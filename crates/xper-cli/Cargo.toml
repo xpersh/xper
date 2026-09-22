@@ -1,0 +1,21 @@
+[package]
+name = "xper-cli"
+description = "Command-line interface for xper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "xper"
+path = "src/main.rs"
+
+[dependencies]
+xper-application.workspace = true
+xper-config.workspace = true
+xper-protocol.workspace = true
+xper-store-sqlite.workspace = true
+
+[lints]
+workspace = true

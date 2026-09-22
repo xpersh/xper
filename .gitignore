@@ -1,0 +1,6 @@
+/target/
+/node_modules/
+/adapters/pi/dist/
+/spikes/
+*.log
+.DS_Store

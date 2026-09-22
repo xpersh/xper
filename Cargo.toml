@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "crates/xper-application",
+    "crates/xper-cli",
+    "crates/xper-config",
+    "crates/xper-domain",
+    "crates/xper-protocol",
+    "crates/xper-store-sqlite",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/myugen/xper"
+
+[workspace.dependencies]
+xper-application = { path = "crates/xper-application", version = "0.1.0" }
+xper-config = { path = "crates/xper-config", version = "0.1.0" }
+xper-domain = { path = "crates/xper-domain", version = "0.1.0" }
+xper-protocol = { path = "crates/xper-protocol", version = "0.1.0" }
+xper-store-sqlite = { path = "crates/xper-store-sqlite", version = "0.1.0" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

@@ -1,0 +1,14 @@
+[package]
+name = "xper-application"
+description = "Use cases and ports for the xper domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+xper-domain.workspace = true
+
+[lints]
+workspace = true

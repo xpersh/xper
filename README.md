@@ -5,8 +5,9 @@ Extreme Programming. Se integra en Pi como agente principal y añade una capa
 de coordinación para gobernar el workflow, asignar modelos según el rol y
 conservar evidencia local sobre calidad, tiempo, coste y rework.
 
-> Estado: fundaciones ejecutables. El workspace y sus quality gates existen,
-> pero el comportamiento de producto se implementará en las tareas siguientes.
+> Estado: fundaciones ejecutables. El workspace, el kernel mínimo y el bridge
+> Rust/TypeScript existen; la integración con Pi y el workflow completo siguen
+> en las tareas siguientes.
 
 ## Objetivo
 
@@ -153,3 +154,19 @@ puede tener dependencias ni usar APIs de I/O, la aplicación sólo depende del
 dominio, la infraestructura y el CLI apuntan hacia dentro, y el adaptador Pi
 no puede importar internals del core. Entre paquetes propios, el único límite
 admitido para el adaptador es el protocolo público.
+
+## Bridge v1
+
+El bridge se inicia con `xper bridge --stdio` (o
+`cargo run -p xper-cli -- bridge --stdio` durante el desarrollo). Usa un frame
+JSON-RPC 2.0 por línea, hasta 64 KiB por mensaje. `stdout` transporta sólo
+frames; los diagnósticos se escriben en `stderr`. El contrato público está en
+[schemas/protocol-v1.schema.json](schemas/protocol-v1.schema.json), con mensajes
+compartidos para tests en [fixtures/protocol-v1.json](fixtures/protocol-v1.json).
+
+El cliente TypeScript exporta `connectBridge` desde `@xper/adapter-pi`. Envía
+`initialize` con nombre, versión y capacidades del adaptador; el bridge pide
+`capabilities` al cliente y el cliente consulta las capacidades del bridge.
+Tras el handshake, ambos pares pueden iniciar peticiones. `ping` comprueba la
+conexión y `shutdown` responde antes de terminar el proceso. Cada nuevo
+proceso negocia desde cero, sin estado residente del protocolo.

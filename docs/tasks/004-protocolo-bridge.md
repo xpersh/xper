@@ -1,6 +1,6 @@
 # XP-004: Protocolo v1 y bridge por stdio
 
-- Estado: `pending`
+- Estado: `done`
 - Milestone: M1
 - Dependencias: XP-002 y resultados de XP-001
 
@@ -30,3 +30,18 @@ TypeScript y el proceso Rust `xper bridge --stdio`.
 
 - Eventos completos de agentes.
 - Socket local, daemon global o comunicación por red.
+
+## Resultado
+
+- `xper bridge --stdio` implementa JSON-RPC 2.0 bidireccional sobre JSONL. El
+  handshake intercambia `initialize` y peticiones `capabilities` en ambas
+  direcciones; también están disponibles `ping` y `shutdown`.
+- Envelope v1, códigos de error, límite de 64 KiB y contratos de métodos
+  publicados en [JSON Schema](../../schemas/protocol-v1.schema.json).
+- El cliente TypeScript inicia el proceso, correlaciona respuestas y controla
+  timeout, cierre e inválidos. `stdout` queda reservado para frames y los
+  diagnósticos van a `stderr`.
+- Los tests Rust y TypeScript consumen las mismas
+  [fixtures](../../fixtures/protocol-v1.json). La prueba de proceso cubre
+  handshake, peticiones desconocidas, frames inválidos o grandes, shutdown y
+  arranque posterior sin estado residente.

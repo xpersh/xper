@@ -16,6 +16,7 @@ xper-application.workspace = true
 xper-config.workspace = true
 xper-protocol.workspace = true
 xper-store-sqlite.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

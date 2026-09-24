@@ -1,6 +1,291 @@
 //! The `xper` command-line entry point.
 
-fn main() {}
+use std::io::{self, BufReader, Write};
+use std::process::ExitCode;
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
+
+use serde_json::{Value, json};
+use xper_protocol::{FrameRead, Message, RpcError, code};
+
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+type Incoming = Result<FrameRead, io::Error>;
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args != ["bridge", "--stdio"] {
+        eprintln!("usage: xper bridge --stdio");
+        return ExitCode::FAILURE;
+    }
+    match run_bridge() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("bridge: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn reader_channel() -> Receiver<Incoming> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut reader = BufReader::new(stdin.lock());
+        loop {
+            let frame = xper_protocol::read_frame(&mut reader);
+            let done = !matches!(frame, Ok(FrameRead::Data(_) | FrameRead::TooLarge));
+            if sender.send(frame).is_err() || done {
+                break;
+            }
+        }
+    });
+    receiver
+}
+
+fn send(writer: &mut impl Write, message: Message) -> io::Result<()> {
+    writer.write_all(&message.to_frame())?;
+    writer.flush()
+}
+
+fn respond(writer: &mut impl Write, id: String, result: Value) -> io::Result<()> {
+    send(writer, Message::Response { id, result })
+}
+
+fn reject(writer: &mut impl Write, id: Option<String>, error: RpcError) -> io::Result<()> {
+    send(writer, Message::Error { id, error })
+}
+
+fn invalid_params(writer: &mut impl Write, id: String) -> io::Result<()> {
+    reject(
+        writer,
+        Some(id),
+        RpcError::new(code::INVALID_PARAMS, "invalid params"),
+    )
+}
+
+fn empty_params(params: &Value) -> bool {
+    params.as_object().is_some_and(serde_json::Map::is_empty)
+}
+
+fn capability_map(value: &Value) -> bool {
+    value
+        .as_object()
+        .is_some_and(|map| map.values().all(Value::is_boolean))
+}
+
+struct BridgeState {
+    initialized: bool,
+    declared_capabilities: Option<Value>,
+    pending_capabilities: Option<(String, Instant)>,
+}
+
+impl BridgeState {
+    fn new() -> Self {
+        Self {
+            initialized: false,
+            declared_capabilities: None,
+            pending_capabilities: None,
+        }
+    }
+
+    fn deadline(&self) -> Option<Duration> {
+        self.pending_capabilities
+            .as_ref()
+            .map(|(_, sent_at)| HANDSHAKE_TIMEOUT.saturating_sub(sent_at.elapsed()))
+    }
+
+    fn handle(&mut self, message: Message, writer: &mut impl Write) -> io::Result<bool> {
+        match message {
+            Message::Request { id, method, params } => {
+                self.handle_request(id, &method, &params, writer)
+            }
+            Message::Response { id, result } => {
+                self.handle_peer_capabilities(&id, &result)?;
+                Ok(true)
+            }
+            Message::Error { id, error } => {
+                if self
+                    .pending_capabilities
+                    .as_ref()
+                    .map(|(expected, _)| expected.as_str())
+                    == id.as_deref()
+                {
+                    return Err(io::Error::other(format!(
+                        "adapter rejected capabilities request: {} ({})",
+                        error.message, error.code
+                    )));
+                }
+                eprintln!("bridge: unexpected error response: {}", error.message);
+                Ok(true)
+            }
+        }
+    }
+
+    fn handle_peer_capabilities(&mut self, id: &str, result: &Value) -> io::Result<()> {
+        if self
+            .pending_capabilities
+            .as_ref()
+            .map(|(expected, _)| expected.as_str())
+            != Some(id)
+        {
+            eprintln!("bridge: unexpected response id {id}");
+            return Ok(());
+        }
+        if result.get("capabilities") != self.declared_capabilities.as_ref() {
+            return Err(io::Error::other(
+                "adapter capabilities changed during handshake",
+            ));
+        }
+        self.pending_capabilities = None;
+        Ok(())
+    }
+
+    fn handle_request(
+        &mut self,
+        id: String,
+        method: &str,
+        params: &Value,
+        writer: &mut impl Write,
+    ) -> io::Result<bool> {
+        if method == "shutdown" {
+            if !empty_params(params) {
+                invalid_params(writer, id)?;
+                return Ok(true);
+            }
+            respond(writer, id, json!({ "ok": true }))?;
+            return Ok(false);
+        }
+        if method == "initialize" {
+            if self.initialized {
+                respond(
+                    writer,
+                    id,
+                    json!({
+                        "protocolVersion": xper_protocol::PROTOCOL_VERSION,
+                        "bridgeVersion": env!("CARGO_PKG_VERSION")
+                    }),
+                )?;
+                return Ok(true);
+            }
+            let adapter = params
+                .get("adapter")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            let version = params
+                .get("adapterVersion")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            let capabilities = params.get("capabilities");
+            if adapter.is_none() || version.is_none() || !capabilities.is_some_and(capability_map) {
+                invalid_params(writer, id)?;
+                return Ok(true);
+            }
+            self.initialized = true;
+            self.declared_capabilities = capabilities.cloned();
+            respond(
+                writer,
+                id,
+                json!({
+                    "protocolVersion": xper_protocol::PROTOCOL_VERSION,
+                    "bridgeVersion": env!("CARGO_PKG_VERSION")
+                }),
+            )?;
+            let request_id = "bridge-1".to_owned();
+            send(
+                writer,
+                Message::Request {
+                    id: request_id.clone(),
+                    method: "capabilities".to_owned(),
+                    params: json!({}),
+                },
+            )?;
+            self.pending_capabilities = Some((request_id, Instant::now()));
+            return Ok(true);
+        }
+        if !self.initialized {
+            reject(
+                writer,
+                Some(id),
+                RpcError::new(code::NOT_INITIALIZED, "initialize first"),
+            )?;
+            return Ok(true);
+        }
+        match method {
+            "capabilities" if empty_params(params) => {
+                respond(
+                    writer,
+                    id,
+                    json!({
+                        "capabilities": { "bidirectionalRequests": true },
+                        "maxFrameBytes": xper_protocol::MAX_FRAME_BYTES
+                    }),
+                )?;
+            }
+            "ping" if empty_params(params) => respond(writer, id, json!({ "pong": true }))?,
+            "capabilities" | "ping" => invalid_params(writer, id)?,
+            _ => {
+                let mut error = RpcError::new(code::METHOD_NOT_FOUND, "method not found");
+                error.data = Some(json!({ "method": method }));
+                reject(writer, Some(id), error)?;
+            }
+        }
+        Ok(true)
+    }
+}
+
+fn run_bridge() -> io::Result<()> {
+    let receiver = reader_channel();
+    let stdout = io::stdout();
+    let mut writer = stdout.lock();
+    let mut state = BridgeState::new();
+    loop {
+        let incoming = match state.deadline() {
+            Some(deadline) => receiver
+                .recv_timeout(deadline)
+                .map_err(|error| match error {
+                    mpsc::RecvTimeoutError::Timeout => io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "adapter capabilities request timed out",
+                    ),
+                    mpsc::RecvTimeoutError::Disconnected => {
+                        io::Error::new(io::ErrorKind::UnexpectedEof, "stdin reader stopped")
+                    }
+                })?,
+            None => receiver.recv().map_err(|_| {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "stdin reader stopped")
+            })?,
+        }?;
+        match incoming {
+            FrameRead::Eof => return Ok(()),
+            FrameRead::TooLarge => reject(
+                &mut writer,
+                None,
+                RpcError::new(code::FRAME_TOO_LARGE, "frame too large"),
+            )?,
+            FrameRead::Truncated => {
+                reject(
+                    &mut writer,
+                    None,
+                    RpcError::new(code::INVALID_REQUEST, "truncated JSONL frame"),
+                )?;
+                return Ok(());
+            }
+            FrameRead::Data(frame) => {
+                let message = match xper_protocol::decode_frame(&frame) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        send(&mut writer, error.response())?;
+                        continue;
+                    }
+                };
+                if !state.handle(message, &mut writer)? {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

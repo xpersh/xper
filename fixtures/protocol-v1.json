@@ -1,0 +1,55 @@
+[
+  {
+    "name": "initialize request",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-1","method":"initialize","params":{"adapter":"pi","adapterVersion":"0.1.0","capabilities":{"subagents":true}}}
+  },
+  {
+    "name": "bridge capabilities request",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"bridge-1","method":"capabilities","params":{}}
+  },
+  {
+    "name": "adapter capabilities response",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"bridge-1","result":{"capabilities":{"subagents":true}}}
+  },
+  {
+    "name": "ping request",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-2","method":"ping","params":{}}
+  },
+  {
+    "name": "shutdown response",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-3","result":{"ok":true}}
+  },
+  {
+    "name": "method not found error",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-4","error":{"code":-32601,"message":"method not found","data":{"method":"unknown"}}}
+  },
+  {
+    "name": "unidentified parse error",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":null,"error":{"code":-32700,"message":"invalid JSON"}}
+  },
+  {
+    "name": "incompatible version",
+    "message": {"jsonrpc":"2.0","protocolVersion":"2","id":"adapter-5","method":"ping","params":{}},
+    "errorCode": -32001
+  },
+  {
+    "name": "missing version",
+    "message": {"jsonrpc":"2.0","id":"adapter-6","method":"ping","params":{}},
+    "errorCode": -32600
+  },
+  {
+    "name": "missing params",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-7","method":"ping"},
+    "errorCode": -32600
+  },
+  {
+    "name": "mixed request and response",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-8","method":"ping","params":{},"result":{}},
+    "errorCode": -32600
+  },
+  {
+    "name": "invalid response result",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-9","result":null},
+    "errorCode": -32600
+  }
+]

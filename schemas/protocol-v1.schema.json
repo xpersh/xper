@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/myugen/xper/schemas/protocol-v1.schema.json",
+  "title": "xper bridge protocol v1 message",
+  "description": "One LF-terminated JSON-RPC 2.0 message on stdio. The LF is not part of the JSON value.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/success" },
+    { "$ref": "#/$defs/failure" }
+  ],
+  "$defs": {
+    "version": { "const": "1" },
+    "id": { "type": "string", "minLength": 1 },
+    "capabilityMap": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "request": {
+      "type": "object",
+      "required": ["jsonrpc", "protocolVersion", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "protocolVersion": { "$ref": "#/$defs/version" },
+        "id": { "$ref": "#/$defs/id" },
+        "method": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" }
+      },
+      "not": { "anyOf": [{ "required": ["result"] }, { "required": ["error"] }] },
+      "allOf": [
+        {
+          "if": { "properties": { "method": { "const": "initialize" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/initializeParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "enum": ["capabilities", "ping", "shutdown"] } } },
+          "then": { "properties": { "params": { "maxProperties": 0 } } }
+        }
+      ]
+    },
+    "success": {
+      "type": "object",
+      "required": ["jsonrpc", "protocolVersion", "id", "result"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "protocolVersion": { "$ref": "#/$defs/version" },
+        "id": { "$ref": "#/$defs/id" },
+        "result": { "type": "object" }
+      },
+      "not": { "anyOf": [{ "required": ["method"] }, { "required": ["error"] }] }
+    },
+    "failure": {
+      "type": "object",
+      "required": ["jsonrpc", "protocolVersion", "id", "error"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "protocolVersion": { "$ref": "#/$defs/version" },
+        "id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {
+              "type": "integer",
+              "enum": [-32700, -32600, -32601, -32602, -32603, -32001, -32002, -32003, -32004, -32005]
+            },
+            "message": { "type": "string" },
+            "data": { "type": "object" }
+          }
+        }
+      },
+      "not": { "anyOf": [{ "required": ["method"] }, { "required": ["result"] }] }
+    },
+    "initializeParams": {
+      "type": "object",
+      "required": ["adapter", "adapterVersion", "capabilities"],
+      "properties": {
+        "adapter": { "type": "string", "minLength": 1 },
+        "adapterVersion": { "type": "string", "minLength": 1 },
+        "capabilities": { "$ref": "#/$defs/capabilityMap" }
+      }
+    },
+    "initializeResult": {
+      "type": "object",
+      "required": ["protocolVersion", "bridgeVersion"],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/version" },
+        "bridgeVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "capabilitiesResult": {
+      "type": "object",
+      "required": ["capabilities"],
+      "properties": {
+        "capabilities": { "$ref": "#/$defs/capabilityMap" },
+        "maxFrameBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "pingResult": {
+      "type": "object",
+      "required": ["pong"],
+      "properties": { "pong": { "const": true } }
+    },
+    "shutdownResult": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": { "ok": { "const": true } }
+    }
+  }
+}

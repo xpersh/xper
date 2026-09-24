@@ -22,6 +22,7 @@ xper-config = { path = "crates/xper-config", version = "0.1.0" }
 xper-domain = { path = "crates/xper-domain", version = "0.1.0" }
 xper-protocol = { path = "crates/xper-protocol", version = "0.1.0" }
 xper-store-sqlite = { path = "crates/xper-store-sqlite", version = "0.1.0" }
+serde_json = "1.0"
 
 [workspace.lints.rust]
 missing_docs = "warn"

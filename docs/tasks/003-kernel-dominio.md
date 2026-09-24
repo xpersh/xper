@@ -1,6 +1,6 @@
 # XP-003: Kernel de dominio mínimo
 
-- Estado: `pending`
+- Estado: `done`
 - Milestone: M1
 - Dependencias: XP-002
 
@@ -30,3 +30,17 @@ transiciones deterministas sin depender de ningún harness.
 - El workflow completo.
 - Persistencia y serialización del protocolo.
 - Ejecución real de agentes.
+
+## Resultado
+
+- Modelo de dominio neutral para runs, visitas de fase, assignments, attempts,
+  gates y referencias versionadas de artefactos.
+- Resultados terminales explícitos para éxito, fallo, cancelación y timeout.
+- Transiciones deterministas `Intake -> Discovery -> Define` y revisita
+  `Define -> Discovery`, con gates obligatorios y errores de código estable.
+- Eventos identificados para cada cambio aceptado e idempotencia por request:
+  un replay devuelve el mismo receipt sin consumir reloj ni IDs adicionales.
+- Reloj e identificadores inyectables, sin dependencias externas ni acceso a
+  filesystem, red, procesos o base de datos.
+- Tests de aceptación para caminos válidos, rechazos sin efectos laterales,
+  revisitas, conflictos idempotentes y reproducción exacta de estado/eventos.

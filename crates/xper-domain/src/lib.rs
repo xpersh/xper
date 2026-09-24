@@ -1,9 +1,32 @@
 //! Pure domain concepts and deterministic rules.
 //!
 //! This crate must remain independent from I/O, persistence, command-line
-//! interfaces, and harness SDKs.
+//! interfaces, and harness SDKs. Time and identifier allocation enter the
+//! domain through [`Clock`] and [`IdGenerator`], so a caller can reproduce a
+//! change exactly.
 
-/// Stable package identity used by scaffold-level dependency smoke tests.
+mod execution;
+mod primitives;
+mod run;
+mod workflow;
+
+pub use execution::{
+    Assignment, AssignmentResult, AssignmentState, Attempt, AttemptResult, AttemptState,
+};
+pub use primitives::{
+    ArtifactId, AssignmentId, AttemptId, Clock, EventId, GateId, IdGenerator, Identifier,
+    InvalidIdentifier, PhaseVisitId, RequestId, RunId, Timestamp,
+};
+pub use run::{
+    Change, DomainEvent, DomainEventKind, Run, TransitionError, TransitionReceipt,
+    TransitionRequest,
+};
+pub use workflow::{
+    ArtifactKind, ArtifactReference, Gate, GateEvaluation, GateResult, Phase, PhaseVisit,
+    PhaseVisitState, RunResult, RunState,
+};
+
+/// Stable package identity used by workspace dependency smoke tests.
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[cfg(test)]

@@ -8,3 +8,6 @@
 /spikes/
 *.log
 .DS_Store
+
+### JetBrains IDE
+.idea/

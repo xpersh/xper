@@ -1,0 +1,3 @@
+workflow:
+  implementation:
+    max_attempts: 5

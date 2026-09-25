@@ -1,6 +1,6 @@
 # XP-006: Configuración, init y doctor
 
-- Estado: `pending`
+- Estado: `done`
 - Milestone: M1
 - Dependencias: XP-002 y XP-005
 
@@ -32,3 +32,15 @@ Preparar y diagnosticar una instalación reproducible sin arrancar un workflow.
 
 - Autenticar proveedores automáticamente.
 - Ejecutar un run o elegir modelos adaptativamente.
+
+## Resultado
+
+- `xper-config` resuelve global, proyecto y local con merge de mapas, precedencia
+  definida y validación de estructura y campos de credenciales.
+- `xper init` y `xper init --global` crean configuración, fijan la dependencia
+  probada en Pi y crean o reparan el agente principal con confirmación. Conservan
+  archivos válidos y respaldan una definición reparada.
+- `xper doctor` y `--json` emiten checks con IDs estables para Pi, dependencia,
+  adapter, conflictos, agente y configuración sin escribir archivos.
+- Fixtures y tests cubren instalaciones válidas, parciales e incompatibles,
+  idempotencia, ausencia de escrituras en doctor y rechazo de credenciales.

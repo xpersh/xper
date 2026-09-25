@@ -1,10 +1,13 @@
 //! The `xper` command-line entry point.
 
+mod setup;
+
 use std::io::{self, BufReader, Write};
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
+use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use xper_protocol::{FrameRead, Message, RpcError, code};
 
@@ -12,16 +15,54 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 type Incoming = Result<FrameRead, io::Error>;
 
+#[derive(Parser)]
+#[command(
+    name = "xper",
+    version,
+    about = "Extreme Programming workflow setup and diagnostics"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run the bridge over standard input and output.
+    Bridge {
+        /// Use JSONL over standard input and output.
+        #[arg(long, required = true)]
+        stdio: bool,
+    },
+    /// Inspect the installation without modifying it.
+    Doctor {
+        /// Emit machine-readable JSON checks.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prepare xper in this project or in the global user scope.
+    Init {
+        /// Prepare the user-wide scope instead of this project.
+        #[arg(long)]
+        global: bool,
+        /// Confirm agent creation or repair in non-interactive use.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args != ["bridge", "--stdio"] {
-        eprintln!("usage: xper bridge --stdio");
-        return ExitCode::FAILURE;
-    }
-    match run_bridge() {
-        Ok(()) => ExitCode::SUCCESS,
+    let result = match Cli::parse().command {
+        Commands::Bridge { stdio: true } => run_bridge().map(|()| true),
+        Commands::Bridge { stdio: false } => unreachable!("clap requires --stdio"),
+        Commands::Doctor { json } => setup::doctor(json),
+        Commands::Init { global, yes } => setup::init(global, yes),
+    };
+    match result {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
         Err(error) => {
-            eprintln!("bridge: {error}");
+            eprintln!("xper: {error}");
             ExitCode::FAILURE
         }
     }

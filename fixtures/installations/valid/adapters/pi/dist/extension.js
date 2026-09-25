@@ -1,0 +1,1 @@
+// Fixture built adapter marker.

@@ -122,13 +122,35 @@ También puede activarlo dentro de una sesión con `/agent xper`. El CLI de
 `xper` configura, valida, diagnostica y exporta información; no sustituye la
 ejecución interactiva de Pi con un comando `xper run`.
 
-`xper init` y `xper doctor` deben verificar que Pi y `pi-open-agents` están
-instalados y son compatibles. Si falta la dependencia, deben mostrar el comando
-de instalación:
+`xper doctor` inspecciona Pi, `pi-open-agents`, el adapter, el agente principal,
+conflictos y configuración sin modificar archivos ni paquetes. `--json` devuelve
+checks con IDs estables y sale con código distinto de cero si alguno falla:
+
+```bash
+xper doctor
+xper doctor --json
+```
+
+`xper init` prepara el proyecto actual; `xper init --global` prepara el scope
+del usuario. Crea la configuración y la definición `primary` sólo tras pasar el
+preflight. Pide confirmación para crear o reparar el agente; en scripts se puede
+autorizar con `--yes`. Una reparación guarda la definición anterior como
+`xper.md.bak`. Los archivos existentes válidos se preservan y repetir `init` es
+idempotente. Si falta una dependencia, el comando indica cómo instalarla y no
+instala paquetes automáticamente:
 
 ```bash
 pi install npm:pi-open-agents
 ```
+
+La configuración se combina por claves: defaults, global
+(`${XDG_CONFIG_HOME:-~/.config}/xper/config.yaml`), proyecto
+(`.xper/config.yaml`) y local (`.xper/config.local.yaml`), en ese orden. Los
+arrays y escalares del scope superior reemplazan los inferiores. La configuración
+local se añade a `.gitignore` durante `init`. Las claves de credenciales se
+rechazan; se usan el almacén de Pi o variables de entorno. El lector admite
+mapas y listas YAML por indentación, escalares y JSON; rechaza características
+YAML avanzadas como anclas y tags.
 
 Referencias:
 

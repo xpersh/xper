@@ -1,0 +1,5 @@
+harness:
+  adapter: pi
+workflow:
+  implementation:
+    max_attempts: 3

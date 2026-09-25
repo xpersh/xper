@@ -4,6 +4,7 @@
 /.pi/npm/
 /.pi/git/
 /.xper/observations/
+/.xper/config.local.yaml
 /spikes/
 *.log
 .DS_Store

@@ -1,0 +1,6 @@
+harness:
+  adapter: pi
+adapters:
+  pi:
+    primary_agent: xper
+    require_pi_open_agents: true

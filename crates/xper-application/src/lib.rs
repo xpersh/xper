@@ -6,6 +6,8 @@
 /// Package identity of the only xper layer this scaffold depends on.
 pub const DOMAIN_PACKAGE_NAME: &str = xper_domain::PACKAGE_NAME;
 
+pub mod events;
+
 #[cfg(test)]
 mod tests {
     use super::DOMAIN_PACKAGE_NAME;

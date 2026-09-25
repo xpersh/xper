@@ -1,6 +1,6 @@
 # XP-007: Event store y proyecciones mínimas en SQLite
 
-- Estado: `pending`
+- Estado: `done`
 - Milestone: M1
 - Dependencias: XP-003
 
@@ -31,3 +31,17 @@ transcripción ni de IDs nativos del harness.
 
 - Todas las proyecciones de la GUI.
 - Retención, compactación u OpenTelemetry.
+
+## Implementación
+
+- `xper-application::events` define el port, el vocabulario cerrado de eventos
+  y una proyección determinista. La conversión de eventos del dominio omite el
+  texto del objetivo, evidencia y razones libres para no persistir prompts.
+- `xper-store-sqlite` guarda el log y reconstruye las cinco tablas mediante una
+  migración versionada. `append_boundary` inserta eventos y actualiza las
+  proyecciones en una sola transacción; un `event_id` repetido con contenido
+  distinto produce conflicto.
+- `open` reconstruye las proyecciones y añade eventos `attempt.interrupted`
+  para intentos sin cierre. Se asume un único coordinador escritor por base.
+  `open_or_volatile` usa SQLite en memoria y expone el motivo de degradación
+  cuando falla la base persistente.

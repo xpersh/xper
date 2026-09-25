@@ -8,7 +8,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 xper-application.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+xper-domain.workspace = true

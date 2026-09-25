@@ -1,6 +1,6 @@
 # XP-005: Adaptador mínimo de Pi
 
-- Estado: `pending`
+- Estado: `done`
 - Milestone: M1
 - Dependencias: XP-001 y XP-004
 
@@ -32,3 +32,19 @@ la extensión TypeScript.
 - Delegar subagentes.
 - Persistir runs.
 - Construir la UI completa de xper.
+
+## Resultado
+
+- `.pi/agents/xper.md` declara el agente `primary` y la configuración de
+  proyecto fija `pi-open-agents@0.1.22`.
+- La extensión inicia el bridge en `session_start`, negocia capacidades y
+  envía `session.attach`; en `session_shutdown` envía `session.detach` y espera
+  el cierre del proceso. `/xper status` muestra versiones, PID y conexión; el
+  indicador TUI es mínimo.
+- Los errores de tools y compactación se envían como observaciones sin guardar
+  resultados, prompts ni código. Si falta el binario o el bridge es
+  incompatible, Pi sigue funcionando y muestra una acción concreta.
+- Tests de proceso cubren handshake, lifecycle, reinicio, caída y errores de
+  arranque. Un probe real en Pi `0.85.1` con `pi-open-agents@0.1.22` validó
+  `pi --approve --agent xper`, `/xper status`, el handshake y el cierre sin proceso
+  huérfano.

@@ -5,9 +5,9 @@ Extreme Programming. Se integra en Pi como agente principal y añade una capa
 de coordinación para gobernar el workflow, asignar modelos según el rol y
 conservar evidencia local sobre calidad, tiempo, coste y rework.
 
-> Estado: fundaciones ejecutables. El workspace, el kernel mínimo y el bridge
-> Rust/TypeScript existen; la integración con Pi y el workflow completo siguen
-> en las tareas siguientes.
+> Estado: fundaciones ejecutables. El workspace, el kernel mínimo, el bridge
+> Rust/TypeScript y el adaptador mínimo de Pi existen; el workflow completo
+> sigue en desarrollo.
 
 ## Objetivo
 
@@ -79,16 +79,52 @@ contrato sin introducir tipos ni conceptos de Pi en la máquina de estados XP.
 El usuario inicia Pi con `xper` como agente principal:
 
 ```bash
-pi --agent xper
+pi --approve --agent xper
 ```
+
+En este checkout, prepara el bridge y la extensión antes del primer arranque:
+
+```bash
+npm ci
+npm run build --workspace @xper/adapter-pi
+cargo build -p xper-cli
+pi install -l npm:pi-open-agents@0.1.22
+pi --approve --agent xper
+```
+
+La definición `primary` está en `.pi/agents/xper.md`; `.pi/settings.json` fija
+`pi-open-agents@0.1.22` para este proyecto. La extensión de `.pi/extensions`
+usa `target/debug/xper` cuando existe y permite seleccionar otro binario con
+`XPER_BRIDGE_COMMAND`. Inicia y cierra el proceso con la sesión de Pi. El
+comando `/xper status` muestra las versiones del adapter, protocolo y bridge,
+además del estado de la conexión y los contadores de `subagent`. Una caída del
+bridge deja la sesión de Pi utilizable y aparece como `offline`.
+
+Para conservar observaciones entre sesiones del prototipo `0.0.1`:
+
+```bash
+mkdir -p .xper/observations
+XPER_PI_OBSERVATIONS_FILE="$PWD/.xper/observations/pi.jsonl" pi --approve --agent xper
+```
+
+El logger Winston escribe JSONL con rotación por tamaño: 5 MiB por archivo y
+cinco archivos como máximo (el actual y cuatro anteriores). Conserva el inicio
+y fin de sesión, el estado del bridge, las invocaciones de `/xper` (sin
+argumentos) y las señales de `subagent`; no guarda tareas, prompts ni salidas.
+Si no se configura el archivo, los contadores de la sesión siguen disponibles.
+`reported done` sólo refleja lo comunicado por `pi-open-agents`: el
+[spike](docs/spikes/001-integracion-pi.md)
+demostró que una cancelación temprana puede parecer un éxito. La decisión de
+usarlo provisionalmente y los criterios para revisarla están en el
+[RFC 0004](docs/rfcs/0004-integracion-con-pi.md).
 
 También puede activarlo dentro de una sesión con `/agent xper`. El CLI de
 `xper` configura, valida, diagnostica y exporta información; no sustituye la
 ejecución interactiva de Pi con un comando `xper run`.
 
 `xper init` y `xper doctor` deben verificar que Pi y `pi-open-agents` están
-instalados y son compatibles. Si falta la extensión, deben explicar que es una
-dependencia necesaria y mostrar el comando de instalación:
+instalados y son compatibles. Si falta la dependencia, deben mostrar el comando
+de instalación:
 
 ```bash
 pi install npm:pi-open-agents
@@ -170,3 +206,8 @@ El cliente TypeScript exporta `connectBridge` desde `@xper/adapter-pi`. Envía
 Tras el handshake, ambos pares pueden iniciar peticiones. `ping` comprueba la
 conexión y `shutdown` responde antes de terminar el proceso. Cada nuevo
 proceso negocia desde cero, sin estado residente del protocolo.
+
+El adaptador mínimo añade `session.attach`, `session.detach` y `event.ingest`
+para errores de tools o compactación. El bridge valida la sesión y confirma
+estos mensajes; la persistencia y las decisiones del workflow pertenecen a
+tareas posteriores.

@@ -34,6 +34,18 @@
         {
           "if": { "properties": { "method": { "enum": ["capabilities", "ping", "shutdown"] } } },
           "then": { "properties": { "params": { "maxProperties": 0 } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "session.attach" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/sessionAttachParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "session.detach" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/sessionDetachParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "event.ingest" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/errorEventParams" } } }
         }
       ]
     },
@@ -104,6 +116,30 @@
       "type": "object",
       "required": ["ok"],
       "properties": { "ok": { "const": true } }
+    },
+    "sessionAttachParams": {
+      "type": "object",
+      "required": ["sessionId", "cwd", "mode"],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "cwd": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sessionDetachParams": {
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": { "sessionId": { "type": "string", "minLength": 1 } }
+    },
+    "errorEventParams": {
+      "type": "object",
+      "required": ["sessionId", "kind", "source"],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "kind": { "const": "error" },
+        "source": { "type": "string", "minLength": 1 },
+        "toolCallId": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }

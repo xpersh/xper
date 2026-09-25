@@ -6,6 +6,7 @@ export const adapterPackage = {
 } as const;
 
 export { BridgeClient, connectBridge } from "./bridge.js";
+export { createXperExtension } from "./extension.js";
 export type { AdapterManifest, BridgeHandshake, BridgeOptions } from "./bridge.js";
 export {
   MAX_FRAME_BYTES,

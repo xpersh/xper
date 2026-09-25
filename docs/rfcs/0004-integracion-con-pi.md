@@ -14,17 +14,53 @@ primarios y subagentes. xper aportará encima la máquina de estados XP, los
 contratos entre fases, el routing multimodelo, los artefactos y la
 observabilidad.
 
-> **Resultado de XP-001:** la decisión queda acotada. `pi-open-agents` se usa
-> para discovery y activación del agente primario, pero no como plano de
-> control durable de delegaciones. Su API instalada no es importable por una
-> extensión hermana y `0.1.22` no representa correctamente errores y
-> cancelaciones en los eventos de Pi. El adaptador de xper será propietario del
-> executor y del tool estructurado de delegación. Véase el
+> **Resultado de XP-001:** el spike recomendó usar `pi-open-agents` para
+> discovery y activación primaria, y construir un executor propio para las
+> delegaciones durables. La decisión explícita para `0.0.1` que sigue acepta
+> probar también su tool `subagent`, conservando los límites descubiertos en el
 > [informe del spike](../spikes/001-integracion-pi.md).
 
 Esta decisión sustituye la hipótesis inicial de un proceso `xper run` que
 controlaba Pi desde fuera. El CLI de xper queda reservado para inicialización,
 configuración, diagnóstico, consulta y exportación.
+
+## Decisión para el prototipo 0.0.1 (2026-09-24)
+
+Se mantiene `pi-open-agents@0.1.22` para descubrir y activar el agente
+principal. En `0.0.1` también se permitirá usar su tool `subagent` como
+ejecutor provisional, para aprender de sesiones reales antes de sustituirlo o
+mantenerlo. No se importará su API interna desde la extensión de xper.
+
+Esta decisión acepta dos defectos observados en XP-001: un fallo de un hijo
+puede llegar con `event.isError: false`, y una cancelación temprana puede
+parecer un final correcto. Por eso `status: done` se registra como **resultado
+reportado**, no como éxito verificado. Estos eventos no bastan para aprobar un
+gate, cerrar un attempt durable ni inferir una cancelación. El executor propio
+propuesto por el spike queda pospuesto hasta disponer de evidencia de uso; el
+core sigue independiente del plugin.
+
+El adaptador cuenta por sesión inicios, finales reportados, errores reportados,
+discrepancias entre `isError` y `details.isError`, finales sin inicio y
+operaciones aún abiertas. `/xper status` muestra estos contadores. Si se define
+`XPER_PI_OBSERVATIONS_FILE`, Winston escribe JSONL local con rotación por tamaño
+(5 MiB por archivo, cinco archivos en total). Incluye marcas de tiempo, IDs de
+correlación, estado reportado, código de salida y señal cuando estén
+disponibles. También registra la activación de la sesión y las invocaciones de
+`/xper`, sin guardar los argumentos. No registra el task, el prompt ni la salida
+del subagente. El archivo es optativo; los contadores funcionan sin él. Si falla
+la escritura, la extensión avisa y mantiene esos contadores en memoria.
+El campo `testedOpenAgentsVersion` identifica la versión del probe, no
+certifica la versión instalada; esa comprobación efectiva pertenece a `doctor`.
+
+El manifiesto del bridge sigue declarando `subagents: false`: todavía no
+existe una operación del protocolo con la que el core pueda crear y controlar
+un attempt. La tool de Pi se observa y puede usarse en el prototipo, pero no
+se presenta al core como una capacidad durable de xper.
+
+Se revisará la decisión antes de usar delegaciones para transiciones
+automáticas, al observar discrepancias nuevas o finales sin pareja, y antes de
+cambiar las versiones fijadas de Pi o `pi-open-agents`. La tupla probada sigue
+siendo Pi `0.85.1` + `pi-open-agents 0.1.22`; falta ejecutar el probe en Windows.
 
 ## Decisión
 
@@ -40,7 +76,8 @@ sesión de Pi con xper como primary agent
    |
    +-- pi-open-agents: discovery, definiciones y agente primary
    |
-   +-- executor xper: attempts y subagentes correlacionados
+   +-- pi-open-agents subagent: ejecución provisional en 0.0.1
+   +-- executor xper: attempts durables y cancelación fiable (posterior)
            |
            +-- discovery / define / design / plan
            +-- driver / navigator / verifier
@@ -79,6 +116,7 @@ assignment lo requiere.
 - Aplicar modelo, nivel de razonamiento, prompt, herramientas y permisos por
   agente.
 - Proporcionar discovery y formato de definiciones de subagentes.
+- Ejecutar la tool `subagent` de forma provisional y observable en `0.0.1`.
 - Proporcionar selección interactiva y compatibilidad de permisos para usos no
   gobernados por el workflow de xper.
 
@@ -89,8 +127,8 @@ assignment lo requiere.
 - Aplicar en Pi las órdenes emitidas por el core.
 - Integrarse con `pi-open-agents` sin exponer su API al dominio.
 - Detectar capacidades y limitaciones del runtime activo.
-- Registrar y ejecutar la delegación estructurada propiedad de xper, con
-  correlación, error y cancelación explícitos.
+- Registrar y ejecutar una delegación estructurada propia cuando se necesiten
+  attempts durables, con correlación, error y cancelación explícitos.
 
 ### Core de xper
 

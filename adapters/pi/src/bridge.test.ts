@@ -31,6 +31,31 @@ test("TypeScript and Rust complete a bidirectional handshake and restart", async
       assert.deepEqual(handshake.capabilities, { bidirectionalRequests: true });
       assert.equal(handshake.maxFrameBytes, 65_536);
       assert.deepEqual(await client.request("ping"), { pong: true });
+      assert.deepEqual(
+        await client.request("session.attach", {
+          sessionId: "pi-session",
+          cwd: workspace,
+          mode: "rpc",
+        }),
+        { attached: true },
+      );
+      assert.deepEqual(
+        await client.request("event.ingest", {
+          sessionId: "pi-session",
+          kind: "error",
+          source: "tool:bash",
+          toolCallId: "call-1",
+        }),
+        { accepted: true },
+      );
+      await assert.rejects(
+        client.request("session.detach", { sessionId: "other-session" }),
+        (error: unknown) =>
+          error instanceof ProtocolFailure && error.code === errorCode.invalidParams,
+      );
+      assert.deepEqual(await client.request("session.detach", { sessionId: "pi-session" }), {
+        detached: true,
+      });
       await assert.rejects(
         client.request("unrecognized.method"),
         (error: unknown) =>

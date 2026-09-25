@@ -78,6 +78,7 @@ struct BridgeState {
     initialized: bool,
     declared_capabilities: Option<Value>,
     pending_capabilities: Option<(String, Instant)>,
+    session_id: Option<String>,
 }
 
 impl BridgeState {
@@ -86,6 +87,7 @@ impl BridgeState {
             initialized: false,
             declared_capabilities: None,
             pending_capabilities: None,
+            session_id: None,
         }
     }
 
@@ -223,6 +225,60 @@ impl BridgeState {
                 )?;
             }
             "ping" if empty_params(params) => respond(writer, id, json!({ "pong": true }))?,
+            "session.attach" => {
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                let cwd = params
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                let mode = params
+                    .get("mode")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                if let (Some(session_id), Some(_), Some(_)) = (session_id, cwd, mode) {
+                    self.session_id = Some(session_id.to_owned());
+                    respond(writer, id, json!({ "attached": true }))?;
+                } else {
+                    invalid_params(writer, id)?;
+                }
+            }
+            "session.detach" => {
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                if session_id.is_some_and(|value| self.session_id.as_deref() == Some(value)) {
+                    self.session_id = None;
+                    respond(writer, id, json!({ "detached": true }))?;
+                } else {
+                    invalid_params(writer, id)?;
+                }
+            }
+            "event.ingest" => {
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                let kind = params
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                let source = params
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty());
+                if session_id.is_some_and(|value| self.session_id.as_deref() == Some(value))
+                    && kind == Some("error")
+                    && source.is_some()
+                {
+                    respond(writer, id, json!({ "accepted": true }))?;
+                } else {
+                    invalid_params(writer, id)?;
+                }
+            }
             "capabilities" | "ping" => invalid_params(writer, id)?,
             _ => {
                 let mut error = RpcError::new(code::METHOD_NOT_FOUND, "method not found");

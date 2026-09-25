@@ -1,6 +1,9 @@
 /target/
 /node_modules/
 /adapters/pi/dist/
+/.pi/npm/
+/.pi/git/
+/.xper/observations/
 /spikes/
 *.log
 .DS_Store

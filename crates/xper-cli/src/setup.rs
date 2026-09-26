@@ -11,7 +11,7 @@ use xper_config::{DEFAULT_CONFIG, ScopePaths, load_effective, load_global};
 const PI_VERSION: &str = "0.85.1";
 const OPEN_AGENTS_VERSION: &str = "0.1.22";
 const PACKAGE: &str = "npm:pi-open-agents@0.1.22";
-const AGENT: &str = "---\nname: xper\ndescription: XP development coordinator backed by xper\nmode: primary\nsystemPrompt: replace\n---\n\nYou are xper, the primary agent for an Extreme Programming development session.\nUse the xper adapter and report bridge problems clearly.\n";
+const AGENT: &str = "---\nname: xper\ndescription: XP development coordinator backed by xper\nmode: primary\nsystemPrompt: replace\n---\n\nYou are xper, the primary agent for an Extreme Programming development session.\nStart a run with /xper start before delegating Discovery. Use xper_delegate for the discovery.explorer assignment and report the Discovery Brief and current phase. A failed or cancelled attempt does not satisfy the Discovery gate. Report bridge problems clearly.\n";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {

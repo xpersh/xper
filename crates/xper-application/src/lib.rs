@@ -7,6 +7,7 @@
 pub const DOMAIN_PACKAGE_NAME: &str = xper_domain::PACKAGE_NAME;
 
 pub mod events;
+pub mod slice;
 
 #[cfg(test)]
 mod tests {

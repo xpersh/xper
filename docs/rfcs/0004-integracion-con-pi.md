@@ -52,15 +52,25 @@ la escritura, la extensión avisa y mantiene esos contadores en memoria.
 El campo `testedOpenAgentsVersion` identifica la versión del probe, no
 certifica la versión instalada; esa comprobación efectiva pertenece a `doctor`.
 
-El manifiesto del bridge sigue declarando `subagents: false`: todavía no
-existe una operación del protocolo con la que el core pueda crear y controlar
-un attempt. La tool de Pi se observa y puede usarse en el prototipo, pero no
-se presenta al core como una capacidad durable de xper.
+En ese prototipo el manifiesto declaraba `subagents: false`: aún no existía
+una operación del protocolo con la que xper pudiera crear y controlar un
+attempt. La tool de Pi se observaba, pero no era capacidad durable de xper.
 
 Se revisará la decisión antes de usar delegaciones para transiciones
 automáticas, al observar discrepancias nuevas o finales sin pareja, y antes de
 cambiar las versiones fijadas de Pi o `pi-open-agents`. La tupla probada sigue
 siendo Pi `0.85.1` + `pi-open-agents 0.1.22`; falta ejecutar el probe en Windows.
+
+## Revisión para XP-008 (2026-09-26)
+
+Para la primera vertical slice se activa la capacidad `subagents` del bridge.
+La tool propia `xper_delegate` crea un assignment `discovery.explorer` y un
+Attempt durable, resuelve el rol en el adaptador y ejecuta un Pi hijo por RPC.
+Su resultado explícito (`succeeded`, `failed`, `cancelled` o `timed_out`)
+determina el estado del Attempt. La tool `subagent` de `pi-open-agents` sigue
+disponible para exploración no gobernada por el workflow y sus señales no
+pueden aprobar el gate de Discovery. Los comandos, artefactos, gates y eventos
+de esta revisión se describen en [XP-008](../tasks/008-vertical-slice.md).
 
 ## Decisión
 
@@ -77,7 +87,7 @@ sesión de Pi con xper como primary agent
    +-- pi-open-agents: discovery, definiciones y agente primary
    |
    +-- pi-open-agents subagent: ejecución provisional en 0.0.1
-   +-- executor xper: attempts durables y cancelación fiable (posterior)
+   +-- executor xper: Discovery con attempts durables y cancelación explícita
            |
            +-- discovery / define / design / plan
            +-- driver / navigator / verifier

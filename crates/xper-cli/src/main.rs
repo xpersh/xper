@@ -1,8 +1,11 @@
 //! The `xper` command-line entry point.
 
 mod setup;
+mod vertical;
 
+use std::collections::BTreeMap;
 use std::io::{self, BufReader, Write};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
@@ -49,6 +52,12 @@ enum Commands {
         #[arg(long)]
         yes: bool,
     },
+    /// Show the latest project run and its persisted timeline.
+    Status {
+        /// Emit the full JSON projection and timeline.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -57,6 +66,50 @@ fn main() -> ExitCode {
         Commands::Bridge { stdio: false } => unreachable!("clap requires --stdio"),
         Commands::Doctor { json } => setup::doctor(json),
         Commands::Init { global, yes } => setup::init(global, yes),
+        Commands::Status { json } => {
+            let result = std::env::current_dir().and_then(|cwd| vertical::cli_status(&cwd));
+            result.and_then(|status| {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else if let Some(run) = status.get("run").filter(|v| !v.is_null()) {
+                    let id = run.get("run_id").and_then(Value::as_str).unwrap_or("?");
+                    let phase = run
+                        .get("visits")
+                        .and_then(Value::as_array)
+                        .and_then(|v| v.last())
+                        .and_then(|v| v.get("phase"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("?");
+                    let attempts = run
+                        .get("attempts")
+                        .and_then(Value::as_object)
+                        .map(|items| {
+                            items
+                                .values()
+                                .map(|attempt| {
+                                    attempt
+                                        .get("outcome")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or("running")
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_else(|| "none".into());
+                    let briefs = run
+                        .get("artifacts")
+                        .and_then(Value::as_object)
+                        .map_or(0, |items| items.len());
+                    println!(
+                        "run {id}: {phase}; attempts {attempts}; briefs {briefs}; events {}",
+                        status["timeline"].as_array().map_or(0, |v| v.len())
+                    );
+                } else {
+                    println!("no run in this project");
+                }
+                Ok(true)
+            })
+        }
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -120,6 +173,9 @@ struct BridgeState {
     declared_capabilities: Option<Value>,
     pending_capabilities: Option<(String, Instant)>,
     session_id: Option<String>,
+    adapter_name: Option<String>,
+    adapter_version: Option<String>,
+    workflow: Option<vertical::WorkspaceRun>,
 }
 
 impl BridgeState {
@@ -129,6 +185,9 @@ impl BridgeState {
             declared_capabilities: None,
             pending_capabilities: None,
             session_id: None,
+            adapter_name: None,
+            adapter_version: None,
+            workflow: None,
         }
     }
 
@@ -225,6 +284,8 @@ impl BridgeState {
                 return Ok(true);
             }
             self.initialized = true;
+            self.adapter_name = adapter.map(str::to_owned);
+            self.adapter_version = version.map(str::to_owned);
             self.declared_capabilities = capabilities.cloned();
             respond(
                 writer,
@@ -279,7 +340,33 @@ impl BridgeState {
                     .get("mode")
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty());
-                if let (Some(session_id), Some(_), Some(_)) = (session_id, cwd, mode) {
+                if let (Some(session_id), Some(cwd), Some(_)) = (session_id, cwd, mode) {
+                    let capabilities = self
+                        .declared_capabilities
+                        .as_ref()
+                        .and_then(Value::as_object)
+                        .map(|map| {
+                            map.iter()
+                                .filter_map(|(key, value)| Some((key.clone(), value.as_bool()?)))
+                                .collect::<BTreeMap<_, _>>()
+                        })
+                        .unwrap_or_default();
+                    match vertical::WorkspaceRun::attach(
+                        Path::new(cwd),
+                        self.adapter_name.as_deref().unwrap_or("unknown"),
+                        self.adapter_version.as_deref().unwrap_or("unknown"),
+                        capabilities,
+                    ) {
+                        Ok(workflow) => self.workflow = Some(workflow),
+                        Err(error) => {
+                            reject(
+                                writer,
+                                Some(id),
+                                RpcError::new(code::INTERNAL_ERROR, error.to_string()),
+                            )?;
+                            return Ok(true);
+                        }
+                    }
                     self.session_id = Some(session_id.to_owned());
                     respond(writer, id, json!({ "attached": true }))?;
                 } else {
@@ -293,6 +380,7 @@ impl BridgeState {
                     .filter(|s| !s.is_empty());
                 if session_id.is_some_and(|value| self.session_id.as_deref() == Some(value)) {
                     self.session_id = None;
+                    self.workflow = None;
                     respond(writer, id, json!({ "detached": true }))?;
                 } else {
                     invalid_params(writer, id)?;
@@ -318,6 +406,45 @@ impl BridgeState {
                     respond(writer, id, json!({ "accepted": true }))?;
                 } else {
                     invalid_params(writer, id)?;
+                }
+            }
+            "run.start" | "run.status" | "assignment.start" | "attempt.finish" | "run.advance" => {
+                let Some(workflow) = self.workflow.as_mut() else {
+                    invalid_params(writer, id)?;
+                    return Ok(true);
+                };
+                let result = match method {
+                    "run.start" => params
+                        .get("objective")
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.trim().is_empty())
+                        .ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::InvalidInput, "objective required")
+                        })
+                        .and_then(|objective| workflow.start(objective)),
+                    "run.status" if empty_params(params) => workflow.status(),
+                    "assignment.start" if empty_params(params) => workflow.delegate(),
+                    "attempt.finish" => workflow.settle(params),
+                    "run.advance" if empty_params(params) => workflow.advance(),
+                    _ => Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid params",
+                    )),
+                };
+                match result {
+                    Ok(value) => respond(writer, id, value)?,
+                    Err(error) => reject(
+                        writer,
+                        Some(id),
+                        RpcError::new(
+                            if error.kind() == io::ErrorKind::InvalidInput {
+                                code::INVALID_PARAMS
+                            } else {
+                                code::INTERNAL_ERROR
+                            },
+                            error.to_string(),
+                        ),
+                    )?,
                 }
             }
             "capabilities" | "ping" => invalid_params(writer, id)?,

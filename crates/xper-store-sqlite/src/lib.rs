@@ -12,7 +12,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use xper_application::events::{
     EVENT_SCHEMA_VERSION, Event, EventKind, EventStore, RunProjection, WorkOutcome, replay,
 };
@@ -96,6 +96,17 @@ impl SqliteEventStore {
         store.rebuild_all()?;
         store.recover_interrupted()?;
         Ok(store)
+    }
+
+    /// Opens an existing database without rebuilding or recovering active attempts.
+    pub fn inspect(path: impl AsRef<Path>) -> Result<Self, StoreError> {
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        connection.busy_timeout(Duration::from_secs(5))?;
+        Ok(Self {
+            connection,
+            durability: Durability::Persistent,
+            degraded_reason: None,
+        })
     }
 
     /// Opens a memory-backed store for tests or explicit ephemeral use.
@@ -197,6 +208,19 @@ impl SqliteEventStore {
     /// Reads a run's events in append order.
     pub fn load_events(&self, run_id: &str) -> Result<Vec<Event>, StoreError> {
         read_events(&self.connection, run_id)
+    }
+
+    /// Returns the most recently started run in this workspace database.
+    pub fn latest_run(&self) -> Result<Option<RunProjection>, StoreError> {
+        let run_id: Option<String> = self.connection.query_row(
+            "SELECT run_id FROM events WHERE event_type = 'run.started' ORDER BY sequence DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        ).optional()?;
+        run_id
+            .map(|id| self.load_run(&id))
+            .transpose()
+            .map(Option::flatten)
     }
 
     /// Replays one run directly from its authoritative events.

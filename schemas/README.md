@@ -9,6 +9,11 @@ LF-terminated line, with at most 65,536 bytes before the LF.
 
 The bridge responds to `initialize`, requests adapter `capabilities`, and then
 accepts `capabilities`, `ping`, `session.attach`, `session.detach`,
-`event.ingest` (error observations), and `shutdown`. Unknown methods receive
+`event.ingest` (error observations), `run.start`, `run.status`,
+`assignment.start`, `attempt.finish`, `run.advance`, and `shutdown`.
+`assignment.start` creates the `discovery.explorer` assignment and one attempt;
+`attempt.finish` records one of four terminal outcomes and may register a
+Discovery Brief path. `run.advance` evaluates persisted evidence before
+entering Define. Unknown methods receive
 `-32601`; incompatible versions receive `-32001`. The stable code catalog is
 in `crates/xper-protocol/src/lib.rs` and `adapters/pi/src/protocol.ts`.

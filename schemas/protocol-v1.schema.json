@@ -46,6 +46,18 @@
         {
           "if": { "properties": { "method": { "const": "event.ingest" } } },
           "then": { "properties": { "params": { "$ref": "#/$defs/errorEventParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "run.start" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/runStartParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "enum": ["run.status", "assignment.start", "run.advance"] } } },
+          "then": { "properties": { "params": { "maxProperties": 0 } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "attempt.finish" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/attemptFinishParams" } } }
         }
       ]
     },
@@ -130,6 +142,22 @@
       "type": "object",
       "required": ["sessionId"],
       "properties": { "sessionId": { "type": "string", "minLength": 1 } }
+    },
+    "runStartParams": {
+      "type": "object",
+      "required": ["objective"],
+      "properties": { "objective": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "attemptFinishParams": {
+      "type": "object",
+      "required": ["attemptId", "outcome"],
+      "properties": {
+        "attemptId": { "type": "string", "minLength": 1 },
+        "outcome": { "enum": ["succeeded", "failed", "cancelled", "timed_out"] },
+        "artifactPath": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
     },
     "errorEventParams": {
       "type": "object",

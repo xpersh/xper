@@ -194,6 +194,13 @@ pub enum EventKind {
         attempt_id: String,
         outcome: WorkOutcome,
     },
+    ArtifactRegistered {
+        artifact_id: String,
+        attempt_id: String,
+        kind: String,
+        path: String,
+        version: u32,
+    },
 }
 
 impl EventKind {
@@ -221,6 +228,7 @@ impl EventKind {
                 WorkOutcome::TimedOut => "attempt.timed_out",
                 WorkOutcome::Interrupted => "attempt.interrupted",
             },
+            Self::ArtifactRegistered { .. } => "artifact.registered",
         }
     }
 }
@@ -299,6 +307,21 @@ pub struct GateProjection {
     pub passed: bool,
 }
 
+/// A versioned artifact reference; content stays outside the event log.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactProjection {
+    /// Artifact identity.
+    pub artifact_id: String,
+    /// Attempt that produced the artifact.
+    pub attempt_id: String,
+    /// Stable artifact kind.
+    pub kind: String,
+    /// Path relative to the run workspace.
+    pub path: String,
+    /// One-based artifact version.
+    pub version: u32,
+}
+
 /// Deterministic state derived entirely from the ordered event stream.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunProjection {
@@ -316,6 +339,8 @@ pub struct RunProjection {
     pub assignments: BTreeMap<String, AssignmentProjection>,
     /// Attempts keyed by identity.
     pub attempts: BTreeMap<String, AttemptProjection>,
+    /// Registered artifact references keyed by identity.
+    pub artifacts: BTreeMap<String, ArtifactProjection>,
 }
 
 /// Persistence port consumed by application use cases.
@@ -358,6 +383,7 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 gates: BTreeMap::new(),
                 assignments: BTreeMap::new(),
                 attempts: BTreeMap::new(),
+                artifacts: BTreeMap::new(),
             });
             continue;
         }
@@ -541,6 +567,36 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 }
                 attempt.outcome = Some(*outcome);
                 attempt.finished_at_ms = Some(event.occurred_at_ms);
+            }
+            EventKind::ArtifactRegistered {
+                artifact_id,
+                attempt_id,
+                kind,
+                path,
+                version,
+            } => {
+                if artifact_id.trim().is_empty()
+                    || state.artifacts.contains_key(artifact_id)
+                    || kind.trim().is_empty()
+                    || path.trim().is_empty()
+                    || *version == 0
+                    || !state
+                        .attempts
+                        .get(attempt_id)
+                        .is_some_and(|attempt| attempt.outcome == Some(WorkOutcome::Succeeded))
+                {
+                    return Err("invalid artifact registration".into());
+                }
+                state.artifacts.insert(
+                    artifact_id.clone(),
+                    ArtifactProjection {
+                        artifact_id: artifact_id.clone(),
+                        attempt_id: attempt_id.clone(),
+                        kind: kind.clone(),
+                        path: path.clone(),
+                        version: *version,
+                    },
+                );
             }
             _ => return Err("invalid run lifecycle transition".into()),
         }

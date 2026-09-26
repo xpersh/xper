@@ -137,6 +137,66 @@ fn domain_events_replay_to_the_same_run_phase_and_visits() {
     assert_eq!(projected.visits.last().unwrap().phase, "discovery");
     store.rebuild_all().unwrap();
     assert_eq!(store.load_run(run.id().as_str()).unwrap(), Some(projected));
+    let run_id = run.id().as_str();
+    let visit_id = run.current_visit().id().as_str();
+    store
+        .append_boundary(&[
+            event(
+                "artifact-test-1",
+                run_id,
+                200,
+                EventKind::AssignmentCreated {
+                    assignment_id: "a-brief".into(),
+                    visit_id: visit_id.into(),
+                    role: "discovery.explorer".into(),
+                },
+            ),
+            event(
+                "artifact-test-2",
+                run_id,
+                201,
+                EventKind::AttemptStarted {
+                    attempt_id: "t-brief".into(),
+                    assignment_id: "a-brief".into(),
+                },
+            ),
+            event(
+                "artifact-test-3",
+                run_id,
+                202,
+                EventKind::AttemptFinished {
+                    attempt_id: "t-brief".into(),
+                    outcome: WorkOutcome::Succeeded,
+                },
+            ),
+            event(
+                "artifact-test-4",
+                run_id,
+                202,
+                EventKind::ArtifactRegistered {
+                    artifact_id: "brief-1".into(),
+                    attempt_id: "t-brief".into(),
+                    kind: "discovery_brief".into(),
+                    path: ".xper/artifacts/brief.md".into(),
+                    version: 1,
+                },
+            ),
+            event(
+                "artifact-test-5",
+                run_id,
+                202,
+                EventKind::AssignmentCompleted {
+                    assignment_id: "a-brief".into(),
+                    outcome: WorkOutcome::Succeeded,
+                },
+            ),
+        ])
+        .unwrap();
+    let with_brief = store.load_run(run_id).unwrap().unwrap();
+    assert_eq!(with_brief.artifacts["brief-1"].attempt_id, "t-brief");
+    assert_eq!(store.replay_run(run_id).unwrap(), Some(with_brief.clone()));
+    store.rebuild_all().unwrap();
+    assert_eq!(store.load_run(run_id).unwrap(), Some(with_brief));
 }
 
 #[test]

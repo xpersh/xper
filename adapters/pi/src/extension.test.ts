@@ -1,24 +1,36 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createXperExtension, isPiToolError } from "./extension.js";
+import { connectBridge } from "./bridge.js";
 import { PiObservations } from "./observations.js";
 
 const workspace = fileURLToPath(new URL("../../..", import.meta.url));
 const binary = resolve(workspace, "target/debug/xper");
 
-function fakePi() {
+function fakePi(cwd = workspace) {
   const handlers = new Map<string, (event: unknown, ctx: unknown) => void | Promise<void>>();
   const messages: string[] = [];
   const statuses: Array<string | undefined> = [];
   let command: ((args: string, ctx: unknown) => void) | undefined;
+  let tool:
+    | {
+        execute: (
+          id: string,
+          params: { task: string; timeoutSeconds?: number },
+          signal: AbortSignal,
+          onUpdate: unknown,
+          ctx: unknown,
+        ) => Promise<{ details: Record<string, unknown> }>;
+      }
+    | undefined;
   const ctx = {
-    cwd: workspace,
+    cwd,
     mode: "tui",
     sessionManager: { getSessionId: () => "test-session" },
     ui: {
@@ -36,6 +48,9 @@ function fakePi() {
     ) => {
       command = options.handler;
     },
+    registerTool: (value: typeof tool) => {
+      tool = value;
+    },
   } as Parameters<typeof createXperExtension>[0];
   return {
     pi,
@@ -51,6 +66,18 @@ function fakePi() {
       assert(command);
       command("status", ctx);
       return messages.at(-1) ?? "";
+    },
+    async command(args: string) {
+      assert(command);
+      await command(args, ctx);
+      return messages.at(-1) ?? "";
+    },
+    async delegate(
+      params: { task: string; timeoutSeconds?: number },
+      signal = new AbortController().signal,
+    ) {
+      assert(tool);
+      return tool.execute("pi-tool-call-1", params, signal, undefined, ctx);
     },
   };
 }
@@ -247,6 +274,171 @@ test("keeps in-memory observations when the log path cannot be opened", async ()
     assert.equal(observations.summary().started, 1);
     assert.equal(writeErrors, 1);
     await observations.sessionEnded("test");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("vertical slice persists Discovery, gates Define, recovers the bridge, and distinguishes outcomes", async () => {
+  execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
+  const directory = mkdtempSync(join(tmpdir(), "xper-vertical-"));
+  const fakeChild = join(directory, "fake-pi.mjs");
+  writeFileSync(
+    fakeChild,
+    `#!/usr/bin/env node
+process.stdin.once("data", () => {
+  if (process.env.XPER_FAKE_OUTCOME === "failed") process.exit(1);
+  if (process.env.XPER_FAKE_OUTCOME === "waiting") { setInterval(() => {}, 1000); return; }
+  process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:"# Discovery Brief\\nEvidence found.\\nRisks and open questions."}]}})+"\\n");
+  process.stdout.write(JSON.stringify({type:"agent_settled"})+"\\n");
+  process.stdin.on("end", () => process.exit(0));
+});
+
+
+`,
+  );
+  chmodSync(fakeChild, 0o755);
+  const previousCommand = process.env.XPER_PI_COMMAND;
+  const previousOutcome = process.env.XPER_FAKE_OUTCOME;
+  process.env.XPER_PI_COMMAND = fakeChild;
+  try {
+    for (const scenario of ["succeeded", "failed", "cancelled", "timed_out"] as const) {
+      const cwd = join(directory, scenario);
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(cwd);
+      const journal = join(cwd, "observations.jsonl");
+      const harness = fakePi(cwd);
+      createXperExtension(harness.pi, { command: binary, observationsFile: journal });
+      await harness.emit("session_start");
+      assert.match(await harness.command("start Explore this project"), /"phase":"discovery"/);
+      assert.match(await harness.command("advance"), /"advanced":false/);
+      if (scenario === "succeeded") {
+        await harness.emit("session_shutdown");
+        await harness.emit("session_start");
+        assert.match(harness.status(), /phase discovery/);
+      }
+      process.env.XPER_FAKE_OUTCOME =
+        scenario === "succeeded" || scenario === "failed" ? scenario : "waiting";
+      const controller = new AbortController();
+      if (scenario === "cancelled") setTimeout(() => controller.abort(), 50);
+      const result = await harness.delegate(
+        { task: "inspect evidence", timeoutSeconds: scenario === "timed_out" ? 1 : 5 },
+        controller.signal,
+      );
+      assert.equal(result.details.outcome, scenario);
+      assert.equal(result.details.phase, scenario === "succeeded" ? "define" : "discovery");
+      const status = JSON.parse(
+        execFileSync(binary, ["status", "--json"], { cwd, encoding: "utf8" }),
+      ) as {
+        run: {
+          visits: Array<{ phase: string }>;
+          attempts: Record<string, { outcome: string }>;
+          artifacts: Record<string, unknown>;
+        };
+        timeline: Array<{ kind: { type: string; outcome?: string; phase?: string } }>;
+      };
+      const run = status.run;
+      assert.equal(run.visits.at(-1)?.phase, scenario === "succeeded" ? "define" : "discovery");
+      assert.equal(Object.values(run.attempts)[0]?.outcome, scenario);
+      assert.equal(
+        status.timeline.filter((event) => event.kind.type === "attempt_finished").length,
+        1,
+      );
+      assert.equal(Object.values(run.artifacts).length, scenario === "succeeded" ? 1 : 0);
+      assert.match(harness.status(), new RegExp(`attempts ${scenario}`));
+      if (scenario === "succeeded") {
+        assert(status.timeline.some((event) => event.kind.type === "artifact_registered"));
+        assert(
+          status.timeline.some(
+            (event) => event.kind.type === "gate_evaluated" && event.kind.outcome === "failed",
+          ),
+        );
+        assert(
+          status.timeline.some(
+            (event) => event.kind.type === "phase_entered" && event.kind.phase === "define",
+          ),
+        );
+        assert.doesNotMatch(JSON.stringify(status.timeline), /inspect evidence|Evidence found/);
+        await harness.emit("session_shutdown");
+        await harness.emit("session_start");
+        assert.match(harness.status(), /phase define/);
+      } else {
+        assert.match(await harness.command("advance"), /"advanced":false/);
+      }
+      await harness.emit("session_shutdown");
+      const observations = readFileSync(journal, "utf8")
+        .trim()
+        .split("\n")
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              type: string;
+              toolCallId?: string;
+              attemptId?: string;
+              outcome?: string;
+            },
+        );
+      const correlated = observations.find((row) => row.type === "attempt.correlated");
+      assert.equal(correlated?.toolCallId, "pi-tool-call-1");
+      assert.equal(correlated?.attemptId, Object.keys(run.attempts)[0]);
+      assert(
+        observations.some(
+          (row) =>
+            row.type === "attempt.finished" &&
+            row.attemptId === correlated?.attemptId &&
+            row.outcome === scenario,
+        ),
+      );
+      assert.doesNotMatch(JSON.stringify(observations), /inspect evidence|Evidence found/);
+    }
+  } finally {
+    if (previousCommand === undefined) delete process.env.XPER_PI_COMMAND;
+    else process.env.XPER_PI_COMMAND = previousCommand;
+    if (previousOutcome === undefined) delete process.env.XPER_FAKE_OUTCOME;
+    else process.env.XPER_FAKE_OUTCOME = previousOutcome;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("bridge crash interrupts an attempt and permits retry on the same assignment", async () => {
+  execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
+  const directory = mkdtempSync(join(tmpdir(), "xper-retry-"));
+  const manifest = { adapter: "pi", adapterVersion: "0.1.0", capabilities: { subagents: true } };
+  try {
+    const first = await connectBridge(manifest, { command: binary });
+    await first.client.request("session.attach", { sessionId: "s1", cwd: directory, mode: "rpc" });
+    await first.client.request("run.start", { objective: "retry after interruption" });
+    const assigned = await first.client.request("assignment.start");
+    const closed = new Promise<void>((resolve) =>
+      first.client.process.once("close", () => resolve()),
+    );
+    first.client.close();
+    await closed;
+    const second = await connectBridge(manifest, { command: binary });
+    try {
+      await second.client.request("session.attach", {
+        sessionId: "s1",
+        cwd: directory,
+        mode: "rpc",
+      });
+      const recovered = await second.client.request("run.status");
+      const projection = recovered.run as { attempts: Record<string, { outcome: string }> };
+      assert.equal(projection.attempts[assigned.attemptId as string]?.outcome, "interrupted");
+      const retry = await second.client.request("assignment.start");
+      assert.equal(retry.assignmentId, assigned.assignmentId);
+      assert.notEqual(retry.attemptId, assigned.attemptId);
+      await second.client.request("attempt.finish", {
+        attemptId: retry.attemptId,
+        outcome: "failed",
+      });
+      const status = await second.client.request("run.status");
+      assert.equal(
+        (status.run as { visits: Array<{ phase: string }> }).visits.at(-1)?.phase,
+        "discovery",
+      );
+    } finally {
+      await second.client.shutdown();
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

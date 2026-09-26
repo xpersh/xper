@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   connectBridge,
   type BridgeClient,
@@ -6,6 +8,7 @@ import {
 } from "./bridge.js";
 import { PROTOCOL_VERSION, ProtocolFailure, errorCode } from "./protocol.js";
 import { PiObservations, isPiToolError, type PiToolEndEvent } from "./observations.js";
+import { resolveAgent, runDiscovery } from "./delegate.js";
 
 export { isPiToolError } from "./observations.js";
 
@@ -17,6 +20,7 @@ const STATUS_KEY = "xper";
 interface PiContext {
   cwd: string;
   mode: string;
+  model?: { provider: string; id: string };
   sessionManager: { getSessionId(): string };
   ui: {
     notify(message: string, type?: "info" | "warning" | "error"): void;
@@ -44,8 +48,27 @@ interface PiExtensionAPI {
   on(event: "tool_execution_end", handler: (event: PiToolEndEvent, ctx: PiContext) => void): void;
   registerCommand(
     name: string,
-    options: { description: string; handler: (args: string, ctx: PiContext) => void },
+    options: {
+      description: string;
+      handler: (args: string, ctx: PiContext) => void | Promise<void>;
+    },
   ): void;
+  registerTool(tool: {
+    name: string;
+    label: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    execute: (
+      toolCallId: string,
+      params: { task: string; timeoutSeconds?: number },
+      signal: AbortSignal,
+      onUpdate: unknown,
+      ctx: PiContext,
+    ) => Promise<{
+      content: Array<{ type: "text"; text: string }>;
+      details: Record<string, unknown>;
+    }>;
+  }): void;
 }
 
 interface ActiveBridge {
@@ -61,7 +84,7 @@ const manifest = {
     primaryAgent: true,
     lifecycleEvents: true,
     nativeUi: true,
-    subagents: false,
+    subagents: true,
   },
 };
 
@@ -93,6 +116,29 @@ export function createXperExtension(
   let stopping = false;
   let lastError: string | undefined;
   let observations: PiObservations | undefined;
+  let lastRun: Record<string, unknown> | undefined;
+
+  function phaseSummary(): string {
+    const run = lastRun?.run as
+      | {
+          run_id?: string;
+          visits?: Array<{ phase: string }>;
+          attempts?: Record<string, { outcome?: string }>;
+          artifacts?: Record<string, unknown>;
+        }
+      | null
+      | undefined;
+    if (!run) return "; no run";
+    const phase = run.visits?.at(-1)?.phase ?? "?";
+    const outcomes = Object.values(run.attempts ?? {}).map(
+      (attempt) => attempt.outcome ?? "running",
+    );
+    return `; run ${run.run_id ?? "?"}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; briefs ${Object.keys(run.artifacts ?? {}).length}`;
+  }
+
+  async function refreshRun(): Promise<void> {
+    if (active) lastRun = await active.client.request("run.status");
+  }
 
   function showStatus(ctx: PiContext): void {
     if (ctx.mode !== "tui") return;
@@ -149,6 +195,7 @@ export function createXperExtension(
           return;
         }
         active = { client, handshake: connected.handshake, sessionId };
+        await refreshRun();
         observations?.record("bridge.connected", {
           bridgeVersion: connected.handshake.bridgeVersion,
           protocolVersion: connected.handshake.protocolVersion,
@@ -208,15 +255,36 @@ export function createXperExtension(
   }
 
   pi.registerCommand("xper", {
-    description: "Show xper bridge status with /xper status",
-    handler: (args, ctx) => {
+    description: "Start, advance, or inspect the current xper run",
+    handler: async (args, ctx) => {
+      const [action, ...rest] = args.trim().split(/\s+/);
       observations?.record("command.invoked", {
         command: "xper",
-        recognized: args.trim() === "status",
+        recognized: ["status", "start", "advance"].includes(action ?? ""),
         bridgeConnected: active !== undefined,
       });
-      if (args.trim() !== "status") {
-        ctx.ui.notify("Usage: /xper status", "info");
+      if (action === "start" || action === "advance") {
+        if (!active) {
+          ctx.ui.notify(`xper: ${lastError ?? "bridge offline"}`, "warning");
+          return;
+        }
+        try {
+          const result = await active.client.request(
+            action === "start" ? "run.start" : "run.advance",
+            action === "start" ? { objective: rest.join(" ") } : {},
+          );
+          await refreshRun();
+          ctx.ui.notify(`xper: ${JSON.stringify(result)}`, "info");
+        } catch (error) {
+          ctx.ui.notify(
+            `xper: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+        }
+        return;
+      }
+      if (action !== "status") {
+        ctx.ui.notify("Usage: /xper start <objective> | /xper status | /xper advance", "info");
         return;
       }
       const state = active
@@ -227,9 +295,76 @@ export function createXperExtension(
         ? `; subagent observed: started ${counts.started}, reported done ${counts.reportedDone}, reported error ${counts.reportedError}, unclassified ${counts.unclassified}, in flight ${counts.inFlight}, mismatches ${counts.mismatches}, unpaired ${counts.unpaired}`
         : "";
       ctx.ui.notify(
-        `xper adapter pi ${ADAPTER_VERSION}; protocol ${PROTOCOL_VERSION}; bridge ${state}${observed}`,
+        `xper adapter pi ${ADAPTER_VERSION}; protocol ${PROTOCOL_VERSION}; bridge ${state}${phaseSummary()}${observed}`,
         active ? "info" : "warning",
       );
+      void refreshRun().catch(() => {});
+    },
+  });
+
+  pi.registerTool({
+    name: "xper_delegate",
+    label: "Xper Discovery explorer",
+    description:
+      "Delegate the current Discovery task and record a Discovery Brief before entering Define. Start a run with /xper start first.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string" },
+        timeoutSeconds: { type: "integer", minimum: 1, maximum: 600 },
+      },
+      required: ["task"],
+    },
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const connection = active;
+      if (!connection) throw new Error(lastError ?? "xper bridge offline");
+      if (!params.task?.trim()) throw new Error("Discovery task is required");
+      const timeoutSeconds = params.timeoutSeconds ?? 120;
+      if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 600) {
+        throw new Error("timeoutSeconds must be between 1 and 600");
+      }
+      const started = await connection.client.request("assignment.start");
+      const attemptId = started.attemptId as string;
+      observations?.record("attempt.correlated", { toolCallId, attemptId });
+      let outcome: "succeeded" | "failed" | "cancelled" | "timed_out" = "failed";
+      let relative: string | undefined;
+      try {
+        const agent = resolveAgent(started.role as string);
+        const result = await runDiscovery(params.task, ctx.cwd, signal, {
+          timeoutMs: timeoutSeconds * 1_000,
+          systemPrompt: agent.systemPrompt,
+          ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+        });
+        outcome = result.outcome;
+        if (outcome === "succeeded" && result.brief) {
+          relative = `.xper/artifacts/discovery-brief-${attemptId}.md`;
+          await mkdir(join(ctx.cwd, ".xper", "artifacts"), { recursive: true });
+          await writeFile(join(ctx.cwd, relative), result.brief, { flag: "wx" });
+        }
+      } catch {
+        outcome = signal.aborted ? "cancelled" : "failed";
+      }
+      const settled = await connection.client.request("attempt.finish", {
+        attemptId,
+        outcome,
+        ...(relative && outcome === "succeeded" ? { artifactPath: relative } : {}),
+      });
+      observations?.record("attempt.finished", { toolCallId, attemptId, outcome });
+      let phase = "discovery";
+      if (outcome === "succeeded") {
+        const advanced = await connection.client.request("run.advance");
+        if (advanced.advanced) phase = "define";
+      }
+      await refreshRun();
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Discovery attempt ${attemptId}: ${outcome}; phase ${phase}${relative ? `; brief ${relative}` : ""}`,
+          },
+        ],
+        details: { attemptId, outcome, phase, artifactId: settled.artifactId ?? null },
+      };
     },
   });
 

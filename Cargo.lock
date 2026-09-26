@@ -488,6 +488,7 @@ dependencies = [
  "serde_json",
  "xper-application",
  "xper-config",
+ "xper-domain",
  "xper-protocol",
  "xper-store-sqlite",
 ]

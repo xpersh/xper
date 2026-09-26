@@ -39,10 +39,11 @@ requireExactDependencies("xper-domain", []);
 requireExactDependencies("xper-application", ["xper-domain"]);
 requireExactDependencies("xper-protocol", []);
 requireExactDependencies("xper-config", ["xper-application"]);
-requireExactDependencies("xper-store-sqlite", ["xper-application"]);
+requireExactDependencies("xper-store-sqlite", ["xper-application", "xper-domain"]);
 requireExactDependencies("xper-cli", [
   "xper-application",
   "xper-config",
+  "xper-domain",
   "xper-protocol",
   "xper-store-sqlite",
 ]);

@@ -5,9 +5,9 @@ Extreme Programming. Se integra en Pi como agente principal y añade una capa
 de coordinación para gobernar el workflow, asignar modelos según el rol y
 conservar evidencia local sobre calidad, tiempo, coste y rework.
 
-> Estado: fundaciones ejecutables. El workspace, el kernel mínimo, el bridge
-> Rust/TypeScript y el adaptador mínimo de Pi existen; el workflow completo
-> sigue en desarrollo.
+> Estado: primera vertical slice ejecutable. Discovery puede delegarse desde
+> Pi y avanzar a Define con evidencia persistida; el resto del workflow sigue
+> en desarrollo.
 
 ## Objetivo
 
@@ -95,10 +95,14 @@ pi --approve --agent xper
 La definición `primary` está en `.pi/agents/xper.md`; `.pi/settings.json` fija
 `pi-open-agents@0.1.22` para este proyecto. La extensión de `.pi/extensions`
 usa `target/debug/xper` cuando existe y permite seleccionar otro binario con
-`XPER_BRIDGE_COMMAND`. Inicia y cierra el proceso con la sesión de Pi. El
-comando `/xper status` muestra las versiones del adapter, protocolo y bridge,
-además del estado de la conexión y los contadores de `subagent`. Una caída del
-bridge deja la sesión de Pi utilizable y aparece como `offline`.
+`XPER_BRIDGE_COMMAND`. Inicia y cierra el proceso con la sesión de Pi.
+`/xper start <objetivo>` inicia o reanuda un run del proyecto. La tool propia
+`xper_delegate` ejecuta `discovery.explorer` en un Pi hijo y registra un
+Discovery Brief antes de solicitar la transición a Define. `/xper status`
+muestra versiones, conexión, fase y resultados de attempts; `xper status
+--json` consulta la proyección y timeline desde SQLite. Una caída del bridge
+deja la sesión de Pi utilizable y aparece como `offline`. La
+[demo de XP-008](docs/tasks/008-vertical-slice.md#demo-manual) detalla el flujo.
 
 Para conservar observaciones entre sesiones del prototipo `0.0.1`:
 
@@ -110,12 +114,13 @@ XPER_PI_OBSERVATIONS_FILE="$PWD/.xper/observations/pi.jsonl" pi --approve --agen
 El logger Winston escribe JSONL con rotación por tamaño: 5 MiB por archivo y
 cinco archivos como máximo (el actual y cuatro anteriores). Conserva el inicio
 y fin de sesión, el estado del bridge, las invocaciones de `/xper` (sin
-argumentos) y las señales de `subagent`; no guarda tareas, prompts ni salidas.
+argumentos), las señales de `subagent` y la correlación entre la tool propia y
+el Attempt; no guarda tareas, prompts ni salidas.
 Si no se configura el archivo, los contadores de la sesión siguen disponibles.
 `reported done` sólo refleja lo comunicado por `pi-open-agents`: el
 [spike](docs/spikes/001-integracion-pi.md)
 demostró que una cancelación temprana puede parecer un éxito. La decisión de
-usarlo provisionalmente y los criterios para revisarla están en el
+usarlo para trabajo no gobernado por xper y los criterios para revisarla están en el
 [RFC 0004](docs/rfcs/0004-integracion-con-pi.md).
 
 También puede activarlo dentro de una sesión con `/agent xper`. El CLI de

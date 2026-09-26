@@ -414,8 +414,7 @@ impl BridgeState {
                     invalid_params(writer, id)?;
                 }
             }
-            "run.start" | "run.join" | "run.status" | "assignment.start" | "attempt.finish"
-            | "run.advance" => {
+            "run.start" | "run.status" | "assignment.start" | "attempt.finish" | "run.advance" => {
                 let Some(workflow) = self.workflow.as_mut() else {
                     invalid_params(writer, id)?;
                     return Ok(true);
@@ -429,14 +428,6 @@ impl BridgeState {
                             io::Error::new(io::ErrorKind::InvalidInput, "objective required")
                         })
                         .and_then(|objective| workflow.start(objective)),
-                    "run.join" => params
-                        .get("runId")
-                        .and_then(Value::as_str)
-                        .filter(|v| !v.trim().is_empty())
-                        .ok_or_else(|| {
-                            io::Error::new(io::ErrorKind::InvalidInput, "runId required")
-                        })
-                        .and_then(|run_id| workflow.join(run_id)),
                     "run.status" if empty_params(params) => workflow.status(),
                     "assignment.start" if empty_params(params) => workflow.delegate(None),
                     "assignment.start" if params.as_object().is_some_and(|map| map.len() == 1) => {

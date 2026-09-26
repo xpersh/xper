@@ -38,12 +38,15 @@ iniciar un run, delegar Discovery y avanzar a Define.
 
 - `/xper start <objetivo>` abre o reanuda el run asociado a esa sesión Pi y
   persiste `Intake -> Discovery` en una sola transacción. Cada sesión nueva puede
-  iniciar un run independiente en el mismo `.xper/events.sqlite`. Para trabajar
-  juntas, una segunda sesión usa `/xper join <runId>`.
+  iniciar un run independiente. En worktrees diferentes, cada sesión usa su
+  propio `.xper/events.sqlite`; incluso si comparten directorio, sus runs no se
+  mezclan.
 - La tool propia `xper_delegate` crea un assignment `discovery.explorer` y un
   Attempt. El adaptador resuelve ese rol y lanza un Pi hijo por RPC. Correlaciona
   el `toolCallId` nativo con el `attemptId` de xper en las observaciones; no
-  deriva el resultado de la tool `subagent` de `pi-open-agents`.
+  deriva el resultado de la tool `subagent` de `pi-open-agents`. El hijo se lanza
+  sin sesión persistente ni extensión xper: el attempt pertenece al run del
+  primary.
 - El resultado final del hijo se escribe como Discovery Brief en
   `.xper/artifacts/`. El evento registra sólo su referencia. Éxito, fallo,
   cancelación y timeout se registran como resultados distintos; un crash deja
@@ -65,6 +68,11 @@ un segundo bridge recupera los attempts cuando la lease caduca. Un cierre
 normal del bridge libera la lease inmediatamente. Si `events.sqlite` está
 bloqueado o contiene un historial incompatible, el bridge devuelve el error en
 lugar de crear una base volátil separada.
+
+La migración de esquema v3 elimina los vínculos adicionales creados con el
+antiguo `join`: conserva la primera sesión asociada a cada run y no modifica
+su historial de eventos. Las sesiones desvinculadas pueden iniciar un run
+propio.
 
 ## Demo manual
 
@@ -102,12 +110,11 @@ un `phase_entered` de Define. Reiniciar Pi o ejecutar `/reload` y consultar
 estados y la ruta del Brief; el texto del task y la salida del hijo no se
 guardan en SQLite.
 
-Para usar dos sesiones Pi sobre el mismo proyecto, iniciar cada sesión con
-`/xper start <objetivo>` crea runs distintos. Para compartir uno, copiar su
-`runId` de `/xper start` o `/xper status` y ejecutar `/xper join <runId>` en la
-segunda sesión. Ambas pueden llamar a `xper_delegate` a la vez. El gate espera
-al último assignment pendiente antes de pasar a Define. Desde la terminal,
-`xper status --run <runId> --json` permite inspeccionar cada run por separado.
+Dos sesiones Pi, preferiblemente en worktrees distintos, crean runs aislados al
+ejecutar `/xper start <objetivo>`. Dentro de un run, varias llamadas a
+`xper_delegate` pueden ejecutarse a la vez; el gate espera al último assignment
+pendiente antes de pasar a Define. Desde cada worktree,
+`xper status --run <runId> --json` permite inspeccionar un run concreto.
 
 ## Verificación reproducible
 
@@ -120,6 +127,6 @@ determinista sin credenciales para cubrir los cuatro resultados, el gate sin
 evidencia, la recuperación tras reinicio y el CLI. Otro test mata el bridge
 durante un attempt, adelanta la caducidad de su lease y verifica su estado
 `interrupted` y el retry. Una prueba adicional abre dos bridges sobre el mismo
-SQLite, comprueba runs separados por sesión y delegaciones simultáneas después
-de `/xper join`. Los tests de `xper-store-sqlite` reconstruyen proyecciones
+SQLite, comprueba runs separados por sesión y delegaciones simultáneas dentro
+de uno de ellos. Los tests de `xper-store-sqlite` reconstruyen proyecciones
 desde el log y comprueban el append transaccional.

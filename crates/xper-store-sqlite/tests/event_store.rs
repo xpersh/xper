@@ -211,7 +211,7 @@ fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
     let (dir, path) = temp_db();
     {
         let mut store = SqliteEventStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 2);
+        assert_eq!(store.schema_version().unwrap(), 3);
         assert_eq!(store.append_boundary(&started()).unwrap(), 2);
         let work = [
             event(
@@ -464,18 +464,49 @@ fn version_one_database_migrates_and_recovers_legacy_attempts() {
         ).unwrap();
     }
     drop(connection);
-    let mut store = SqliteEventStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 2);
+    let store = SqliteEventStore::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 3);
     assert_eq!(
         store.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
         Some(WorkOutcome::Interrupted)
     );
-    store.bind_session("session-1", "r1").unwrap();
-    assert_eq!(
-        store.session_run("session-1").unwrap().as_deref(),
-        Some("r1")
-    );
     drop(store);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn version_two_joined_sessions_keep_only_the_original_binding() {
+    let (dir, path) = temp_db();
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO schema_migrations(version) VALUES (1), (2);").unwrap();
+    connection
+        .execute_batch(include_str!("../migrations/0001_initial.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../migrations/0002_concurrency.sql"))
+        .unwrap();
+    connection.execute("INSERT INTO session_runs(session_key, run_id) VALUES ('original', 'run-1'), ('joined', 'run-1')", []).unwrap();
+    drop(connection);
+
+    let store = SqliteEventStore::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 3);
+    assert_eq!(
+        store.session_run("original").unwrap().as_deref(),
+        Some("run-1")
+    );
+    assert_eq!(store.session_run("joined").unwrap(), None);
+    drop(store);
+
+    let connection = Connection::open(&path).unwrap();
+    assert!(
+        connection
+            .execute(
+                "INSERT INTO session_runs(session_key, run_id) VALUES ('another', 'run-1')",
+                []
+            )
+            .is_err()
+    );
+    drop(connection);
     fs::remove_dir_all(dir).unwrap();
 }
 

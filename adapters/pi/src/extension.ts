@@ -255,27 +255,23 @@ export function createXperExtension(
   }
 
   pi.registerCommand("xper", {
-    description: "Start, join, advance, or inspect the current xper run",
+    description: "Start, advance, or inspect the current xper run",
     handler: async (args, ctx) => {
       const [action, ...rest] = args.trim().split(/\s+/);
       observations?.record("command.invoked", {
         command: "xper",
-        recognized: ["status", "start", "join", "advance"].includes(action ?? ""),
+        recognized: ["status", "start", "advance"].includes(action ?? ""),
         bridgeConnected: active !== undefined,
       });
-      if (action === "start" || action === "join" || action === "advance") {
+      if (action === "start" || action === "advance") {
         if (!active) {
           ctx.ui.notify(`xper: ${lastError ?? "bridge offline"}`, "warning");
           return;
         }
         try {
           const result = await active.client.request(
-            action === "start" ? "run.start" : action === "join" ? "run.join" : "run.advance",
-            action === "start"
-              ? { objective: rest.join(" ") }
-              : action === "join"
-                ? { runId: rest[0] }
-                : {},
+            action === "start" ? "run.start" : "run.advance",
+            action === "start" ? { objective: rest.join(" ") } : {},
           );
           await refreshRun();
           ctx.ui.notify(`xper: ${JSON.stringify(result)}`, "info");
@@ -288,10 +284,7 @@ export function createXperExtension(
         return;
       }
       if (action !== "status") {
-        ctx.ui.notify(
-          "Usage: /xper start <objective> | /xper join <runId> | /xper status | /xper advance",
-          "info",
-        );
+        ctx.ui.notify("Usage: /xper start <objective> | /xper status | /xper advance", "info");
         return;
       }
       const state = active

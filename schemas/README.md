@@ -9,10 +9,10 @@ LF-terminated line, with at most 65,536 bytes before the LF.
 
 The bridge responds to `initialize`, requests adapter `capabilities`, and then
 accepts `capabilities`, `ping`, `session.attach`, `session.detach`,
-`event.ingest` (error observations), `run.start`, `run.join`, `run.status`,
+`event.ingest` (error observations), `run.start`, `run.status`,
 `assignment.start`, `attempt.finish`, `run.advance`, and `shutdown`.
-`run.join` binds the current session to an existing active run. By default,
-`assignment.start` creates a new `discovery.explorer` assignment and attempt;
+Each Pi session keeps its own run. By default, `assignment.start` creates a
+new `discovery.explorer` assignment and attempt;
 its optional `assignmentId` retries an interrupted assignment.
 `attempt.finish` records one of four terminal outcomes and may register a
 Discovery Brief path. `run.advance` waits for all Discovery assignments to

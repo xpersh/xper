@@ -52,10 +52,6 @@
           "then": { "properties": { "params": { "$ref": "#/$defs/runStartParams" } } }
         },
         {
-          "if": { "properties": { "method": { "const": "run.join" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/runJoinParams" } } }
-        },
-        {
           "if": { "properties": { "method": { "const": "assignment.start" } } },
           "then": { "properties": { "params": { "$ref": "#/$defs/assignmentStartParams" } } }
         },
@@ -155,12 +151,6 @@
       "type": "object",
       "required": ["objective"],
       "properties": { "objective": { "type": "string", "minLength": 1 } },
-      "additionalProperties": false
-    },
-    "runJoinParams": {
-      "type": "object",
-      "required": ["runId"],
-      "properties": { "runId": { "type": "string", "minLength": 1 } },
       "additionalProperties": false
     },
     "assignmentStartParams": {

@@ -460,7 +460,7 @@ test("bridge crash interrupts an attempt and permits retry on the same assignmen
   }
 });
 
-test("two Pi sessions run independently and can delegate together after joining", async () => {
+test("two Pi sessions stay isolated while one run has parallel delegations", async () => {
   execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
   const directory = mkdtempSync(join(tmpdir(), "xper-concurrent-"));
   const manifest = { adapter: "pi", adapterVersion: "0.1.0", capabilities: { subagents: true } };
@@ -498,13 +498,20 @@ test("two Pi sessions run independently and can delegate together after joining"
     ) as { run: { run_id: string } };
     assert.equal(inspected.run.run_id, one.runId);
 
-    await second.client.request("run.join", { runId: one.runId });
-    const [assignmentOne, assignmentTwo] = await Promise.all([
+    await assert.rejects(
+      second.client.request("run.join", { runId: one.runId }),
+      /method not found/,
+    );
+    const [assignmentOne, assignmentTwo, otherSessionAssignment] = await Promise.all([
+      first.client.request("assignment.start"),
       first.client.request("assignment.start"),
       second.client.request("assignment.start"),
     ]);
     assert.notEqual(assignmentOne.assignmentId, assignmentTwo.assignmentId);
     assert.notEqual(assignmentOne.attemptId, assignmentTwo.attemptId);
+    assert.equal(assignmentOne.runId, one.runId);
+    assert.equal(assignmentTwo.runId, one.runId);
+    assert.equal(otherSessionAssignment.runId, two.runId);
     const artifacts = join(directory, ".xper", "artifacts");
     mkdirSync(artifacts, { recursive: true });
     const brief = `.xper/artifacts/discovery-brief-${assignmentOne.attemptId}.md`;
@@ -517,18 +524,25 @@ test("two Pi sessions run independently and can delegate together after joining"
     const waiting = await first.client.request("run.advance");
     assert.equal(waiting.advanced, false);
     assert.match(waiting.reason as string, /still running/);
-    await second.client.request("attempt.finish", {
+    await first.client.request("attempt.finish", {
       attemptId: assignmentTwo.attemptId,
       outcome: "failed",
     });
-    const advanced = await second.client.request("run.advance");
+    const advanced = await first.client.request("run.advance");
     assert.equal(advanced.advanced, true);
-    const shared = await first.client.request("run.status");
+    const isolated = await first.client.request("run.status");
     assert.equal(
-      (shared.run as { visits: Array<{ phase: string }> }).visits.at(-1)?.phase,
+      (isolated.run as { visits: Array<{ phase: string }> }).visits.at(-1)?.phase,
       "define",
     );
-    assert.equal(Object.keys((shared.run as { attempts: object }).attempts).length, 2);
+    assert.equal(Object.keys((isolated.run as { attempts: object }).attempts).length, 2);
+    const otherSessionStatus = await second.client.request("run.status");
+    assert.equal((otherSessionStatus.run as { run_id: string }).run_id, two.runId);
+    assert.equal(
+      (otherSessionStatus.run as { visits: Array<{ phase: string }> }).visits.at(-1)?.phase,
+      "discovery",
+    );
+    assert.equal(Object.keys((otherSessionStatus.run as { attempts: object }).attempts).length, 1);
   } finally {
     await Promise.allSettled([first.client.shutdown(), second.client.shutdown()]);
     rmSync(directory, { recursive: true, force: true });

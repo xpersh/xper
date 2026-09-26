@@ -123,30 +123,6 @@ impl WorkspaceRun {
         self.store.heartbeat().map_err(storage)
     }
 
-    /// Explicitly shares an existing active run with this Pi session.
-    pub fn join(&mut self, run_id: &str) -> io::Result<Value> {
-        if self.store.has_active_attempts().map_err(storage)? {
-            return Err(invalid(
-                "finish running attempts before joining another run",
-            ));
-        }
-        let run = self
-            .store
-            .load_run(run_id)
-            .map_err(storage)?
-            .ok_or_else(|| invalid("unknown run ID"))?;
-        if run.status != RunStatus::Active {
-            return Err(invalid("run is not active"));
-        }
-        self.store
-            .bind_session(&self.session_id, run_id)
-            .map_err(storage)?;
-        self.run_id = Some(run_id.into());
-        Ok(
-            json!({"runId":run_id,"phase":run.visits.last().map(|v| v.phase.as_str()),"joined":true}),
-        )
-    }
-
     fn current(&self) -> io::Result<Option<RunProjection>> {
         self.run_id
             .as_deref()

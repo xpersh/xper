@@ -26,6 +26,7 @@ pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../migrations/0001_initial.sql")),
     (2, include_str!("../migrations/0002_concurrency.sql")),
+    (3, include_str!("../migrations/0003_session_isolation.sql")),
 ];
 const LEASE_MS: i64 = 30_000;
 static NEXT_COORDINATOR: AtomicU64 = AtomicU64::new(0);
@@ -205,27 +206,6 @@ impl SqliteEventStore {
                 |row| row.get(0),
             )
             .optional()?)
-    }
-
-    /// Binds a Pi session to a run for future bridge restarts.
-    pub fn bind_session(&mut self, session_key: &str, run_id: &str) -> Result<(), StoreError> {
-        self.connection.execute(
-            "INSERT INTO session_runs(session_key, run_id) VALUES (?1, ?2) ON CONFLICT(session_key) DO UPDATE SET run_id = excluded.run_id",
-            params![session_key, run_id],
-        )?;
-        Ok(())
-    }
-
-    /// Whether this coordinator still owns an unfinished attempt.
-    pub fn has_active_attempts(&self) -> Result<bool, StoreError> {
-        let Some(id) = self.coordinator_id.as_deref() else {
-            return Ok(false);
-        };
-        Ok(self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM active_attempt_owners WHERE coordinator_id = ?1)",
-            [id],
-            |row| row.get::<_, i64>(0),
-        )? != 0)
     }
 
     /// Applies an entire domain boundary atomically. Duplicate identical

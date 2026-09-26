@@ -26,7 +26,8 @@ y aceptar de forma independiente.
 
 ## Documentos de diseño
 
-- [Guía de la arquitectura actual y casos de uso](docs/architecture.md)
+- [Arquitectura del core de xper y casos de uso](docs/architecture.md)
+- [Arquitectura del adaptador Pi](adapters/pi/docs/architecture.md)
 - [RFC 0001: Producto y workflow](docs/rfcs/0001-producto-y-workflow.md)
 - [RFC 0002: Configuración y routing multimodelo](docs/rfcs/0002-configuracion-multimodelo.md)
 - [RFC 0003: Observabilidad y métricas](docs/rfcs/0003-observabilidad-y-metricas.md)
@@ -213,11 +214,22 @@ El layout coincide con RFC 0005, por lo que no requiere un ADR adicional. Los
 crates futuros (`xper-workspaces`, `xper-observability` y `xper-tui`) se
 añadirán cuando una tarea necesite comportamiento real en esas capas.
 
-`scripts/check-boundaries.mjs` valida el grafo del workspace: el dominio no
-puede tener dependencias ni usar APIs de I/O, la aplicación sólo depende del
-dominio, la infraestructura y el CLI apuntan hacia dentro, y el adaptador Pi
-no puede importar internals del core. Entre paquetes propios, el único límite
-admitido para el adaptador es el protocolo público.
+`scripts/check-core-boundaries.mjs` valida la arquitectura de los crates: el
+dominio no puede tener dependencias ni usar APIs de I/O, la aplicación sólo
+depende del dominio, y la infraestructura y el CLI apuntan hacia dentro.
+Cada adaptador mantiene sus propias comprobaciones: las de Pi viven en
+`adapters/pi/scripts/check-boundaries.mjs` y protegen tanto su estructura
+interna como el acceso al core exclusivamente mediante el protocolo público.
+
+`npm run boundaries` ejecuta las comprobaciones del core y las de todos los
+workspaces registrados. Se pueden ejecutar por separado con
+`npm run boundaries:core` y `npm run boundaries --workspace @xper/adapter-pi`.
+
+Cada adaptador mantiene su guía de arquitectura en su propio paquete. Los
+adaptadores registrados como workspaces definen además un script `boundaries`:
+el comando conjunto lo ejecuta automáticamente y falla si falta. Así pueden
+evolucionar su documentación y sus reglas sin modificar las del core o las de
+otros adaptadores.
 
 ## Bridge v1
 

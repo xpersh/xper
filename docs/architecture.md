@@ -1,4 +1,9 @@
-# Arquitectura de la aplicación
+# Arquitectura del core de xper
+
+Esta guía describe el dominio, los casos de uso, los puertos y las interfaces
+Rust de xper. Cada adaptador documenta su organización interna dentro de su
+propio paquete; la [guía del adaptador Pi](../adapters/pi/docs/architecture.md)
+describe la integración actual.
 
 La entrada al proceso es el CLI. El CLI expone dos interfaces: comandos de
 terminal y un bridge JSONL que recibe peticiones de los adaptadores. Ambas
@@ -6,7 +11,7 @@ invocan casos de uso de `xper-application`.
 
 ```mermaid
 flowchart LR
-    Pi[Adaptador de Pi] --> Bridge[Bridge JSONL]
+    Adapter[Adaptador de harness] --> Bridge[Bridge JSONL]
     Terminal[Comandos CLI] --> Cases[Casos de uso]
     Bridge --> Cases
     Cases --> Domain[Dominio]
@@ -27,7 +32,7 @@ contratos del core. `composition.rs` crea y conecta las dependencias concretas.
 | Traducción RPC | `crates/xper-cli/src/bridge/workflow.rs` | JSON → petición tipada → resultado → JSON |
 | Presentación CLI | `crates/xper-cli/src/status.rs`, `setup.rs` | Texto/JSON y confirmación por terminal |
 | Composición | `crates/xper-cli/src/composition.rs` | Apertura de SQLite y recursos de una sesión |
-| Adaptadores locales | `crates/xper-cli/src/infrastructure/` | Reloj, IDs, artefactos e instalación Pi |
+| Adaptadores locales | `crates/xper-cli/src/infrastructure/` | Reloj, IDs, artefactos e instalación local |
 | Acciones del sistema | `crates/xper-application/src/use_cases/` | Coordinación de cada operación |
 | Dependencias de las acciones | `crates/xper-application/src/ports.rs` | Lecturas, transacciones, evidencia e instalación |
 | Vocabulario durable | `crates/xper-application/src/events.rs` | Eventos normalizados y conversión desde el dominio |
@@ -60,7 +65,7 @@ escribir su coordinación y conectarla a la interfaz que la exponga.
 `initialize_workspace` recibe callbacks de presentación y consentimiento.
 Decide cuándo invocarlos y cuándo permitir escrituras; el CLI decide cómo
 mostrar los checks y cómo leer la respuesta. El adaptador informa qué fallos
-puede reparar, por lo que la aplicación no necesita conocer IDs propios de Pi.
+puede reparar, por lo que la aplicación no necesita conocer IDs propios del harness.
 
 ## Puertos y garantías
 
@@ -122,56 +127,26 @@ primera vertical. Esta refactorización no añade rehidratación de la entidad
 Al ampliar el workflow habrá que resolver esa integración con el kernel y
 evitar mantener dos conjuntos independientes de reglas de transición.
 
-## Organización de la extensión Pi
+## Verificación del core
 
-La extensión tiene acciones de integración pequeñas. Las reglas de gates y
-transiciones siguen en los casos de uso del core Rust.
+Desde la raíz del repositorio:
 
-```text
-extension.ts                         compone las dependencias
-pi/xper-command.ts                   traduce /xper y presenta resultados
-pi/xper-delegate.ts                  registra la tool y presenta su resultado
-  → actions/delegate-discovery.ts    coordina una delegación local
-      → bridge/xper-client.ts        invoca operaciones tipadas de xper
-      → discovery/delegate.ts        ejecuta Pi y normaliza su resultado
-      → discovery/artifacts.ts       guarda el Brief sin sobrescribirlo
+```bash
+npm run boundaries:core
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets
 ```
 
-`delegateDiscovery` recibe funciones de ejecución y escritura, un cliente de
-workflow y un callback opcional de observaciones. Se puede probar sin procesos,
-archivos ni API de Pi. Crea el assignment mediante el core, ejecuta el agente,
-guarda la evidencia y comunica el resultado. Tras un éxito solicita el avance y
-devuelve la fase indicada por el core, incluido un gate bloqueado.
+Las reglas de [check-core-boundaries.mjs](../scripts/check-core-boundaries.mjs)
+comprueban las dependencias entre crates y detectan I/O o transporte JSON/RPC
+dentro de aplicación, construcción de eventos de workflow desde el CLI e imports
+de implementaciones fuera de la composición o infraestructura. Sólo inspeccionan
+el workspace Rust. Son comprobaciones estáticas de convenciones, no un análisis
+completo del lenguaje.
 
-Los fallos locales de ejecución o escritura producen un resultado fallido; una
-cancelación se conserva como tal. Un Brief vacío no produce un éxito y la ruta
-del artefacto sólo se devuelve después de guardarlo. Si falla el bridge al
-registrar el resultado o avanzar, el error se propaga sin inventar otro
-resultado ni reintentar una mutación cuyo commit podría haberse realizado.
-
-`XperClient` ofrece `startRun`, `startAssignment`, `finishAttempt`, `advanceRun`
-y `getRunStatus`. Valida las respuestas y las correlaciones de assignment y
-attempt antes de entregarlas al consumidor; conserva los errores RPC originales.
-Los campos adicionales se admiten para permitir evolución compatible. En el
-estado sólo se tipan y validan los campos de proyección que utiliza la extensión;
-la timeline permanece opaca y no se reconstruyen reglas del dominio en TypeScript.
-
-`BridgeClient` conserva el transporte JSONL y el handshake. `XperSession` conserva
-la conexión, el lifecycle y el último estado tipado. Las acciones no importan
-implementaciones de procesos, archivos ni registros de Pi. No necesitan un
-contenedor de servicios ni una segunda jerarquía de dominio/aplicación.
-
-## Verificación
-
-`npm run check` ejecuta formato, lint, límites arquitectónicos, typecheck y tests.
-Las reglas de `scripts/check-boundaries.mjs` comprueban las dependencias entre
-crates y detectan I/O o transporte JSON/RPC dentro de aplicación, construcción
-de eventos de workflow desde el CLI e imports de implementaciones fuera de la
-composición o infraestructura. En la extensión comprueban que las acciones
-reciban sus dependencias de I/O y que las operaciones de workflow se invoquen
-mediante el cliente tipado. Son comprobaciones estáticas de convenciones,
-no un análisis completo de Rust.
-
-Los tests de aplicación no arrancan SQLite, procesos ni Pi. Los tests de SQLite
-verifican sus garantías transaccionales y de recuperación; los del CLI y del
-adaptador comprueban que las interfaces públicas siguen funcionando.
+Los tests de dominio y aplicación se ejecutan sin arrancar un harness; los de
+aplicación usan dobles de sus puertos. Los tests de SQLite verifican sus garantías
+transaccionales y de recuperación, y los del CLI comprueban sus interfaces.
+La verificación conjunta del repositorio se describe en el
+[README](../README.md#desarrollo).

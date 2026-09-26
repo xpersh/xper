@@ -4,6 +4,7 @@
 - Fecha: 2026-09-22
 - Depende de: [RFC 0001](0001-producto-y-workflow.md), [RFC 0002](0002-configuracion-multimodelo.md) y [RFC 0003](0003-observabilidad-y-metricas.md)
 - Relacionado con: [RFC 0005](0005-arquitectura-modular.md)
+- Implementación actual: [arquitectura del adaptador Pi](../../adapters/pi/docs/architecture.md)
 
 ## Resumen
 

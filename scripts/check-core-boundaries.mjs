@@ -62,15 +62,6 @@ for (const rustPackage of packages.values()) {
   }
 }
 
-const adapterRoot = join(workspaceRoot, "adapters/pi");
-const adapterManifest = JSON.parse(readFileSync(join(adapterRoot, "package.json"), "utf8"));
-const productionDependencies = Object.keys(adapterManifest.dependencies ?? {});
-for (const dependency of productionDependencies) {
-  if (dependency.startsWith("@xper/") && dependency !== "@xper/protocol") {
-    failures.push(`Pi adapter depends on private xper package ${dependency}`);
-  }
-}
-
 function filesWithExtension(directory, extension) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -128,49 +119,12 @@ for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates/xper-cli
   }
 }
 
-const importPattern = /(?:from\s+|import\s*\()\s*["']([^"']+)["']/g;
-for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
-  const source = readFileSync(sourceFile, "utf8");
-  const adapterPath = relative(join(adapterRoot, "src"), sourceFile).replaceAll("\\", "/");
-  if (
-    !adapterPath.startsWith("__tests__/") &&
-    adapterPath !== "bridge/xper-client.ts" &&
-    /\.request\s*\(\s*["'](?:run\.(?:start|status|advance)|assignment\.start|attempt\.finish)["']/.test(
-      source,
-    )
-  ) {
-    failures.push(`${adapterPath} must call workflow operations through the typed xper client`);
-  }
-  for (const match of source.matchAll(importPattern)) {
-    const specifier = match[1];
-    if (
-      adapterPath.startsWith("actions/") &&
-      (specifier?.startsWith("node:") ||
-        /(?:^|\/)(?:pi|discovery)\//.test(specifier ?? "") ||
-        specifier?.endsWith("/bridge/client.js"))
-    ) {
-      failures.push(`${adapterPath} must receive Pi execution and I/O through its dependencies`);
-    }
-    const importsPrivateXperPackage =
-      specifier?.startsWith("@xper/") && specifier !== "@xper/protocol";
-    if (
-      specifier?.includes("/crates/") ||
-      /^xper-(?!protocol(?:$|\/))/.test(specifier ?? "") ||
-      importsPrivateXperPackage
-    ) {
-      failures.push(
-        `${relative(workspaceRoot, sourceFile)} imports private core module ${specifier}`,
-      );
-    }
-  }
-}
-
 if (failures.length > 0) {
-  console.error("Dependency boundary violations:\n");
+  console.error("Core architecture violations:\n");
   for (const failure of failures) {
     console.error(`- ${failure}`);
   }
   process.exitCode = 1;
 } else {
-  console.log("Dependency boundaries are valid.");
+  console.log("Core architecture boundaries are valid.");
 }

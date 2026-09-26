@@ -75,7 +75,7 @@ expresa esa intención en el harness concreto.
 
 ## Capas del core
 
-La [guía de la arquitectura actual](../architecture.md) concreta estos límites
+La [guía de la arquitectura del core](../architecture.md) concreta estos límites
 con el mapa de módulos, los casos de uso de la primera vertical y las reglas
 para ampliarlos.
 

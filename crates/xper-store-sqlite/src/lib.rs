@@ -9,10 +9,13 @@ use std::{
     error::Error as StdError,
     fmt,
     path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
+use rusqlite::{
+    Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
+};
 use xper_application::events::{
     EVENT_SCHEMA_VERSION, Event, EventKind, EventStore, RunProjection, WorkOutcome, replay,
 };
@@ -20,7 +23,12 @@ use xper_application::events::{
 /// Stable package identity used by workspace dependency smoke tests.
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../migrations/0001_initial.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../migrations/0001_initial.sql")),
+    (2, include_str!("../migrations/0002_concurrency.sql")),
+];
+const LEASE_MS: i64 = 30_000;
+static NEXT_COORDINATOR: AtomicU64 = AtomicU64::new(0);
 
 /// A store failure. A boundary is rolled back if any operation fails.
 #[derive(Debug)]
@@ -72,29 +80,45 @@ pub enum Durability {
     Volatile,
 }
 
-/// The single-writer SQLite adapter. Independent read connections may use WAL.
+/// A SQLite adapter with serialized writes and per-coordinator attempt ownership.
 pub struct SqliteEventStore {
     connection: Connection,
     durability: Durability,
     degraded_reason: Option<String>,
+    coordinator_id: Option<String>,
 }
 
 impl SqliteEventStore {
-    /// Opens a persistent database, migrates it, rebuilds projections, and
-    /// records an interrupted event for every attempt lacking a final event.
+    /// Opens a persistent database and recovers only attempts with inactive owners.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        connection.pragma_update(None, "journal_mode", "WAL")?;
+        // Two new bridge processes can race while first switching a fresh DB to WAL.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match connection.pragma_update(None, "journal_mode", "WAL") {
+                Ok(()) => break,
+                Err(rusqlite::Error::SqliteFailure(failure, _))
+                    if matches!(
+                        failure.code,
+                        ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
+                    ) && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
         let mut store = Self {
             connection,
             durability: Durability::Persistent,
             degraded_reason: None,
+            coordinator_id: Some(fresh_coordinator_id()),
         };
         store.migrate()?;
         store.rebuild_all()?;
-        store.recover_interrupted()?;
+        store.heartbeat()?;
         Ok(store)
     }
 
@@ -106,6 +130,7 @@ impl SqliteEventStore {
             connection,
             durability: Durability::Persistent,
             degraded_reason: None,
+            coordinator_id: None,
         })
     }
 
@@ -117,8 +142,10 @@ impl SqliteEventStore {
             connection,
             durability: Durability::Volatile,
             degraded_reason: None,
+            coordinator_id: Some(fresh_coordinator_id()),
         };
         store.migrate()?;
+        store.heartbeat()?;
         Ok(store)
     }
 
@@ -127,11 +154,16 @@ impl SqliteEventStore {
     pub fn open_or_volatile(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         match Self::open(path) {
             Ok(store) => Ok(store),
-            Err(error) => {
-                let mut store = Self::in_memory()?;
-                store.degraded_reason = Some(error.to_string());
-                Ok(store)
-            }
+            Err(error) => match &error {
+                StoreError::Sqlite(rusqlite::Error::SqliteFailure(failure, _))
+                    if failure.code == ErrorCode::CannotOpen =>
+                {
+                    let mut store = Self::in_memory()?;
+                    store.degraded_reason = Some(error.to_string());
+                    Ok(store)
+                }
+                _ => Err(error),
+            },
         }
     }
 
@@ -147,9 +179,76 @@ impl SqliteEventStore {
         self.degraded_reason.as_deref()
     }
 
+    /// Renews this bridge's ownership lease and recovers newly expired attempts.
+    pub fn heartbeat(&mut self) -> Result<(), StoreError> {
+        let Some(id) = self.coordinator_id.as_deref() else {
+            return Ok(());
+        };
+        let expires = now_ms()?
+            .checked_add(LEASE_MS)
+            .ok_or(StoreError::TimestampOverflow)?;
+        self.connection.execute(
+            "INSERT INTO coordinator_leases(coordinator_id, expires_at_ms) VALUES (?1, ?2) ON CONFLICT(coordinator_id) DO UPDATE SET expires_at_ms = excluded.expires_at_ms",
+            params![id, expires],
+        )?;
+        self.recover_interrupted()?;
+        Ok(())
+    }
+
+    /// Returns the run last bound to one Pi session.
+    pub fn session_run(&self, session_key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT run_id FROM session_runs WHERE session_key = ?1",
+                [session_key],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Binds a Pi session to a run for future bridge restarts.
+    pub fn bind_session(&mut self, session_key: &str, run_id: &str) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO session_runs(session_key, run_id) VALUES (?1, ?2) ON CONFLICT(session_key) DO UPDATE SET run_id = excluded.run_id",
+            params![session_key, run_id],
+        )?;
+        Ok(())
+    }
+
+    /// Whether this coordinator still owns an unfinished attempt.
+    pub fn has_active_attempts(&self) -> Result<bool, StoreError> {
+        let Some(id) = self.coordinator_id.as_deref() else {
+            return Ok(false);
+        };
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM active_attempt_owners WHERE coordinator_id = ?1)",
+            [id],
+            |row| row.get::<_, i64>(0),
+        )? != 0)
+    }
+
     /// Applies an entire domain boundary atomically. Duplicate identical
     /// event IDs have no effect; conflicting reuse aborts the whole boundary.
     pub fn append_boundary(&mut self, events: &[Event]) -> Result<usize, StoreError> {
+        self.append_with_session(events, None)
+    }
+
+    /// Starts a run and binds its Pi session in the same transaction.
+    pub fn append_boundary_and_bind_session(
+        &mut self,
+        events: &[Event],
+        session_key: &str,
+        run_id: &str,
+    ) -> Result<usize, StoreError> {
+        self.append_with_session(events, Some((session_key, run_id)))
+    }
+
+    fn append_with_session(
+        &mut self,
+        events: &[Event],
+        session: Option<(&str, &str)>,
+    ) -> Result<usize, StoreError> {
         if events.is_empty() {
             return Ok(0);
         }
@@ -159,33 +258,20 @@ impl SqliteEventStore {
                 "boundary spans multiple runs".into(),
             ));
         }
-        let tx = self.connection.transaction()?;
-        let mut inserted = 0;
-        for event in events {
-            let json = serde_json::to_string(event)?;
-            let existing: Option<String> = tx
-                .query_row(
-                    "SELECT event_json FROM events WHERE event_id = ?1",
-                    [&event.event_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(existing) = existing {
-                if existing != json {
-                    return Err(StoreError::EventIdConflict(event.event_id.clone()));
-                }
-                continue;
-            }
-            tx.execute("INSERT INTO events(event_id, run_id, event_type, schema_version, occurred_at_ms, event_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![event.event_id, event.run_id, event.kind.name(), EVENT_SCHEMA_VERSION, sqlite_time(event.occurred_at_ms)?, json])?;
-            inserted += 1;
+        if session.is_some_and(|(_, bound_run_id)| bound_run_id != run_id) {
+            return Err(StoreError::InvalidHistory(
+                "session binding has a different run ID".into(),
+            ));
         }
-        if inserted > 0 {
-            let history = read_events(&tx, run_id)?;
-            let projection = replay(&history)
-                .map_err(StoreError::InvalidHistory)?
-                .ok_or_else(|| StoreError::InvalidHistory("run has no start event".into()))?;
-            materialize(&tx, &projection)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let inserted = append_boundary_in_tx(&tx, events, self.coordinator_id.as_deref(), false)?;
+        if let Some((session_key, run_id)) = session {
+            tx.execute(
+                "INSERT INTO session_runs(session_key, run_id) VALUES (?1, ?2) ON CONFLICT(session_key) DO UPDATE SET run_id = excluded.run_id",
+                params![session_key, run_id],
+            )?;
         }
         tx.commit()?;
         Ok(inserted)
@@ -230,15 +316,15 @@ impl SqliteEventStore {
 
     /// Rebuilds every projection from the log in one transaction.
     pub fn rebuild_all(&mut self) -> Result<(), StoreError> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run_ids = {
-            let mut statement = self
-                .connection
-                .prepare("SELECT DISTINCT run_id FROM events ORDER BY run_id")?;
+            let mut statement = tx.prepare("SELECT DISTINCT run_id FROM events ORDER BY run_id")?;
             statement
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?
         };
-        let tx = self.connection.transaction()?;
         tx.execute("DELETE FROM runs", [])?;
         for run_id in run_ids {
             let history = read_events(&tx, &run_id)?;
@@ -251,13 +337,16 @@ impl SqliteEventStore {
         Ok(())
     }
 
-    /// Emits explicit interruption events for attempts still running after a
-    /// restart. Repeated recovery is idempotent.
+    /// Emits interruption events only for attempts without a live owner.
     pub fn recover_interrupted(&mut self) -> Result<usize, StoreError> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = now_ms()?;
         let pending = {
-            let mut statement = self.connection.prepare("SELECT run_id, attempt_id, started_at_ms FROM attempts WHERE outcome IS NULL ORDER BY run_id, attempt_id")?;
+            let mut statement = tx.prepare("SELECT a.run_id, a.attempt_id, a.started_at_ms FROM attempts a LEFT JOIN active_attempt_owners o ON o.attempt_id = a.attempt_id LEFT JOIN coordinator_leases l ON l.coordinator_id = o.coordinator_id WHERE a.outcome IS NULL AND (o.attempt_id IS NULL OR l.expires_at_ms IS NULL OR l.expires_at_ms <= ?1) ORDER BY a.run_id, a.attempt_id")?;
             statement
-                .query_map([], |row| {
+                .query_map([now], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -266,18 +355,13 @@ impl SqliteEventStore {
                 })?
                 .collect::<Result<Vec<_>, _>>()?
         };
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let now = u64::try_from(now).map_err(|_| StoreError::TimestampOverflow)?;
         let mut by_run: BTreeMap<String, Vec<Event>> = BTreeMap::new();
         for (run_id, attempt_id, started) in pending {
-            let started = u64::try_from(started).map_err(|_| StoreError::TimestampOverflow)?;
             by_run.entry(run_id.clone()).or_default().push(Event {
                 event_id: format!("xper:recovery:{attempt_id}"),
                 run_id,
-                occurred_at_ms: now.max(started),
+                occurred_at_ms: u64::try_from(now.max(started))
+                    .map_err(|_| StoreError::TimestampOverflow)?,
                 kind: EventKind::AttemptFinished {
                     attempt_id,
                     outcome: WorkOutcome::Interrupted,
@@ -286,8 +370,9 @@ impl SqliteEventStore {
         }
         let mut total = 0;
         for events in by_run.values() {
-            total += self.append_boundary(events)?;
+            total += append_boundary_in_tx(&tx, events, None, true)?;
         }
+        tx.commit()?;
         Ok(total)
     }
 
@@ -301,7 +386,9 @@ impl SqliteEventStore {
     }
 
     fn migrate(&mut self) -> Result<(), StoreError> {
-        let tx = self.connection.transaction()?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);")?;
         let version: i64 = tx.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
@@ -323,6 +410,110 @@ impl SqliteEventStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+impl Drop for SqliteEventStore {
+    fn drop(&mut self) {
+        if let Some(id) = self.coordinator_id.as_deref() {
+            let _ = self.connection.execute(
+                "DELETE FROM coordinator_leases WHERE coordinator_id = ?1",
+                [id],
+            );
+        }
+    }
+}
+
+fn fresh_coordinator_id() -> String {
+    format!(
+        "{}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        NEXT_COORDINATOR.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn now_ms() -> Result<i64, StoreError> {
+    sqlite_time(
+        u64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        )
+        .map_err(|_| StoreError::TimestampOverflow)?,
+    )
+}
+
+fn append_boundary_in_tx(
+    tx: &Transaction<'_>,
+    events: &[Event],
+    coordinator_id: Option<&str>,
+    recovery: bool,
+) -> Result<usize, StoreError> {
+    let run_id = &events[0].run_id;
+    let mut inserted = 0;
+    for event in events {
+        let json = serde_json::to_string(event)?;
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT event_json FROM events WHERE event_id = ?1",
+                [&event.event_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing != json {
+                return Err(StoreError::EventIdConflict(event.event_id.clone()));
+            }
+            continue;
+        }
+        match &event.kind {
+            EventKind::AttemptStarted {
+                attempt_id,
+                assignment_id,
+            } => {
+                let owner = coordinator_id.ok_or_else(|| {
+                    StoreError::InvalidHistory("attempt start requires a coordinator".into())
+                })?;
+                tx.execute(
+                    "INSERT INTO active_attempt_owners(attempt_id, assignment_id, coordinator_id) VALUES (?1, ?2, ?3)",
+                    params![attempt_id, assignment_id, owner],
+                )?;
+            }
+            EventKind::AttemptFinished { attempt_id, .. } => {
+                if !recovery {
+                    let owner: Option<String> = tx.query_row(
+                        "SELECT coordinator_id FROM active_attempt_owners WHERE attempt_id = ?1",
+                        [attempt_id], |row| row.get(0)
+                    ).optional()?;
+                    if owner.as_deref() != coordinator_id {
+                        return Err(StoreError::InvalidHistory(
+                            "attempt belongs to another coordinator or was interrupted".into(),
+                        ));
+                    }
+                }
+                tx.execute(
+                    "DELETE FROM active_attempt_owners WHERE attempt_id = ?1",
+                    [attempt_id],
+                )?;
+            }
+            _ => {}
+        }
+        tx.execute("INSERT INTO events(event_id, run_id, event_type, schema_version, occurred_at_ms, event_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![event.event_id, event.run_id, event.kind.name(), EVENT_SCHEMA_VERSION, sqlite_time(event.occurred_at_ms)?, json])?;
+        inserted += 1;
+    }
+    if inserted > 0 {
+        let history = read_events(tx, run_id)?;
+        let projection = replay(&history)
+            .map_err(StoreError::InvalidHistory)?
+            .ok_or_else(|| StoreError::InvalidHistory("run has no start event".into()))?;
+        materialize(tx, &projection)?;
+    }
+    Ok(inserted)
 }
 
 impl EventStore for SqliteEventStore {

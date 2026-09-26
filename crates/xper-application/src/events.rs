@@ -488,6 +488,16 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 );
             }
             EventKind::GatePassed { visit_id, gate_id } => {
+                if state
+                    .visits
+                    .last()
+                    .is_some_and(|visit| visit.phase == "discovery")
+                    && state.assignments.values().any(|assignment| {
+                        assignment.visit_id == *visit_id && assignment.outcome.is_none()
+                    })
+                {
+                    return Err("Discovery assignments are still running".into());
+                }
                 let gate = state
                     .gates
                     .get_mut(gate_id)
@@ -506,7 +516,10 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 if assignment_id.trim().is_empty()
                     || role.trim().is_empty()
                     || state.assignments.contains_key(assignment_id)
-                    || !state.visits.iter().any(|v| v.visit_id == *visit_id)
+                    || !state
+                        .visits
+                        .last()
+                        .is_some_and(|v| v.visit_id == *visit_id && v.exited_at_ms.is_none())
                 {
                     return Err("invalid assignment".into());
                 }

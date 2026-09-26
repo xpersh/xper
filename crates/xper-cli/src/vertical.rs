@@ -87,6 +87,7 @@ pub struct WorkspaceRun {
     root: PathBuf,
     store: SqliteEventStore,
     metadata: AdapterMetadata,
+    session_id: String,
     run_id: Option<String>,
 }
 
@@ -97,12 +98,13 @@ impl WorkspaceRun {
         adapter: &str,
         version: &str,
         capabilities: BTreeMap<String, bool>,
+        session_id: &str,
     ) -> io::Result<Self> {
         let directory = root.join(".xper");
         fs::create_dir_all(&directory)?;
         let store =
             SqliteEventStore::open_or_volatile(directory.join("events.sqlite")).map_err(storage)?;
-        let run_id = store.latest_run().map_err(storage)?.map(|run| run.run_id);
+        let run_id = store.session_run(session_id).map_err(storage)?;
         Ok(Self {
             root: root.to_path_buf(),
             store,
@@ -111,8 +113,38 @@ impl WorkspaceRun {
                 version: version.into(),
                 capabilities,
             },
+            session_id: session_id.into(),
             run_id,
         })
+    }
+
+    /// Keeps this bridge's active attempts owned while it is connected.
+    pub fn heartbeat(&mut self) -> io::Result<()> {
+        self.store.heartbeat().map_err(storage)
+    }
+
+    /// Explicitly shares an existing active run with this Pi session.
+    pub fn join(&mut self, run_id: &str) -> io::Result<Value> {
+        if self.store.has_active_attempts().map_err(storage)? {
+            return Err(invalid(
+                "finish running attempts before joining another run",
+            ));
+        }
+        let run = self
+            .store
+            .load_run(run_id)
+            .map_err(storage)?
+            .ok_or_else(|| invalid("unknown run ID"))?;
+        if run.status != RunStatus::Active {
+            return Err(invalid("run is not active"));
+        }
+        self.store
+            .bind_session(&self.session_id, run_id)
+            .map_err(storage)?;
+        self.run_id = Some(run_id.into());
+        Ok(
+            json!({"runId":run_id,"phase":run.visits.last().map(|v| v.phase.as_str()),"joined":true}),
+        )
     }
 
     fn current(&self) -> io::Result<Option<RunProjection>> {
@@ -165,13 +197,15 @@ impl WorkspaceRun {
             .iter()
             .map(|item| Event::from_domain(item, &self.metadata))
             .collect();
-        self.commit(&events)?;
         let run_id = run.id().as_str().to_owned();
+        self.store
+            .append_boundary_and_bind_session(&events, &self.session_id, &run_id)
+            .map_err(storage)?;
         self.run_id = Some(run_id.clone());
         Ok(json!({"runId":run_id,"phase":"discovery","resumed":false}))
     }
     /// Starts one Discovery assignment and its attempt, returning xper IDs.
-    pub fn delegate(&mut self) -> io::Result<Value> {
+    pub fn delegate(&mut self, retry_assignment_id: Option<&str>) -> io::Result<Value> {
         let run = self.active()?;
         let visit = run
             .visits
@@ -180,15 +214,22 @@ impl WorkspaceRun {
         if visit.phase != "discovery" {
             return Err(invalid("Discovery is not active"));
         }
-        let pending = run.assignments.values().find(|assignment| {
-            assignment.visit_id == visit.visit_id && assignment.outcome.is_none()
-        });
+        let pending = retry_assignment_id
+            .map(|id| {
+                run.assignments
+                    .get(id)
+                    .filter(|assignment| {
+                        assignment.visit_id == visit.visit_id && assignment.outcome.is_none()
+                    })
+                    .ok_or_else(|| invalid("assignment is not pending in this Discovery visit"))
+            })
+            .transpose()?;
         if let Some(assignment) = pending
             && run.attempts.values().any(|attempt| {
                 attempt.assignment_id == assignment.assignment_id && attempt.outcome.is_none()
             })
         {
-            return Err(invalid("Discovery assignment already in progress"));
+            return Err(invalid("assignment already has a running attempt"));
         }
         let assignment_id = pending.map_or_else(
             || fresh_id("assignment"),
@@ -307,9 +348,14 @@ impl WorkspaceRun {
         );
         if !valid {
             self.commit(&[evaluation])?;
-            return Ok(
-                json!({"advanced":false,"phase":"discovery","reason":"Discovery Brief from a successful explorer assignment is required"}),
-            );
+            let reason = if run.assignments.values().any(|assignment| {
+                assignment.visit_id == visit.visit_id && assignment.outcome.is_none()
+            }) {
+                "Discovery assignments are still running"
+            } else {
+                "Discovery Brief from a successful explorer assignment is required"
+            };
+            return Ok(json!({"advanced":false,"phase":"discovery","reason":reason}));
         }
         let target_visit = fresh_id("visit");
         self.commit(&[
@@ -354,14 +400,24 @@ impl WorkspaceRun {
     }
 }
 
-/// Reads the latest run in the current project for `xper status`.
-pub fn cli_status(root: &Path) -> io::Result<Value> {
+/// Reads one run, or the latest run in the project, for `xper status`.
+pub fn cli_status(root: &Path, run_id: Option<&str>) -> io::Result<Value> {
     let path = root.join(".xper/events.sqlite");
     if !path.exists() {
+        if run_id.is_some() {
+            return Err(invalid("unknown run ID"));
+        }
         return Ok(json!({"run":null,"timeline":[]}));
     }
     let store = SqliteEventStore::inspect(path).map_err(storage)?;
-    let Some(run) = store.latest_run().map_err(storage)? else {
+    let run = match run_id {
+        Some(id) => store.load_run(id).map_err(storage)?,
+        None => store.latest_run().map_err(storage)?,
+    };
+    let Some(run) = run else {
+        if run_id.is_some() {
+            return Err(invalid("unknown run ID"));
+        }
         return Ok(json!({"run":null,"timeline":[]}));
     };
     let timeline = store.load_events(&run.run_id).map_err(storage)?;

@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use xper_protocol::{FrameRead, Message, RpcError, code};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 type Incoming = Result<FrameRead, io::Error>;
 
@@ -57,6 +58,9 @@ enum Commands {
         /// Emit the full JSON projection and timeline.
         #[arg(long)]
         json: bool,
+        /// Inspect a specific run when several sessions share the project.
+        #[arg(long)]
+        run: Option<String>,
     },
 }
 
@@ -66,8 +70,9 @@ fn main() -> ExitCode {
         Commands::Bridge { stdio: false } => unreachable!("clap requires --stdio"),
         Commands::Doctor { json } => setup::doctor(json),
         Commands::Init { global, yes } => setup::init(global, yes),
-        Commands::Status { json } => {
-            let result = std::env::current_dir().and_then(|cwd| vertical::cli_status(&cwd));
+        Commands::Status { json, run } => {
+            let result =
+                std::env::current_dir().and_then(|cwd| vertical::cli_status(&cwd, run.as_deref()));
             result.and_then(|status| {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&status)?);
@@ -356,6 +361,7 @@ impl BridgeState {
                         self.adapter_name.as_deref().unwrap_or("unknown"),
                         self.adapter_version.as_deref().unwrap_or("unknown"),
                         capabilities,
+                        session_id,
                     ) {
                         Ok(workflow) => self.workflow = Some(workflow),
                         Err(error) => {
@@ -408,7 +414,8 @@ impl BridgeState {
                     invalid_params(writer, id)?;
                 }
             }
-            "run.start" | "run.status" | "assignment.start" | "attempt.finish" | "run.advance" => {
+            "run.start" | "run.join" | "run.status" | "assignment.start" | "attempt.finish"
+            | "run.advance" => {
                 let Some(workflow) = self.workflow.as_mut() else {
                     invalid_params(writer, id)?;
                     return Ok(true);
@@ -422,8 +429,26 @@ impl BridgeState {
                             io::Error::new(io::ErrorKind::InvalidInput, "objective required")
                         })
                         .and_then(|objective| workflow.start(objective)),
+                    "run.join" => params
+                        .get("runId")
+                        .and_then(Value::as_str)
+                        .filter(|v| !v.trim().is_empty())
+                        .ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::InvalidInput, "runId required")
+                        })
+                        .and_then(|run_id| workflow.join(run_id)),
                     "run.status" if empty_params(params) => workflow.status(),
-                    "assignment.start" if empty_params(params) => workflow.delegate(),
+                    "assignment.start" if empty_params(params) => workflow.delegate(None),
+                    "assignment.start" if params.as_object().is_some_and(|map| map.len() == 1) => {
+                        params
+                            .get("assignmentId")
+                            .and_then(Value::as_str)
+                            .filter(|v| !v.is_empty())
+                            .ok_or_else(|| {
+                                io::Error::new(io::ErrorKind::InvalidInput, "assignmentId required")
+                            })
+                            .and_then(|id| workflow.delegate(Some(id)))
+                    }
                     "attempt.finish" => workflow.settle(params),
                     "run.advance" if empty_params(params) => workflow.advance(),
                     _ => Err(io::Error::new(
@@ -464,22 +489,36 @@ fn run_bridge() -> io::Result<()> {
     let mut writer = stdout.lock();
     let mut state = BridgeState::new();
     loop {
-        let incoming = match state.deadline() {
-            Some(deadline) => receiver
-                .recv_timeout(deadline)
-                .map_err(|error| match error {
-                    mpsc::RecvTimeoutError::Timeout => io::Error::new(
+        let wait = state.deadline().map_or(HEARTBEAT_INTERVAL, |deadline| {
+            deadline.min(HEARTBEAT_INTERVAL)
+        });
+        let incoming = match receiver.recv_timeout(wait) {
+            Ok(incoming) => incoming?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if state
+                    .deadline()
+                    .is_some_and(|remaining| remaining.is_zero())
+                {
+                    return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
                         "adapter capabilities request timed out",
-                    ),
-                    mpsc::RecvTimeoutError::Disconnected => {
-                        io::Error::new(io::ErrorKind::UnexpectedEof, "stdin reader stopped")
-                    }
-                })?,
-            None => receiver.recv().map_err(|_| {
-                io::Error::new(io::ErrorKind::UnexpectedEof, "stdin reader stopped")
-            })?,
-        }?;
+                    ));
+                }
+                if let Some(workflow) = state.workflow.as_mut() {
+                    workflow.heartbeat()?;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "stdin reader stopped",
+                ));
+            }
+        };
+        if let Some(workflow) = state.workflow.as_mut() {
+            workflow.heartbeat()?;
+        }
         match incoming {
             FrameRead::Eof => return Ok(()),
             FrameRead::TooLarge => reject(

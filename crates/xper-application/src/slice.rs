@@ -16,6 +16,13 @@ pub fn discovery_ready(
     else {
         return false;
     };
+    if run
+        .assignments
+        .values()
+        .any(|assignment| assignment.visit_id == visit.visit_id && assignment.outcome.is_none())
+    {
+        return false;
+    }
     run.artifacts.values().any(|artifact| {
         artifact.kind == "discovery_brief"
             && artifact.version > 0

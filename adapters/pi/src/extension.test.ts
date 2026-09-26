@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -22,7 +30,7 @@ function fakePi(cwd = workspace) {
     | {
         execute: (
           id: string,
-          params: { task: string; timeoutSeconds?: number },
+          params: { task: string; timeoutSeconds?: number; assignmentId?: string },
           signal: AbortSignal,
           onUpdate: unknown,
           ctx: unknown,
@@ -73,7 +81,7 @@ function fakePi(cwd = workspace) {
       return messages.at(-1) ?? "";
     },
     async delegate(
-      params: { task: string; timeoutSeconds?: number },
+      params: { task: string; timeoutSeconds?: number; assignmentId?: string },
       signal = new AbortController().signal,
     ) {
       assert(tool);
@@ -414,6 +422,12 @@ test("bridge crash interrupts an attempt and permits retry on the same assignmen
     );
     first.client.close();
     await closed;
+    // Advance the dead bridge's lease without waiting for the real 30-second timeout.
+    execFileSync("python3", [
+      "-c",
+      "import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute('UPDATE coordinator_leases SET expires_at_ms=0'); db.commit()",
+      join(directory, ".xper", "events.sqlite"),
+    ]);
     const second = await connectBridge(manifest, { command: binary });
     try {
       await second.client.request("session.attach", {
@@ -424,7 +438,9 @@ test("bridge crash interrupts an attempt and permits retry on the same assignmen
       const recovered = await second.client.request("run.status");
       const projection = recovered.run as { attempts: Record<string, { outcome: string }> };
       assert.equal(projection.attempts[assigned.attemptId as string]?.outcome, "interrupted");
-      const retry = await second.client.request("assignment.start");
+      const retry = await second.client.request("assignment.start", {
+        assignmentId: assigned.assignmentId,
+      });
       assert.equal(retry.assignmentId, assigned.assignmentId);
       assert.notEqual(retry.attemptId, assigned.attemptId);
       await second.client.request("attempt.finish", {
@@ -440,6 +456,81 @@ test("bridge crash interrupts an attempt and permits retry on the same assignmen
       await second.client.shutdown();
     }
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("two Pi sessions run independently and can delegate together after joining", async () => {
+  execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
+  const directory = mkdtempSync(join(tmpdir(), "xper-concurrent-"));
+  const manifest = { adapter: "pi", adapterVersion: "0.1.0", capabilities: { subagents: true } };
+  const first = await connectBridge(manifest, { command: binary });
+  const second = await connectBridge(manifest, { command: binary });
+  try {
+    await Promise.all([
+      first.client.request("session.attach", {
+        sessionId: "parallel-1",
+        cwd: directory,
+        mode: "rpc",
+      }),
+      second.client.request("session.attach", {
+        sessionId: "parallel-2",
+        cwd: directory,
+        mode: "rpc",
+      }),
+    ]);
+    const [one, two] = await Promise.all([
+      first.client.request("run.start", { objective: "first" }),
+      second.client.request("run.start", { objective: "second" }),
+    ]);
+    assert.notEqual(one.runId, two.runId);
+    const [statusOne, statusTwo] = await Promise.all([
+      first.client.request("run.status"),
+      second.client.request("run.status"),
+    ]);
+    assert.equal((statusOne.run as { run_id: string }).run_id, one.runId);
+    assert.equal((statusTwo.run as { run_id: string }).run_id, two.runId);
+    const inspected = JSON.parse(
+      execFileSync(binary, ["status", "--json", "--run", one.runId as string], {
+        cwd: directory,
+        encoding: "utf8",
+      }),
+    ) as { run: { run_id: string } };
+    assert.equal(inspected.run.run_id, one.runId);
+
+    await second.client.request("run.join", { runId: one.runId });
+    const [assignmentOne, assignmentTwo] = await Promise.all([
+      first.client.request("assignment.start"),
+      second.client.request("assignment.start"),
+    ]);
+    assert.notEqual(assignmentOne.assignmentId, assignmentTwo.assignmentId);
+    assert.notEqual(assignmentOne.attemptId, assignmentTwo.attemptId);
+    const artifacts = join(directory, ".xper", "artifacts");
+    mkdirSync(artifacts, { recursive: true });
+    const brief = `.xper/artifacts/discovery-brief-${assignmentOne.attemptId}.md`;
+    writeFileSync(join(directory, brief), "Discovery evidence");
+    await first.client.request("attempt.finish", {
+      attemptId: assignmentOne.attemptId,
+      outcome: "succeeded",
+      artifactPath: brief,
+    });
+    const waiting = await first.client.request("run.advance");
+    assert.equal(waiting.advanced, false);
+    assert.match(waiting.reason as string, /still running/);
+    await second.client.request("attempt.finish", {
+      attemptId: assignmentTwo.attemptId,
+      outcome: "failed",
+    });
+    const advanced = await second.client.request("run.advance");
+    assert.equal(advanced.advanced, true);
+    const shared = await first.client.request("run.status");
+    assert.equal(
+      (shared.run as { visits: Array<{ phase: string }> }).visits.at(-1)?.phase,
+      "define",
+    );
+    assert.equal(Object.keys((shared.run as { attempts: object }).attempts).length, 2);
+  } finally {
+    await Promise.allSettled([first.client.shutdown(), second.client.shutdown()]);
     rmSync(directory, { recursive: true, force: true });
   }
 });

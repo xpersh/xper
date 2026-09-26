@@ -4,6 +4,7 @@ use std::{
     collections::BTreeMap,
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,6 +15,8 @@ use xper_domain::{
     TransitionRequest,
 };
 use xper_store_sqlite::{Durability, SqliteEventStore, StoreError};
+
+static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 struct ClockAt(u64);
 impl Clock for ClockAt {
@@ -70,7 +73,11 @@ fn temp_db() -> (PathBuf, PathBuf) {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("xper-store-{}-{stamp}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "xper-store-{}-{stamp}-{}",
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
     fs::create_dir(&dir).unwrap();
     let db = dir.join("events.sqlite");
     (dir, db)
@@ -204,7 +211,7 @@ fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
     let (dir, path) = temp_db();
     {
         let mut store = SqliteEventStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 1);
+        assert_eq!(store.schema_version().unwrap(), 2);
         assert_eq!(store.append_boundary(&started()).unwrap(), 2);
         let work = [
             event(
@@ -260,12 +267,22 @@ fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
         store
             .append_boundary(&[
                 event(
+                    "e9",
+                    "r1",
+                    125,
+                    EventKind::AssignmentCreated {
+                        assignment_id: "a2".into(),
+                        visit_id: "v1".into(),
+                        role: "implementation.driver".into(),
+                    },
+                ),
+                event(
                     "e7",
                     "r1",
                     125,
                     EventKind::AttemptStarted {
                         attempt_id: "t2".into(),
-                        assignment_id: "a1".into(),
+                        assignment_id: "a2".into(),
                     },
                 ),
                 event(
@@ -304,7 +321,7 @@ fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
     let count: i64 = connection
         .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 7);
+    assert_eq!(count, 8);
     let pi_tables: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE '%pi%'",
@@ -337,6 +354,129 @@ fn conflicting_event_identity_does_not_change_state() {
         Err(StoreError::EventIdConflict(_))
     ));
     assert_eq!(store.load_run("r1").unwrap(), original);
+}
+
+#[test]
+fn a_second_live_connection_does_not_interrupt_the_first_connections_attempt() {
+    let (dir, path) = temp_db();
+    let mut first = SqliteEventStore::open(&path).unwrap();
+    first.append_boundary(&started()).unwrap();
+    first
+        .append_boundary(&[
+            event(
+                "e3",
+                "r1",
+                110,
+                EventKind::AssignmentCreated {
+                    assignment_id: "a1".into(),
+                    visit_id: "v1".into(),
+                    role: "discovery.explorer".into(),
+                },
+            ),
+            event(
+                "e4",
+                "r1",
+                120,
+                EventKind::AttemptStarted {
+                    attempt_id: "t1".into(),
+                    assignment_id: "a1".into(),
+                },
+            ),
+        ])
+        .unwrap();
+    let mut second = SqliteEventStore::open(&path).unwrap();
+    assert_eq!(
+        first.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
+        None
+    );
+    assert_eq!(
+        second.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
+        None
+    );
+    assert!(matches!(
+        second.append_boundary(&[event(
+            "foreign-finish",
+            "r1",
+            130,
+            EventKind::AttemptFinished {
+                attempt_id: "t1".into(),
+                outcome: WorkOutcome::Succeeded
+            }
+        )]),
+        Err(StoreError::InvalidHistory(_))
+    ));
+    assert_eq!(
+        first.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
+        None
+    );
+    first
+        .append_boundary(&[event(
+            "owner-finish",
+            "r1",
+            130,
+            EventKind::AttemptFinished {
+                attempt_id: "t1".into(),
+                outcome: WorkOutcome::Succeeded,
+            },
+        )])
+        .unwrap();
+    assert_eq!(
+        second.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
+        Some(WorkOutcome::Succeeded)
+    );
+    drop(second);
+    drop(first);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn version_one_database_migrates_and_recovers_legacy_attempts() {
+    let (dir, path) = temp_db();
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO schema_migrations(version) VALUES (1);").unwrap();
+    connection
+        .execute_batch(include_str!("../migrations/0001_initial.sql"))
+        .unwrap();
+    let mut history = started();
+    history.push(event(
+        "e3",
+        "r1",
+        110,
+        EventKind::AssignmentCreated {
+            assignment_id: "a1".into(),
+            visit_id: "v1".into(),
+            role: "discovery.explorer".into(),
+        },
+    ));
+    history.push(event(
+        "e4",
+        "r1",
+        120,
+        EventKind::AttemptStarted {
+            attempt_id: "t1".into(),
+            assignment_id: "a1".into(),
+        },
+    ));
+    for item in history {
+        connection.execute(
+            "INSERT INTO events(event_id, run_id, event_type, schema_version, occurred_at_ms, event_json) VALUES (?1, ?2, ?3, 1, ?4, ?5)",
+            rusqlite::params![item.event_id, item.run_id, item.kind.name(), i64::try_from(item.occurred_at_ms).unwrap(), serde_json::to_string(&item).unwrap()],
+        ).unwrap();
+    }
+    drop(connection);
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    assert_eq!(store.schema_version().unwrap(), 2);
+    assert_eq!(
+        store.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
+        Some(WorkOutcome::Interrupted)
+    );
+    store.bind_session("session-1", "r1").unwrap();
+    assert_eq!(
+        store.session_run("session-1").unwrap().as_deref(),
+        Some("r1")
+    );
+    drop(store);
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -52,7 +52,15 @@
           "then": { "properties": { "params": { "$ref": "#/$defs/runStartParams" } } }
         },
         {
-          "if": { "properties": { "method": { "enum": ["run.status", "assignment.start", "run.advance"] } } },
+          "if": { "properties": { "method": { "const": "run.join" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/runJoinParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "assignment.start" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/assignmentStartParams" } } }
+        },
+        {
+          "if": { "properties": { "method": { "enum": ["run.status", "run.advance"] } } },
           "then": { "properties": { "params": { "maxProperties": 0 } } }
         },
         {
@@ -147,6 +155,17 @@
       "type": "object",
       "required": ["objective"],
       "properties": { "objective": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "runJoinParams": {
+      "type": "object",
+      "required": ["runId"],
+      "properties": { "runId": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "assignmentStartParams": {
+      "type": "object",
+      "properties": { "assignmentId": { "type": "string", "minLength": 1 } },
       "additionalProperties": false
     },
     "attemptFinishParams": {

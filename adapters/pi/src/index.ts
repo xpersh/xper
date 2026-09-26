@@ -5,9 +5,9 @@ export const adapterPackage = {
   protocolBoundary: "public",
 } as const;
 
-export { BridgeClient, connectBridge } from "./bridge.js";
+export { BridgeClient, connectBridge } from "./bridge/client.js";
 export { createXperExtension } from "./extension.js";
-export type { AdapterManifest, BridgeHandshake, BridgeOptions } from "./bridge.js";
+export type { AdapterManifest, BridgeHandshake, BridgeOptions } from "./bridge/client.js";
 export {
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
@@ -16,11 +16,11 @@ export {
   decodeMessage,
   encodeFrame,
   errorCode,
-} from "./protocol.js";
+} from "./bridge/protocol.js";
 export type {
   RpcError,
   RpcFailureMessage,
   RpcMessage,
   RpcRequest,
   RpcSuccess,
-} from "./protocol.js";
+} from "./bridge/protocol.js";

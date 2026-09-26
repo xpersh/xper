@@ -14,11 +14,11 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createXperExtension, isPiToolError } from "./extension.js";
-import { connectBridge } from "./bridge.js";
-import { PiObservations } from "./observations.js";
+import { createXperExtension, isPiToolError } from "../extension.js";
+import { connectBridge } from "../bridge/client.js";
+import { PiObservations } from "../pi/observations.js";
 
-const workspace = fileURLToPath(new URL("../../..", import.meta.url));
+const workspace = fileURLToPath(new URL("../../../..", import.meta.url));
 const binary = resolve(workspace, "target/debug/xper");
 
 function fakePi(cwd = workspace) {

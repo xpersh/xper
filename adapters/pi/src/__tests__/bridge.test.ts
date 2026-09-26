@@ -6,10 +6,10 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { connectBridge } from "./bridge.js";
-import { ProtocolFailure, errorCode } from "./protocol.js";
+import { connectBridge } from "../bridge/client.js";
+import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
 
-const workspace = fileURLToPath(new URL("../../..", import.meta.url));
+const workspace = fileURLToPath(new URL("../../../..", import.meta.url));
 const binary = resolve(workspace, "target/debug/xper");
 const manifest = {
   adapter: "pi",

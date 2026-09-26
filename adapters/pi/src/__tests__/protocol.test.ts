@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { ProtocolFailure, decodeFrame, decodeMessage, encodeFrame, errorCode } from "./protocol.js";
+import {
+  ProtocolFailure,
+  decodeFrame,
+  decodeMessage,
+  encodeFrame,
+  errorCode,
+} from "../bridge/protocol.js";
 
 interface Fixture {
   name: string;
@@ -11,7 +17,7 @@ interface Fixture {
 }
 
 const fixtures = JSON.parse(
-  readFileSync(new URL("../../../fixtures/protocol-v1.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../../fixtures/protocol-v1.json", import.meta.url), "utf8"),
 ) as Fixture[];
 
 for (const fixture of fixtures) {

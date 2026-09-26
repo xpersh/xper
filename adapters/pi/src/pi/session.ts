@@ -4,6 +4,7 @@ import {
   type BridgeHandshake,
   type BridgeOptions,
 } from "../bridge/client.js";
+import { XperClient, type RunStatus } from "../bridge/xper-client.js";
 import { PiObservations } from "./observations.js";
 import type { PiContext } from "./types.js";
 import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
@@ -14,6 +15,7 @@ const STATUS_KEY = "xper";
 
 export interface ActiveBridge {
   client: BridgeClient;
+  workflow: XperClient;
   handshake: BridgeHandshake;
   sessionId: string;
 }
@@ -53,7 +55,7 @@ export class XperSession {
   private stopping = false;
   private lastError: string | undefined;
   private observations: PiObservations | undefined;
-  private lastRun: Record<string, unknown> | undefined;
+  private lastRun: RunStatus | undefined;
   private readonly observationsFile: string | undefined;
   private readonly bridgeOptions: BridgeOptions;
 
@@ -76,25 +78,15 @@ export class XperSession {
   }
 
   phaseSummary(): string {
-    const run = this.lastRun?.run as
-      | {
-          run_id?: string;
-          visits?: Array<{ phase: string }>;
-          attempts?: Record<string, { outcome?: string }>;
-          artifacts?: Record<string, unknown>;
-        }
-      | null
-      | undefined;
+    const run = this.lastRun?.run;
     if (!run) return "; no run";
-    const phase = run.visits?.at(-1)?.phase ?? "?";
-    const outcomes = Object.values(run.attempts ?? {}).map(
-      (attempt) => attempt.outcome ?? "running",
-    );
-    return `; run ${run.run_id ?? "?"}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; briefs ${Object.keys(run.artifacts ?? {}).length}`;
+    const phase = run.visits.at(-1)?.phase ?? "?";
+    const outcomes = Object.values(run.attempts).map((attempt) => attempt.outcome ?? "running");
+    return `; run ${run.run_id}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; briefs ${Object.keys(run.artifacts).length}`;
   }
 
   async refreshRun(): Promise<void> {
-    if (this.active) this.lastRun = await this.active.client.request("run.status");
+    if (this.active) this.lastRun = await this.active.workflow.getRunStatus();
   }
 
   private showStatus(ctx: PiContext): void {
@@ -151,7 +143,12 @@ export class XperSession {
           await client.shutdown();
           return;
         }
-        this.active = { client, handshake: connected.handshake, sessionId };
+        this.active = {
+          client,
+          workflow: new XperClient(client),
+          handshake: connected.handshake,
+          sessionId,
+        };
         await this.refreshRun();
         this.observations?.record("bridge.connected", {
           bridgeVersion: connected.handshake.bridgeVersion,

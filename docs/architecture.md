@@ -122,13 +122,54 @@ primera vertical. Esta refactorización no añade rehidratación de la entidad
 Al ampliar el workflow habrá que resolver esa integración con el kernel y
 evitar mantener dos conjuntos independientes de reglas de transición.
 
+## Organización de la extensión Pi
+
+La extensión tiene acciones de integración pequeñas. Las reglas de gates y
+transiciones siguen en los casos de uso del core Rust.
+
+```text
+extension.ts                         compone las dependencias
+pi/xper-command.ts                   traduce /xper y presenta resultados
+pi/xper-delegate.ts                  registra la tool y presenta su resultado
+  → actions/delegate-discovery.ts    coordina una delegación local
+      → bridge/xper-client.ts        invoca operaciones tipadas de xper
+      → discovery/delegate.ts        ejecuta Pi y normaliza su resultado
+      → discovery/artifacts.ts       guarda el Brief sin sobrescribirlo
+```
+
+`delegateDiscovery` recibe funciones de ejecución y escritura, un cliente de
+workflow y un callback opcional de observaciones. Se puede probar sin procesos,
+archivos ni API de Pi. Crea el assignment mediante el core, ejecuta el agente,
+guarda la evidencia y comunica el resultado. Tras un éxito solicita el avance y
+devuelve la fase indicada por el core, incluido un gate bloqueado.
+
+Los fallos locales de ejecución o escritura producen un resultado fallido; una
+cancelación se conserva como tal. Un Brief vacío no produce un éxito y la ruta
+del artefacto sólo se devuelve después de guardarlo. Si falla el bridge al
+registrar el resultado o avanzar, el error se propaga sin inventar otro
+resultado ni reintentar una mutación cuyo commit podría haberse realizado.
+
+`XperClient` ofrece `startRun`, `startAssignment`, `finishAttempt`, `advanceRun`
+y `getRunStatus`. Valida las respuestas y las correlaciones de assignment y
+attempt antes de entregarlas al consumidor; conserva los errores RPC originales.
+Los campos adicionales se admiten para permitir evolución compatible. En el
+estado sólo se tipan y validan los campos de proyección que utiliza la extensión;
+la timeline permanece opaca y no se reconstruyen reglas del dominio en TypeScript.
+
+`BridgeClient` conserva el transporte JSONL y el handshake. `XperSession` conserva
+la conexión, el lifecycle y el último estado tipado. Las acciones no importan
+implementaciones de procesos, archivos ni registros de Pi. No necesitan un
+contenedor de servicios ni una segunda jerarquía de dominio/aplicación.
+
 ## Verificación
 
 `npm run check` ejecuta formato, lint, límites arquitectónicos, typecheck y tests.
 Las reglas de `scripts/check-boundaries.mjs` comprueban las dependencias entre
 crates y detectan I/O o transporte JSON/RPC dentro de aplicación, construcción
 de eventos de workflow desde el CLI e imports de implementaciones fuera de la
-composición o infraestructura. Son comprobaciones estáticas de convenciones,
+composición o infraestructura. En la extensión comprueban que las acciones
+reciban sus dependencias de I/O y que las operaciones de workflow se invoquen
+mediante el cliente tipado. Son comprobaciones estáticas de convenciones,
 no un análisis completo de Rust.
 
 Los tests de aplicación no arrancan SQLite, procesos ni Pi. Los tests de SQLite

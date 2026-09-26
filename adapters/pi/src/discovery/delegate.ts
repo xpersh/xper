@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
+import type { DiscoveryExecutionResult } from "../actions/delegate-discovery.js";
+import type { AttemptOutcome } from "../bridge/xper-client.js";
 
-export type DelegateOutcome = "succeeded" | "failed" | "cancelled" | "timed_out";
-export interface DelegateResult {
-  outcome: DelegateOutcome;
-  brief?: string;
-}
+export type DelegateOutcome = AttemptOutcome;
+export type DelegateResult = DiscoveryExecutionResult;
 
 /** The first supported xper role is resolved inside the adapter, never in the core. */
 export function resolveAgent(role: string): { name: string; systemPrompt: string } {
@@ -50,7 +49,7 @@ export function runDiscovery(
   );
   const timeoutMs = options.timeoutMs ?? 120_000;
   return new Promise((resolve) => {
-    let outcome: DelegateOutcome | undefined;
+    let outcome: Exclude<DelegateOutcome, "succeeded"> | undefined;
     let brief = "";
     let buffer = "";
     let settled = false;

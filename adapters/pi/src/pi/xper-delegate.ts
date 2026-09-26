@@ -1,10 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { resolveAgent, runDiscovery } from "../discovery/delegate.js";
+import { delegateDiscovery, type DiscoveryDependencies } from "../actions/delegate-discovery.js";
 import type { PiExtensionAPI } from "./types.js";
 import type { XperSession } from "./session.js";
 
-export function registerXperDelegate(pi: PiExtensionAPI, session: XperSession): void {
+export function registerXperDelegate(
+  pi: PiExtensionAPI,
+  session: XperSession,
+  execution: Pick<DiscoveryDependencies, "execute" | "saveBrief">,
+): void {
   pi.registerTool({
     name: "xper_delegate",
     label: "Xper Discovery explorer",
@@ -25,55 +27,30 @@ export function registerXperDelegate(pi: PiExtensionAPI, session: XperSession): 
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const connection = session.connection;
       if (!connection) throw new Error(session.error ?? "xper bridge offline");
-      if (!params.task?.trim()) throw new Error("Discovery task is required");
-      const timeoutSeconds = params.timeoutSeconds ?? 120;
-      if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 600) {
-        throw new Error("timeoutSeconds must be between 1 and 600");
-      }
-      const started = await connection.client.request(
-        "assignment.start",
-        params.assignmentId ? { assignmentId: params.assignmentId } : {},
-      );
-      const attemptId = started.attemptId as string;
-      session.observation?.record("attempt.correlated", { toolCallId, attemptId });
-      let outcome: "succeeded" | "failed" | "cancelled" | "timed_out" = "failed";
-      let relative: string | undefined;
-      try {
-        const agent = resolveAgent(started.role as string);
-        const result = await runDiscovery(params.task, ctx.cwd, signal, {
-          timeoutMs: timeoutSeconds * 1_000,
-          systemPrompt: agent.systemPrompt,
+      const result = await delegateDiscovery(
+        {
+          ...params,
+          cwd: ctx.cwd,
+          signal,
           ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-        });
-        outcome = result.outcome;
-        if (outcome === "succeeded" && result.brief) {
-          relative = `.xper/artifacts/discovery-brief-${attemptId}.md`;
-          await mkdir(join(ctx.cwd, ".xper", "artifacts"), { recursive: true });
-          await writeFile(join(ctx.cwd, relative), result.brief, { flag: "wx" });
-        }
-      } catch {
-        outcome = signal.aborted ? "cancelled" : "failed";
-      }
-      const settled = await connection.client.request("attempt.finish", {
-        attemptId,
-        outcome,
-        ...(relative && outcome === "succeeded" ? { artifactPath: relative } : {}),
-      });
-      session.observation?.record("attempt.finished", { toolCallId, attemptId, outcome });
-      let phase = "discovery";
-      if (outcome === "succeeded") {
-        const advanced = await connection.client.request("run.advance");
-        if (advanced.advanced) phase = "define";
-      }
+        },
+        {
+          ...execution,
+          workflow: connection.workflow,
+          observe: ({ type, ...fields }) =>
+            session.observation?.record(type, { toolCallId, ...fields }),
+        },
+      );
+      const { attemptId, outcome, phase, artifactPath, artifactId } = result;
       await session.refreshRun();
       return {
         content: [
           {
             type: "text",
-            text: `Discovery attempt ${attemptId}: ${outcome}; phase ${phase}${relative ? `; brief ${relative}` : ""}`,
+            text: `Discovery attempt ${attemptId}: ${outcome}; phase ${phase}${artifactPath ? `; brief ${artifactPath}` : ""}`,
           },
         ],
-        details: { attemptId, outcome, phase, artifactId: settled.artifactId ?? null },
+        details: { attemptId, outcome, phase, artifactId },
       };
     },
   });

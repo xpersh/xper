@@ -1,0 +1,233 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  delegateDiscovery,
+  type DelegateDiscoveryRequest,
+  type DiscoveryDependencies,
+  type DiscoveryExecution,
+  type DiscoveryExecutionResult,
+} from "../actions/delegate-discovery.js";
+import type { FinishAttempt, RunAdvanced } from "../bridge/xper-client.js";
+
+function fixture() {
+  const calls: string[] = [];
+  const executions: DiscoveryExecution[] = [];
+  const completions: FinishAttempt[] = [];
+  const observations: unknown[] = [];
+  const saved: Array<{ cwd: string; attemptId: string; brief: string }> = [];
+  const assignmentIds: Array<string | undefined> = [];
+  const controller = new AbortController();
+  const request: DelegateDiscoveryRequest = {
+    task: "Inspect this project",
+    cwd: "/workspace",
+    signal: controller.signal,
+  };
+  const state: {
+    execution: DiscoveryExecutionResult;
+    advance: RunAdvanced;
+    failure?: "start" | "execute" | "save" | "finish" | "advance";
+  } = {
+    execution: { outcome: "succeeded", brief: "# Discovery Brief\nEvidence" },
+    advance: { advanced: true, phase: "define" },
+  };
+  const failure = new Error("dependency unavailable");
+  function step(name: typeof state.failure) {
+    assert(name);
+    calls.push(name);
+    if (state.failure === name) throw failure;
+  }
+  const dependencies: DiscoveryDependencies = {
+    workflow: {
+      async startAssignment(assignmentId) {
+        step("start");
+        assignmentIds.push(assignmentId);
+        return {
+          runId: "run-1",
+          assignmentId: assignmentId ?? "assignment-1",
+          attemptId: "attempt-1",
+          role: "discovery.explorer",
+        };
+      },
+      async finishAttempt(completion) {
+        completions.push(completion);
+        step("finish");
+        return {
+          attemptId: completion.attemptId,
+          outcome: completion.outcome,
+          artifactId: completion.outcome === "succeeded" ? "artifact-1" : null,
+        };
+      },
+      async advanceRun() {
+        step("advance");
+        return state.advance;
+      },
+    },
+    async execute(execution) {
+      step("execute");
+      executions.push(execution);
+      return state.execution;
+    },
+    async saveBrief(cwd, attemptId, brief) {
+      step("save");
+      saved.push({ cwd, attemptId, brief });
+      return `.xper/artifacts/discovery-brief-${attemptId}.md`;
+    },
+    observe: (event) => observations.push(event),
+  };
+  return {
+    dependencies,
+    request,
+    state,
+    calls,
+    executions,
+    completions,
+    observations,
+    saved,
+    assignmentIds,
+    controller,
+    failure,
+  };
+}
+
+test("delegation saves evidence before settling and returns the phase decided by the core", async () => {
+  const f = fixture();
+  f.request.model = "provider/model";
+  f.request.timeoutSeconds = 30;
+  const result = await delegateDiscovery(f.request, f.dependencies);
+  assert.deepEqual(f.calls, ["start", "execute", "save", "finish", "advance"]);
+  assert.deepEqual(f.executions, [
+    {
+      task: f.request.task,
+      cwd: "/workspace",
+      role: "discovery.explorer",
+      signal: f.controller.signal,
+      timeoutMs: 30_000,
+      model: "provider/model",
+    },
+  ]);
+  assert.deepEqual(f.saved, [
+    { cwd: "/workspace", attemptId: "attempt-1", brief: "# Discovery Brief\nEvidence" },
+  ]);
+  assert.deepEqual(f.completions, [
+    {
+      attemptId: "attempt-1",
+      outcome: "succeeded",
+      artifactPath: ".xper/artifacts/discovery-brief-attempt-1.md",
+    },
+  ]);
+  assert.deepEqual(result, {
+    attemptId: "attempt-1",
+    outcome: "succeeded",
+    phase: "define",
+    artifactId: "artifact-1",
+    artifactPath: ".xper/artifacts/discovery-brief-attempt-1.md",
+  });
+  assert.deepEqual(f.observations, [
+    { type: "attempt.correlated", attemptId: "attempt-1" },
+    { type: "attempt.finished", attemptId: "attempt-1", outcome: "succeeded" },
+  ]);
+});
+
+test("successful execution still respects a blocked core gate", async () => {
+  const f = fixture();
+  f.state.advance = { advanced: false, phase: "discovery", reason: "other assignments pending" };
+  assert.equal((await delegateDiscovery(f.request, f.dependencies)).phase, "discovery");
+  assert.equal(f.calls.filter((call) => call === "advance").length, 1);
+});
+
+for (const outcome of ["failed", "cancelled", "timed_out"] as const) {
+  test(`delegation preserves ${outcome} without writing evidence or requesting advancement`, async () => {
+    const f = fixture();
+    f.state.execution = { outcome };
+    const result = await delegateDiscovery(f.request, f.dependencies);
+    assert.deepEqual(result, {
+      attemptId: "attempt-1",
+      outcome,
+      phase: "discovery",
+      artifactId: null,
+    });
+    assert.deepEqual(f.calls, ["start", "execute", "finish"]);
+    assert.deepEqual(f.completions, [{ attemptId: "attempt-1", outcome }]);
+    assert.equal(f.executions[0]?.timeoutMs, 120_000);
+  });
+}
+
+test("retry passes the pending assignment identity through to the core", async () => {
+  const f = fixture();
+  f.request.assignmentId = "interrupted-assignment";
+  await delegateDiscovery(f.request, f.dependencies);
+  assert.deepEqual(f.assignmentIds, ["interrupted-assignment"]);
+});
+
+test("invalid task or timeout is rejected before any effects", async () => {
+  for (const override of [
+    { task: "  " },
+    ...[0, -1, 601, 1.5, Number.NaN].map((timeoutSeconds) => ({ timeoutSeconds })),
+  ]) {
+    const f = fixture();
+    await assert.rejects(delegateDiscovery({ ...f.request, ...override }, f.dependencies));
+    assert.deepEqual(f.calls, []);
+  }
+});
+
+test("execution and artifact failures settle as failed without reporting a saved Brief", async () => {
+  for (const failure of ["execute", "save"] as const) {
+    const f = fixture();
+    f.state.failure = failure;
+    const result = await delegateDiscovery(f.request, f.dependencies);
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.artifactPath, undefined);
+    assert.deepEqual(f.completions, [{ attemptId: "attempt-1", outcome: "failed" }]);
+    assert(!f.calls.includes("advance"));
+  }
+});
+
+test("an execution exception after cancellation is settled as cancelled", async () => {
+  const f = fixture();
+  f.state.failure = "execute";
+  f.controller.abort();
+  assert.equal((await delegateDiscovery(f.request, f.dependencies)).outcome, "cancelled");
+  assert.deepEqual(f.completions, [{ attemptId: "attempt-1", outcome: "cancelled" }]);
+});
+
+test("an empty successful response cannot produce a successful durable result", async () => {
+  const f = fixture();
+  f.state.execution = { outcome: "succeeded", brief: " \n" };
+  assert.equal((await delegateDiscovery(f.request, f.dependencies)).outcome, "failed");
+  assert.deepEqual(f.calls, ["start", "execute", "finish"]);
+});
+
+test("a rejected assignment does not start an agent or invent an attempt result", async () => {
+  const f = fixture();
+  f.state.failure = "start";
+  await assert.rejects(
+    delegateDiscovery(f.request, f.dependencies),
+    (error) => error === f.failure,
+  );
+  assert.deepEqual(f.calls, ["start"]);
+  assert.deepEqual(f.observations, []);
+});
+
+test("loss of the bridge while settling propagates without resettling or advancing", async () => {
+  const f = fixture();
+  f.state.failure = "finish";
+  await assert.rejects(
+    delegateDiscovery(f.request, f.dependencies),
+    (error) => error === f.failure,
+  );
+  assert.deepEqual(f.calls, ["start", "execute", "save", "finish"]);
+  assert.equal(f.completions.length, 1);
+  assert.deepEqual(f.observations, [{ type: "attempt.correlated", attemptId: "attempt-1" }]);
+});
+
+test("a failed advance never rewrites an already settled successful attempt", async () => {
+  const f = fixture();
+  f.state.failure = "advance";
+  await assert.rejects(
+    delegateDiscovery(f.request, f.dependencies),
+    (error) => error === f.failure,
+  );
+  assert.equal(f.completions.length, 1);
+  assert.equal(f.completions[0]?.outcome, "succeeded");
+  assert.equal(f.observations.length, 2);
+});

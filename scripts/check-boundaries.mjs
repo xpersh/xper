@@ -131,8 +131,26 @@ for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates/xper-cli
 const importPattern = /(?:from\s+|import\s*\()\s*["']([^"']+)["']/g;
 for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   const source = readFileSync(sourceFile, "utf8");
+  const adapterPath = relative(join(adapterRoot, "src"), sourceFile).replaceAll("\\", "/");
+  if (
+    !adapterPath.startsWith("__tests__/") &&
+    adapterPath !== "bridge/xper-client.ts" &&
+    /\.request\s*\(\s*["'](?:run\.(?:start|status|advance)|assignment\.start|attempt\.finish)["']/.test(
+      source,
+    )
+  ) {
+    failures.push(`${adapterPath} must call workflow operations through the typed xper client`);
+  }
   for (const match of source.matchAll(importPattern)) {
     const specifier = match[1];
+    if (
+      adapterPath.startsWith("actions/") &&
+      (specifier?.startsWith("node:") ||
+        /(?:^|\/)(?:pi|discovery)\//.test(specifier ?? "") ||
+        specifier?.endsWith("/bridge/client.js"))
+    ) {
+      failures.push(`${adapterPath} must receive Pi execution and I/O through its dependencies`);
+    }
     const importsPrivateXperPackage =
       specifier?.startsWith("@xper/") && specifier !== "@xper/protocol";
     if (

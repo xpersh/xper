@@ -19,10 +19,10 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
           return;
         }
         try {
-          const result = await connection.client.request(
-            action === "start" ? "run.start" : "run.advance",
-            action === "start" ? { objective: rest.join(" ") } : {},
-          );
+          const result =
+            action === "start"
+              ? await connection.workflow.startRun(rest.join(" "))
+              : await connection.workflow.advanceRun();
           await session.refreshRun();
           ctx.ui.notify(`xper: ${JSON.stringify(result)}`, "info");
         } catch (error) {

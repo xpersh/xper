@@ -1,47 +1,46 @@
-# XP-007: Event store y proyecciones mínimas en SQLite
+# XP-007: Event store and minimal SQLite projections
 
-- Estado: `done`
+- Status: `done`
 - Milestone: M1
-- Dependencias: XP-003
+- Dependencies: XP-003
 
-## Objetivo
+## Goal
 
-Persistir el estado neutral de xper y reconstruir runs sin depender de la
-transcripción ni de IDs nativos del harness.
+Persist xper's neutral state and reconstruct runs without relying on the
+transcript or native harness IDs.
 
-## Alcance
+## Scope
 
-- Crear migraciones versionadas para `events`, `runs`, `phase_visits`,
-  `assignments` y `attempts`.
-- Implementar append idempotente y transacciones por boundary.
-- Proyectar estado actual de un run.
-- Registrar adapter, versión y capabilities como metadata.
-- Recuperar attempts iniciados sin evento final como `interrupted`.
-- Definir comportamiento degradado si SQLite no está disponible.
+- Create versioned migrations for `events`, `runs`, `phase_visits`,
+  `assignments`, and `attempts`.
+- Implement idempotent append and transactions per boundary.
+- Project the current state of a run.
+- Record adapter, version, and capabilities as metadata.
+- Recover attempts started without a final event as `interrupted`.
+- Define degraded behavior when SQLite is unavailable.
 
-## Criterios de aceptación
+## Acceptance criteria
 
-- Reproducir eventos reconstruye el mismo estado de dominio.
-- Reinsertar un `event_id` no duplica efectos.
-- Un crash simulado no produce un attempt falsamente exitoso.
-- No se almacenan prompts, código ni argumentos de tools por defecto.
-- El esquema no contiene tablas acopladas a Pi.
+- Replaying events reconstructs the same domain state.
+- Reinserting an `event_id` does not duplicate effects.
+- A simulated crash does not produce a falsely successful attempt.
+- Prompts, code, and tool arguments are not stored by default.
+- The schema contains no Pi-coupled tables.
 
-## Fuera de alcance
+## Out of scope
 
-- Todas las proyecciones de la GUI.
-- Retención, compactación u OpenTelemetry.
+- All GUI projections.
+- Retention, compaction, or OpenTelemetry.
 
-## Implementación
+## Implementation
 
-- `xper-application::events` define el port, el vocabulario cerrado de eventos
-  y una proyección determinista. La conversión de eventos del dominio omite el
-  texto del objetivo, evidencia y razones libres para no persistir prompts.
-- `xper-store-sqlite` guarda el log y reconstruye las cinco tablas mediante una
-  migración versionada. `append_boundary` inserta eventos y actualiza las
-  proyecciones en una sola transacción; un `event_id` repetido con contenido
-  distinto produce conflicto.
-- `open` reconstruye las proyecciones y añade eventos `attempt.interrupted`
-  para intentos sin cierre. Se asume un único coordinador escritor por base.
-  `open_or_volatile` usa SQLite en memoria y expone el motivo de degradación
-  cuando falla la base persistente.
+- `xper-application::events` defines the port, closed event vocabulary, and a
+  deterministic projection. Conversion from domain events omits objective text,
+  evidence, and free-form reasons to avoid persisting prompts.
+- `xper-store-sqlite` stores the log and rebuilds the five tables through a
+  versioned migration. `append_boundary` inserts events and updates projections
+  in one transaction; a repeated `event_id` with different content is a conflict.
+- `open` rebuilds projections and adds `attempt.interrupted` events for
+  unfinished attempts. A single writing coordinator per database is assumed.
+  `open_or_volatile` uses in-memory SQLite and exposes the reason for degraded
+  operation when the persistent database fails.

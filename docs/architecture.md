@@ -1,135 +1,133 @@
-# Arquitectura del core de xper
+# xper core architecture
 
-Esta guía describe el dominio, los casos de uso, los puertos y las interfaces
-Rust de xper. Cada adaptador documenta su organización interna dentro de su
-propio paquete; la [guía del adaptador Pi](../adapters/pi/docs/architecture.md)
-describe la integración actual.
+This guide describes xper's Rust domain, use cases, ports, and interfaces.
+Each adapter documents its internal organization within its own package; the
+[Pi adapter guide](../adapters/pi/docs/architecture.md) describes the current
+integration.
 
-La entrada al proceso es el CLI. El CLI expone dos interfaces: comandos de
-terminal y un bridge JSONL que recibe peticiones de los adaptadores. Ambas
-invocan casos de uso de `xper-application`.
+The CLI is the process entry point. It exposes two interfaces: terminal
+commands and a JSONL bridge that receives adapter requests. Both invoke
+`xper-application` use cases.
 
 ```mermaid
 flowchart LR
-    Adapter[Adaptador de harness] --> Bridge[Bridge JSONL]
-    Terminal[Comandos CLI] --> Cases[Casos de uso]
+    Adapter[Harness adapter] --> Bridge[JSONL bridge]
+    Terminal[CLI commands] --> Cases[Use cases]
     Bridge --> Cases
-    Cases --> Domain[Dominio]
-    Cases --> Ports[Puertos]
-    SQLite[SQLite] -. implementa .-> Ports
-    Local[Archivos, instalación, reloj e IDs] -. implementa .-> Ports
+    Cases --> Domain[Domain]
+    Cases --> Ports[Ports]
+    SQLite[SQLite] -. implements .-> Ports
+    Local[Files, installation, clock and IDs] -. implements .-> Ports
 ```
 
-Las flechas continuas muestran llamadas. Las implementaciones dependen de los
-contratos del core. `composition.rs` crea y conecta las dependencias concretas.
+Solid arrows show calls. Implementations depend on core contracts.
+`composition.rs` creates and wires concrete dependencies.
 
-## Mapa para leer el código
+## Code navigation map
 
-| Responsabilidad | Ubicación | Contenido |
+| Responsibility | Location | Contents |
 | --- | --- | --- |
-| Entrada al proceso | `crates/xper-cli/src/main.rs` | Argumentos y código de salida |
-| Transporte del bridge | `crates/xper-cli/src/bridge/mod.rs` | Framing, handshake, sesiones y heartbeat |
-| Traducción RPC | `crates/xper-cli/src/bridge/workflow.rs` | JSON → petición tipada → resultado → JSON |
-| Presentación CLI | `crates/xper-cli/src/status.rs`, `setup.rs` | Texto/JSON y confirmación por terminal |
-| Composición | `crates/xper-cli/src/composition.rs` | Apertura de SQLite y recursos de una sesión |
-| Adaptadores locales | `crates/xper-cli/src/infrastructure/` | Reloj, IDs, artefactos e instalación local |
-| Acciones del sistema | `crates/xper-application/src/use_cases/` | Coordinación de cada operación |
-| Dependencias de las acciones | `crates/xper-application/src/ports.rs` | Lecturas, transacciones, evidencia e instalación |
-| Vocabulario durable | `crates/xper-application/src/events.rs` | Eventos normalizados y conversión desde el dominio |
-| Estado consultable | `crates/xper-application/src/read_models/` | Proyecciones y replay determinista |
-| Política de evidencia | `crates/xper-application/src/policies/discovery.rs` | Relación entre visita, assignment, attempt y Brief |
-| Reglas del kernel | `crates/xper-domain/src/` | Entidades, máquina de estados y transiciones puras |
-| Persistencia | `crates/xper-store-sqlite/` | Transacciones, migraciones, leases y recuperación |
+| Process entry point | `crates/xper-cli/src/main.rs` | Arguments and exit code |
+| Bridge transport | `crates/xper-cli/src/bridge/mod.rs` | Framing, handshake, sessions, and heartbeat |
+| RPC translation | `crates/xper-cli/src/bridge/workflow.rs` | JSON → typed request → result → JSON |
+| CLI presentation | `crates/xper-cli/src/status.rs`, `setup.rs` | Text/JSON and terminal confirmation |
+| Composition | `crates/xper-cli/src/composition.rs` | Opening SQLite and session resources |
+| Local adapters | `crates/xper-cli/src/infrastructure/` | Clock, IDs, artifacts, and local installation |
+| System actions | `crates/xper-application/src/use_cases/` | Coordination of each operation |
+| Action dependencies | `crates/xper-application/src/ports.rs` | Reads, transactions, evidence, and installation |
+| Durable vocabulary | `crates/xper-application/src/events.rs` | Normalized events and conversion from the domain |
+| Queryable state | `crates/xper-application/src/read_models/` | Projections and deterministic replay |
+| Evidence policy | `crates/xper-application/src/policies/discovery.rs` | Relationships between visit, assignment, attempt, and Brief |
+| Kernel rules | `crates/xper-domain/src/` | Entities, state machine, and pure transitions |
+| Persistence | `crates/xper-store-sqlite/` | Transactions, migrations, leases, and recovery |
 
-## Casos de uso como API de la aplicación
+## Use cases as the application API
 
-Cada operación tiene un módulo con una función `execute`. Los comandos de
-workflow reciben un `Request` tipado y devuelven un `Outcome`; las consultas
-reciben una selección explícita. No reciben JSON, argumentos de terminal ni
-una conexión SQLite concreta.
+Each operation has a module with an `execute` function. Workflow commands
+receive a typed `Request` and return an `Outcome`; queries receive an explicit
+selection. They do not receive JSON, terminal arguments, or a concrete SQLite
+connection.
 
-| Entrada | Caso de uso | Resultado |
+| Entry point | Use case | Result |
 | --- | --- | --- |
-| `run.start` | `start_run` | Iniciar Intake → Discovery o reanudar el run activo de la sesión |
-| `assignment.start` | `start_discovery` | Crear assignment/attempt o reintentar un assignment pendiente |
-| `attempt.finish` | `finish_attempt` | Registrar resultado, evidencia y cierre del assignment |
-| `run.advance` | `advance_run` | Evaluar el gate de Discovery y entrar a Define |
-| `run.status`, `xper status` | `get_run_status` | Leer proyección y timeline |
-| `xper doctor` | `inspect_installation` | Diagnosticar la instalación sin modificarla |
-| `xper init` | `initialize_workspace` | Coordinar preflight, consentimiento y preparación |
+| `run.start` | `start_run` | Start Intake → Discovery or resume the session's active run |
+| `assignment.start` | `start_discovery` | Create an assignment/attempt or retry a pending assignment |
+| `attempt.finish` | `finish_attempt` | Record the result, evidence, and assignment completion |
+| `run.advance` | `advance_run` | Evaluate the Discovery gate and enter Define |
+| `run.status`, `xper status` | `get_run_status` | Read the projection and timeline |
+| `xper doctor` | `inspect_installation` | Diagnose the installation without modifying it |
+| `xper init` | `initialize_workspace` | Coordinate preflight, consent, and setup |
 
-Las funciones explicitan las dependencias que necesitan. No hay un contenedor
-global de servicios ni un bus de comandos. Añadir una acción consiste en
-escribir su coordinación y conectarla a la interfaz que la exponga.
+Functions make their required dependencies explicit. There is no global
+service container or command bus. Adding an action means writing its
+coordination and connecting it to the interface that exposes it.
 
-`initialize_workspace` recibe callbacks de presentación y consentimiento.
-Decide cuándo invocarlos y cuándo permitir escrituras; el CLI decide cómo
-mostrar los checks y cómo leer la respuesta. El adaptador informa qué fallos
-puede reparar, por lo que la aplicación no necesita conocer IDs propios del harness.
+`initialize_workspace` receives presentation and consent callbacks. It decides
+when to invoke them and when to allow writes; the CLI decides how to display
+checks and read the response. The adapter reports which failures it can repair,
+so the application does not need to know harness-specific IDs.
 
-## Puertos y garantías
+## Ports and guarantees
 
-- `RunReader`: consultar un run, sus eventos, el último run y el vínculo de una
-  sesión. `get_run_status` sólo requiere este contrato.
-- `RunRepository`: añade commits de límites completos. Crear el run y vincular
-  su sesión forman una única operación atómica del puerto.
-- `ArtifactReader`: comprobar disponibilidad de evidencia relativa al workspace.
-- `Installation`: inspeccionar y preparar el scope seleccionado. Conserva
-  archivos válidos y comprueba conflictos de backups antes de escribir.
-- `Clock` e `IdGenerator`: contratos existentes del dominio, reutilizados por
-  los casos de uso para que sus resultados se puedan reproducir en tests.
+- `RunReader`: query a run, its events, the latest run, and a session binding.
+  `get_run_status` requires only this contract.
+- `RunRepository`: adds commits of complete boundaries. Creating a run and
+  binding its session are a single atomic port operation.
+- `ArtifactReader`: check evidence availability relative to the workspace.
+- `Installation`: inspect and prepare the selected scope. Preserve valid files
+  and check backup conflicts before writing.
+- `Clock` and `IdGenerator`: existing domain contracts reused by use cases to
+  make their results reproducible in tests.
 
-Una operación coordina una unidad coherente de persistencia: finalizar un
-attempt exitoso registra el resultado, el artefacto y el assignment en el
-mismo commit. La consulta devuelve únicamente estado persistido. La sesión
-resuelve su run mediante el repositorio, sin mantener otra copia del vínculo
-en el bridge.
+An operation coordinates one coherent unit of persistence: finishing a
+successful attempt records its result, artifact, and assignment in the same
+commit. Queries return only persisted state. The session resolves its run
+through the repository without keeping another copy of the binding in the bridge.
 
-Las leases, el fallback volátil, la apertura de la base y su cierre pertenecen
-al adaptador y al lifecycle del proceso. El bridge añade la información de
-durabilidad a su respuesta; los casos de uso no conocen SQLite.
+Leases, volatile fallback, and opening and closing the database belong to the
+adapter and process lifecycle. The bridge adds durability information to its
+response; use cases do not know about SQLite.
 
-## Qué pertenece a cada bloque
+## What belongs in each block
 
-- Una regla sobre estados o transiciones de una entidad pertenece al dominio.
-- La coordinación entre estado persistido, evidencia y efectos pertenece a un
-  caso de uso. La política de Discovery consulta las relaciones de la proyección;
-  la disponibilidad real de sus archivos se consulta a través de un puerto.
-- Un evento durable describe un hecho con el vocabulario público de xper. La
-  conversión desde eventos del dominio excluye objetivos y evidencia textual.
-- Una proyección es un modelo de lectura reconstruible. No es la entidad `Run`
-  del dominio ni un repositorio; su replay también valida la consistencia del log.
-- Un puerto expresa una necesidad de la aplicación y las garantías que exige.
-  Su implementación resuelve los detalles del sistema operativo o del proveedor.
-- La interfaz valida la forma externa y traduce errores. La aplicación valida
-  la operación para proteger también a futuros clientes que no usen el CLI.
+- A rule about an entity's states or transitions belongs in the domain.
+- Coordination between persisted state, evidence, and effects belongs in a
+  use case. The Discovery policy checks relationships in the projection;
+  actual file availability is queried through a port.
+- A durable event describes a fact using xper's public vocabulary. Conversion
+  from domain events excludes objectives and textual evidence.
+- A projection is a rebuildable read model. It is neither the domain `Run`
+  entity nor a repository; its replay also validates log consistency.
+- A port expresses an application need and the guarantees it requires. Its
+  implementation handles operating-system or provider details.
+- The interface validates the external shape and translates errors. The
+  application validates the operation to protect future clients that bypass
+  the CLI as well.
 
-Los errores de aplicación distinguen peticiones inválidas de fallos de una
-dependencia y conservan la causa original. El bridge los convierte en los
-códigos RPC existentes.
+Application errors distinguish invalid requests from dependency failures and
+preserve the original cause. The bridge converts them to the existing RPC codes.
 
-## Cómo ampliar la siguiente vertical
+## Extending the next vertical slice
 
-1. Expresar las reglas nuevas en el dominio y sus tests cuando correspondan.
-2. Añadir la operación en `use_cases/`, con entrada y resultado explícitos.
-3. Usar los puertos existentes o definir uno si aparece una necesidad nueva.
-4. Probar la coordinación con dobles de los puertos y reloj/IDs deterministas.
-5. Conectar el comando o método RPC y conservar sus pruebas de integración.
+1. Express new rules in the domain and its tests where appropriate.
+2. Add the operation in `use_cases/`, with explicit inputs and results.
+3. Use existing ports or define one when a new need appears.
+4. Test coordination with port doubles and deterministic clocks/IDs.
+5. Connect the command or RPC method and preserve its integration tests.
 
-No se crean módulos para fases futuras ni una jerarquía de clases por cada
-caso de uso. Los adaptadores locales permanecen como módulos del ejecutable
-mientras sólo éste los componga; podrán extraerse a otro crate cuando otro
-ejecutable los necesite.
+Do not create modules for future phases or a class hierarchy for each use case.
+Local adapters remain executable modules while only that executable composes
+them; they can move to another crate when another executable needs them.
 
-El avance durable de Discovery sigue usando la proyección y los eventos de la
-primera vertical. Esta refactorización no añade rehidratación de la entidad
-`Run` desde el log ni generaliza las transiciones a fases aún no implementadas.
-Al ampliar el workflow habrá que resolver esa integración con el kernel y
-evitar mantener dos conjuntos independientes de reglas de transición.
+The durable Discovery transition still uses the first vertical slice's
+projection and events. This refactoring does not add rehydration of the `Run`
+entity from the log or generalize transitions to unimplemented phases.
+Extending the workflow will require resolving that integration with the kernel
+and avoiding two independent sets of transition rules.
 
-## Verificación del core
+## Core verification
 
-Desde la raíz del repositorio:
+From the repository root:
 
 ```bash
 npm run boundaries:core
@@ -138,15 +136,13 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets
 ```
 
-Las reglas de [check-core-boundaries.mjs](../scripts/check-core-boundaries.mjs)
-comprueban las dependencias entre crates y detectan I/O o transporte JSON/RPC
-dentro de aplicación, construcción de eventos de workflow desde el CLI e imports
-de implementaciones fuera de la composición o infraestructura. Sólo inspeccionan
-el workspace Rust. Son comprobaciones estáticas de convenciones, no un análisis
-completo del lenguaje.
+The rules in [check-core-boundaries.mjs](../scripts/check-core-boundaries.mjs)
+check crate dependencies and detect I/O or JSON/RPC transport in the application,
+workflow event construction in the CLI, and implementation imports outside
+composition or infrastructure. They inspect only the Rust workspace. These are
+static convention checks, not a complete language analysis.
 
-Los tests de dominio y aplicación se ejecutan sin arrancar un harness; los de
-aplicación usan dobles de sus puertos. Los tests de SQLite verifican sus garantías
-transaccionales y de recuperación, y los del CLI comprueban sus interfaces.
-La verificación conjunta del repositorio se describe en el
-[README](../README.md#desarrollo).
+Domain and application tests run without starting a harness; application tests
+use port doubles. SQLite tests verify transaction and recovery guarantees, and
+CLI tests check its interfaces. Aggregate repository verification is described
+in the [README](../README.md#development).

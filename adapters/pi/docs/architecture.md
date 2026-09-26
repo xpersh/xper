@@ -1,124 +1,126 @@
-# Arquitectura del adaptador Pi
+# Pi adapter architecture
 
-Esta guía describe la extensión TypeScript de Pi: cómo conecta comandos, tools
-y eventos del harness con xper. El dominio, la persistencia y los casos de uso
-Rust se documentan en la [arquitectura del core](../../../docs/architecture.md).
-El [RFC 0004](../../../docs/rfcs/0004-integracion-con-pi.md) recoge las decisiones
-de integración y el [protocolo público](../../../schemas/README.md) define la
-frontera entre procesos.
+This guide describes the Pi TypeScript extension: how it connects harness
+commands, tools, and events to xper. The Rust domain, persistence, and use cases
+are documented in the [core architecture](../../../docs/architecture.md).
+[RFC 0004](../../../docs/rfcs/0004-pi-integration.md) records integration
+decisions, and the [public protocol](../../../schemas/README.md) defines the
+cross-process boundary.
 
-## Responsabilidades y composición
+## Responsibilities and composition
 
-La extensión tiene acciones de integración pequeñas. Las reglas de gates y
-transiciones siguen en los casos de uso del core Rust. El adaptador traduce la
-API de Pi, ejecuta agentes, guarda sus artefactos y presenta los resultados.
+The extension has small integration actions. Gate and transition rules remain
+in the Rust core's use cases. The adapter translates the Pi API, executes
+agents, saves their artifacts, and presents results.
 
-[extension.ts](../src/extension.ts) compone la sesión, el ejecutor y la escritura
-de artefactos, y registra comandos, tools y hooks. La creación del proceso bridge
-se difiere hasta el inicio de la sesión.
+[extension.ts](../src/extension.ts) composes the session, executor, and artifact
+writer, and registers commands, tools, and hooks. Bridge process creation is
+deferred until the session starts.
 
-El diagrama muestra las rutas principales de ejecución. Las flechas discontinuas
-son dependencias que se inyectan en la acción; las continuas representan llamadas
-o efectos. `extension.ts` conecta estas piezas al registrar la extensión.
+The diagram shows the main execution paths. Dashed arrows are dependencies
+injected into the action; solid arrows represent calls or effects.
+`extension.ts` connects these pieces when registering the extension.
 
 ```mermaid
 flowchart LR
-    subgraph adapter["Adaptador Pi · TypeScript"]
-        command["Comando /xper"]
+    subgraph adapter["Pi adapter · TypeScript"]
+        command["Command /xper"]
         tool["Tool xper_delegate"]
-        hooks["Hooks de Pi"]
-        session["XperSession<br/>Conexión y estado de sesión"]
-        action["delegateDiscovery<br/>Coordina la delegación"]
-        client["XperClient<br/>Operaciones tipadas y validación"]
-        bridge["BridgeClient<br/>Transporte y handshake"]
-        executor["runDiscovery<br/>Ejecuta el agente"]
-        writer["saveDiscoveryBrief<br/>Guarda la evidencia"]
+        hooks["Pi hooks"]
+        session["XperSession<br/>Connection and session state"]
+        action["delegateDiscovery<br/>Coordinates delegation"]
+        client["XperClient<br/>Typed operations and validation"]
+        bridge["BridgeClient<br/>Transport and handshake"]
+        executor["runDiscovery<br/>Executes the agent"]
+        writer["saveDiscoveryBrief<br/>Saves evidence"]
 
         command --> client
         tool --> action
         hooks --> session
-        session -->|Consulta de estado| client
-        session -->|Lifecycle y eventos| bridge
+        session -->|Status query| client
+        session -->|Lifecycle and events| bridge
         action -. workflow .-> client
         action -. execute .-> executor
         action -. saveBrief .-> writer
         client --> bridge
     end
 
-    core["Core Rust · xper bridge --stdio<br/>Casos de uso, gates y persistencia"]
-    child["Proceso Pi hijo<br/>Rol discovery.explorer"]
-    brief["Archivo Brief<br/>.xper/artifacts/"]
+    core["Rust core · xper bridge --stdio<br/>Use cases, gates and persistence"]
+    child["Child Pi process<br/>Role discovery.explorer"]
+    brief["Brief file<br/>.xper/artifacts/"]
 
-    bridge <-->|JSONL por stdio| core
+    bridge <-->|JSONL over stdio| core
     executor --> child
     writer --> brief
 ```
 
-La acción solicita al core el assignment, registra el resultado y, tras un éxito,
-pide avanzar. El core decide la transición y evalúa los gates. El proceso Pi hijo
-ejecuta el rol asignado; su resultado vuelve a la acción para guardar el Brief y
-comunicarlo al core.
+The action requests an assignment from the core, records the result, and asks
+to advance after success. The core decides the transition and evaluates gates.
+The child Pi process executes the assigned role; its result returns to the
+action so it can save the Brief and report it to the core.
 
-| Responsabilidad | Módulo |
+| Responsibility | Module |
 | --- | --- |
-| Registro de `/xper` y presentación de sus resultados | [pi/xper-command.ts](../src/pi/xper-command.ts) |
-| Registro de `xper_delegate` y traducción de su entrada y salida | [pi/xper-delegate.ts](../src/pi/xper-delegate.ts) |
-| Hooks de sesión y herramientas | [pi/hooks.ts](../src/pi/hooks.ts) |
-| Conexión, lifecycle y último estado tipado | [pi/session.ts](../src/pi/session.ts) |
-| Observaciones de Pi y log local | [pi/observations.ts](../src/pi/observations.ts) |
-| Coordinación de una delegación local | [actions/delegate-discovery.ts](../src/actions/delegate-discovery.ts) |
-| Operaciones tipadas de xper y validación de respuestas | [bridge/xper-client.ts](../src/bridge/xper-client.ts) |
-| Transporte JSONL, correlación y handshake | [bridge/client.ts](../src/bridge/client.ts) |
-| Envelopes y errores del protocolo público | [bridge/protocol.ts](../src/bridge/protocol.ts) |
-| Resolución del rol, ejecución de Pi y normalización del resultado | [discovery/delegate.ts](../src/discovery/delegate.ts) |
-| Escritura del Brief sin sobrescribir evidencia existente | [discovery/artifacts.ts](../src/discovery/artifacts.ts) |
+| Register `/xper` and present its results | [pi/xper-command.ts](../src/pi/xper-command.ts) |
+| Register `xper_delegate` and translate its input and output | [pi/xper-delegate.ts](../src/pi/xper-delegate.ts) |
+| Session and tool hooks | [pi/hooks.ts](../src/pi/hooks.ts) |
+| Connection, lifecycle, and latest typed state | [pi/session.ts](../src/pi/session.ts) |
+| Pi observations and local log | [pi/observations.ts](../src/pi/observations.ts) |
+| Coordinate a local delegation | [actions/delegate-discovery.ts](../src/actions/delegate-discovery.ts) |
+| Typed xper operations and response validation | [bridge/xper-client.ts](../src/bridge/xper-client.ts) |
+| JSONL transport, correlation, and handshake | [bridge/client.ts](../src/bridge/client.ts) |
+| Public protocol envelopes and errors | [bridge/protocol.ts](../src/bridge/protocol.ts) |
+| Resolve roles, execute Pi, and normalize results | [discovery/delegate.ts](../src/discovery/delegate.ts) |
+| Write the Brief without overwriting existing evidence | [discovery/artifacts.ts](../src/discovery/artifacts.ts) |
 
-## Flujo de delegación
+## Delegation flow
 
-`delegateDiscovery` recibe funciones de ejecución y escritura, un cliente de
-workflow y un callback opcional de observaciones. Se puede probar sin procesos,
-archivos ni API de Pi. Crea el assignment mediante el core, ejecuta el agente,
-guarda la evidencia y comunica el resultado. Tras un éxito solicita el avance y
-devuelve la fase indicada por el core, incluido un gate bloqueado.
+`delegateDiscovery` receives execution and writing functions, a workflow
+client, and an optional observation callback. It can be tested without
+processes, files, or the Pi API. It creates the assignment through the core,
+executes the agent, saves evidence, and reports the result. After success it
+requests advancement and returns the phase reported by the core, including a
+blocked gate.
 
-Los fallos locales de ejecución o escritura producen un resultado fallido; una
-cancelación se conserva como tal. Un Brief vacío no produce un éxito y la ruta
-del artefacto sólo se devuelve después de guardarlo. Si falla el bridge al
-registrar el resultado o avanzar, el error se propaga sin inventar otro
-resultado ni reintentar una mutación cuyo commit podría haberse realizado.
+Local execution or write errors produce a failed result; cancellation remains
+cancellation. An empty Brief does not produce success, and the artifact path is
+returned only after saving it. If the bridge fails while recording the result
+or advancing, the error propagates without inventing another result or retrying
+a mutation that may already have committed.
 
-## Frontera con el core
+## Boundary with the core
 
-`XperClient` ofrece `startRun`, `startAssignment`, `finishAttempt`, `advanceRun`
-y `getRunStatus`. Valida las respuestas y las correlaciones de assignment y
-attempt antes de entregarlas al consumidor; conserva los errores RPC originales.
-Los campos adicionales se admiten para permitir evolución compatible. En el
-estado sólo se tipan y validan los campos de proyección que utiliza la extensión;
-la timeline permanece opaca y no se reconstruyen reglas del dominio en TypeScript.
+`XperClient` provides `startRun`, `startAssignment`, `finishAttempt`,
+`advanceRun`, and `getRunStatus`. It validates responses and assignment/attempt
+correlations before returning them to the consumer, preserving original RPC
+errors. Additional fields are allowed for compatible evolution. Only projection
+fields used by the extension are typed and validated in status responses; the
+timeline remains opaque, and domain rules are not reconstructed in TypeScript.
 
-`BridgeClient` conserva el transporte JSONL y el handshake. `XperSession` conserva
-la conexión, el lifecycle y el último estado tipado. Las acciones no importan
-implementaciones de procesos, archivos ni registros de Pi. No necesitan un
-contenedor de servicios ni una segunda jerarquía de dominio/aplicación.
+`BridgeClient` retains JSONL transport and the handshake. `XperSession` retains
+the connection, lifecycle, and latest typed state. Actions do not import process,
+file, or Pi registration implementations. They do not need a service container
+or a second domain/application hierarchy.
 
-La preparación de la instalación mediante `xper init` y `xper doctor` pertenece
-al CLI. Su [implementación local para Pi](../../../crates/xper-cli/src/infrastructure/installation.rs)
-implementa el puerto `Installation` del core; la extensión no duplica ese flujo.
+Installation setup through `xper init` and `xper doctor` belongs to the CLI.
+Its [local Pi implementation](../../../crates/xper-cli/src/infrastructure/installation.rs)
+implements the core's `Installation` port; the extension does not duplicate
+that flow.
 
-## Cómo ampliar el adaptador
+## Extending the adapter
 
-1. Añadir una acción local cuando sea necesario coordinar ejecución o efectos.
-2. Explicitar sus dependencias y probarla con dobles sin arrancar Pi.
-3. Añadir al cliente tipado las operaciones públicas del core que necesite,
-   validando las respuestas antes de consumirlas.
-4. Conectar la acción a comandos, tools o hooks y comprobar la integración.
+1. Add a local action when execution or effects need coordination.
+2. Make its dependencies explicit and test it with doubles without starting Pi.
+3. Add the required public core operations to the typed client, validating
+   responses before consuming them.
+4. Connect the action to commands, tools, or hooks and check the integration.
 
-Las reglas nuevas del workflow se incorporan al core. Los cambios en el
-lifecycle, la API de Pi o su presentación pertenecen a este adaptador.
+New workflow rules belong in the core. Changes to lifecycle, the Pi API, or
+its presentation belong in this adapter.
 
-## Verificación del adaptador
+## Adapter verification
 
-Desde la raíz del repositorio:
+From the repository root:
 
 ```bash
 npm run boundaries --workspace @xper/adapter-pi
@@ -126,14 +128,13 @@ npm run typecheck --workspace @xper/adapter-pi
 npm run test --workspace @xper/adapter-pi
 ```
 
-[check-boundaries.mjs](../scripts/check-boundaries.mjs) sólo lee este paquete y
-no requiere Cargo. Comprueba el acceso al core mediante el protocolo público,
-que las acciones reciban sus dependencias de I/O y que las operaciones de
-workflow se invoquen mediante el cliente tipado. Es una comprobación estática
-de convenciones, no un análisis completo de TypeScript.
+[check-boundaries.mjs](../scripts/check-boundaries.mjs) reads only this package
+and does not require Cargo. It checks access to the core through the public
+protocol, that actions receive their I/O dependencies, and that workflow
+operations go through the typed client. It is a static convention check, not
+a complete TypeScript analysis.
 
-Las pruebas de la acción y del cliente tipado usan dependencias simuladas.
-Las del escritor de artefactos usan directorios temporales. Las pruebas de
-integración arrancan el bridge Rust y un proceso Pi simulado para comprobar la
-vertical, la recuperación y el aislamiento de sesiones; requieren el checkout
-del core y su toolchain, pero no credenciales de modelos.
+Action and typed-client tests use simulated dependencies. Artifact-writer
+tests use temporary directories. Integration tests start the Rust bridge and
+a simulated Pi process to check the vertical slice, recovery, and session
+isolation; they require the core checkout and toolchain but no model credentials.

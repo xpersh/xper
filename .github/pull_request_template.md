@@ -1,15 +1,15 @@
-## Cambio
+## Change
 
-<!-- Explica el problema y el comportamiento resultante. Enlaza la tarea si existe. -->
+<!-- Explain the problem and resulting behavior. Link the task if one exists. -->
 
-## Arquitectura
+## Architecture
 
-<!-- Indica qué responsabilidades cambian y por qué pertenecen a esos módulos.
-Si cambia una frontera o un contrato, enlaza la guía/decisión actualizada e indica
-qué productores, consumidores y checks has revisado. Omite lo que no aplique. -->
+<!-- State which responsibilities change and why they belong in these modules.
+If a boundary or contract changes, link the updated guide/decision and identify
+which producers, consumers, and checks you reviewed. Omit what does not apply. -->
 
-## Validación
+## Validation
 
-<!-- Anota los comandos ejecutados y su resultado. Para código, dependencias o
-build: npm run check. Para documentación: enlaces, rutas y git diff --check.
-Explica los checks que no pudiste ejecutar y las limitaciones relevantes. -->
+<!-- List the commands run and their results. For code, dependencies, or build
+changes: npm run check. For documentation: links, paths, and git diff --check.
+Explain checks you could not run and any relevant limitations. -->

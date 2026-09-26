@@ -1,32 +1,32 @@
-# XP-012: Judgment Day, rework y cierre
+# XP-012: Judgment Day, rework, and closure
 
-- Estado: `pending`
+- Status: `pending`
 - Milestone: M3
-- Dependencias: XP-011
+- Dependencies: XP-011
 
-## Objetivo
+## Goal
 
-Cerrar un run con una evaluación adversarial, reproducible y separada del
-contexto de implementación.
+Close a run with an adversarial, reproducible evaluation separate from the
+implementation context.
 
-## Alcance
+## Scope
 
-- Construir el paquete mínimo de contexto para Judge.
-- Ejecutar Judgment Day con modelo y contexto independientes cuando sea posible.
-- Implementar todos los verdicts definidos en RFC 0001.
-- Enrutar rework hacia Implementation, Design o Define.
-- Solicitar decisión humana ante ambigüedad o acción irreversible.
-- Generar retrospectiva y cerrar el run.
+- Build the minimum context package for Judge.
+- Run Judgment Day with an independent model and context when possible.
+- Implement all verdicts defined in RFC 0001.
+- Route rework to Implementation, Design, or Define.
+- Request a human decision for ambiguity or irreversible actions.
+- Generate a retrospective and close the run.
 
-## Criterios de aceptación
+## Acceptance criteria
 
-- Cada criterio de aceptación enlaza evidencia concreta.
-- Judge no hereda la conversación completa por defecto.
-- `ACCEPT_WITH_DEBT` registra deuda, responsable lógico y condición futura.
-- Los verdicts producen transiciones deterministas e idempotentes.
-- Un run cerrado conserva snapshot, artefactos, métricas y retrospectiva.
+- Each acceptance criterion links to concrete evidence.
+- Judge does not inherit the entire conversation by default.
+- `ACCEPT_WITH_DEBT` records the debt, logical owner, and future condition.
+- Verdicts produce deterministic, idempotent transitions.
+- A closed run retains its snapshot, artifacts, metrics, and retrospective.
 
-## Fuera de alcance
+## Out of scope
 
-- Despliegue o publicación automática a producción.
-- Puntuar productividad humana.
+- Automatic deployment or publication to production.
+- Scoring human productivity.

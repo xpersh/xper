@@ -1,37 +1,37 @@
-# Trabajo en el adaptador Pi
+# Working on the Pi adapter
 
-Aplica junto al [AGENTS.md raíz](../../AGENTS.md). Lee primero la
-[arquitectura del adaptador](docs/architecture.md), incluido su diagrama. Estas
-reglas también orientan los cambios en la integración `.pi/` del checkout.
+Apply these instructions together with the [root AGENTS.md](../../AGENTS.md).
+First read the [adapter architecture](docs/architecture.md), including its
+diagram. These rules also guide changes to the checkout's `.pi/` integration.
 
-## Dónde introducir el cambio
+## Where changes belong
 
-- `src/extension.ts` compone dependencias y registra la extensión.
-- `src/pi/` traduce comandos, tools y hooks de Pi, presenta resultados y
-  gestiona la sesión y las observaciones.
-- `src/actions/` coordina una acción de integración con dependencias inyectadas.
-  No importa APIs de Pi, procesos, archivos ni implementaciones concretas del
-  bridge. Prueba la acción con dobles antes de conectarla a su entrada.
-- `src/bridge/xper-client.ts` ofrece las operaciones tipadas del workflow y
-  valida sus respuestas. Añade aquí las operaciones públicas nuevas que
-  necesite el adaptador; no hagas llamadas RPC de workflow desde otros módulos.
-- `src/bridge/client.ts` se ocupa del transporte, correlación y handshake;
-  `src/bridge/protocol.ts`, de envelopes y errores del contrato.
-- `src/discovery/` implementa la ejecución de Pi y la escritura del Brief.
-  Mantén estos efectos fuera de la acción que los coordina.
+- `src/extension.ts` composes dependencies and registers the extension.
+- `src/pi/` translates Pi commands, tools, and hooks, presents results, and
+  manages the session and observations.
+- `src/actions/` coordinates an integration action with injected dependencies.
+  It does not import Pi APIs, processes, files, or concrete bridge
+  implementations. Test the action with doubles before connecting its entry point.
+- `src/bridge/xper-client.ts` provides typed workflow operations and validates
+  their responses. Add new public operations needed by the adapter here; do not
+  make workflow RPC calls from other modules.
+- `src/bridge/client.ts` handles transport, correlation, and the handshake;
+  `src/bridge/protocol.ts` handles contract envelopes and errors.
+- `src/discovery/` implements Pi execution and Brief writing. Keep these effects
+  outside the action that coordinates them.
 
-Los gates y las transiciones los decide el core. No importes internals de los
-crates ni reconstruyas reglas del dominio en TypeScript. Una observación de Pi
-no sustituye al resultado registrado de un attempt.
+The core decides gates and transitions. Do not import crate internals or
+reconstruct domain rules in TypeScript. A Pi observation does not replace an
+attempt's recorded result.
 
-Conserva la diferencia entre éxito, fallo, cancelación y timeout. Publica la ruta
-de un artefacto sólo después de guardarlo y no sobrescribas evidencia existente.
-Si una mutación falla por transporte, no inventes otro resultado ni la reintentes
-sin conocer si el core la ha confirmado.
+Preserve the distinction between success, failure, cancellation, and timeout.
+Publish an artifact path only after saving it, and do not overwrite existing
+evidence. If a mutation fails at the transport layer, do not invent another
+result or retry without knowing whether the core committed it.
 
-## Verificación
+## Verification
 
-Desde la raíz:
+From the root:
 
 ```bash
 npm run boundaries --workspace @xper/adapter-pi
@@ -39,11 +39,11 @@ npm run typecheck --workspace @xper/adapter-pi
 npm run test --workspace @xper/adapter-pi
 ```
 
-El comando de tests compila el paquete. Las pruebas de acciones y cliente usan
-dobles; las de artefactos usan directorios temporales. Las de integración
-necesitan el checkout y el toolchain Rust, arrancan el bridge y simulan el proceso
-Pi, sin credenciales de modelos. Conserva esta separación al añadir pruebas.
+The test command builds the package. Action and client tests use doubles;
+artifact tests use temporary directories. Integration tests require the checkout
+and Rust toolchain, start the bridge, and simulate the Pi process without model
+credentials. Preserve this separation when adding tests.
 
-No edites `dist/`. Para comprobar la integración manual, usa las instrucciones
-del [README](../../README.md#relación-con-pi); una demo no sustituye a los tests.
-Antes de entregar cambios de código, ejecuta también `npm run check`.
+Do not edit `dist/`. For manual integration checks, follow the
+[README](../../README.md#relationship-with-pi); a demo does not replace tests.
+Before delivering code changes, also run `npm run check`.

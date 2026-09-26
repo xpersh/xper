@@ -1,72 +1,77 @@
-# Desarrollo de xper con agentes
+# Developing xper with agents
 
-Estas instrucciones se aplican a todo el repositorio. Lee también las
-instrucciones locales indicadas abajo antes de modificar su área, aunque tu
-harness no cargue automáticamente los `AGENTS.md` de subdirectorios.
+These instructions apply to the entire repository. Also read the local
+instructions listed below before changing an area, even if your harness does
+not automatically load `AGENTS.md` files from subdirectories.
 
-## Antes de editar
+## Before editing
 
-1. Revisa `git status` y conserva los cambios existentes ajenos a tu tarea.
-2. Lee el [README](README.md) para conocer el estado ejecutable del producto.
-   La primera vertical llega de Discovery a Define; el backlog no describe
-   necesariamente funcionalidades implementadas.
-3. Localiza la responsabilidad del cambio y lee sólo las guías que le afectan:
+1. Review `git status` and preserve existing changes outside your task.
+2. Read the [README](README.md) to understand the product's current capabilities.
+   The first vertical slice goes from Discovery to Define; the backlog does not
+   necessarily describe implemented features.
+3. Identify the responsibility affected by the change and read the relevant guides:
 
-   | Área | Instrucciones y referencia |
+   | Area | Instructions and reference |
    | --- | --- |
-   | Core Rust y CLI (`crates/`) | [crates/AGENTS.md](crates/AGENTS.md) y [arquitectura del core](docs/architecture.md) |
-   | Adaptador Pi (`adapters/pi/`) e integración de `.pi/` | [adapters/pi/AGENTS.md](adapters/pi/AGENTS.md) y [arquitectura de Pi](adapters/pi/docs/architecture.md) |
-   | Contrato entre procesos (`schemas/`, `fixtures/`, `xper-protocol`) | [Protocolo público](schemas/README.md), [fixtures](fixtures/README.md) y las instrucciones de los productores y consumidores afectados |
-   | Una tarea del backlog | Su archivo en [docs/tasks/](docs/tasks/README.md), incluido su estado y criterios de aceptación |
+   | Rust core and CLI (`crates/`) | [crates/AGENTS.md](crates/AGENTS.md) and [core architecture](docs/architecture.md) |
+   | Pi adapter (`adapters/pi/`) and `.pi/` integration | [adapters/pi/AGENTS.md](adapters/pi/AGENTS.md) and [Pi architecture](adapters/pi/docs/architecture.md) |
+   | Cross-process contract (`schemas/`, `fixtures/`, `xper-protocol`) | [Public protocol](schemas/README.md), [fixtures](fixtures/README.md), and the instructions for affected producers and consumers |
+   | A backlog task | Its file in [docs/tasks/](docs/tasks/README.md), including status and acceptance criteria |
 
-Las guías de arquitectura describen la organización actual; los RFC explican
-las decisiones y la dirección prevista. Si encuentras una discrepancia con el
-código, señálala y resuélvela dentro del alcance del cambio. No implementes fases
-futuras sólo porque aparezcan en un RFC.
+The architecture guides describe the current organization; the RFCs explain
+the decisions and intended direction. If you find a discrepancy with the code,
+point it out and resolve it within the scope of the change. Do not implement
+future phases just because they appear in an RFC.
 
-Si existe `.codegraph/`, consulta primero `codegraph_explore` o
-`codegraph explore "<pregunta o símbolo>"` para localizar o entender código.
-Si no existe, usa `rg`; no generes un índice como parte de otra tarea.
+If `.codegraph/` exists, first use `codegraph_explore` or
+`codegraph explore "<question or symbol>"` to locate or understand code.
+Otherwise, use `rg`; do not generate an index as part of another task.
 
-## Reglas de implementación
+## Implementation rules
 
-- El core gobierna el workflow. Los adaptadores acceden a él mediante el
-  protocolo público y conservan los detalles de cada harness en su paquete.
-- Añade comportamiento en el bloque que le corresponde y usa dependencias
-  explícitas. No crees contenedores globales, buses de comandos ni módulos
-  vacíos para anticipar necesidades futuras.
-- Mantén cada comprobación de arquitectura junto a su propietario. Un nuevo
-  adaptador debe tener instrucciones, guía y checks propios; si es un workspace
-  npm, define `boundaries` para integrarse en el comando conjunto.
-- Si cambias un contrato público, revisa conjuntamente schema, fixtures,
-  implementación Rust, consumidores afectados y pruebas de compatibilidad.
-  Conserva la semántica de errores y versiones o documenta su evolución.
-- Una modificación deliberada de los límites debe actualizar la guía y sus
-  checks con una justificación. No desactives una regla para hacer pasar código
-  que debería vivir en otro módulo.
-- No edites salidas generadas (`target/`, `adapters/pi/dist/`, `node_modules/`)
-  ni uses el estado local de `.xper/` como fixture. Las pruebas deben trabajar
-  con datos sintéticos y recursos aislados, sin credenciales de modelos.
+- Use English for repository documentation, agent instructions, code comments,
+  user-facing messages, test descriptions, and new descriptive filenames.
+  Preserve public identifiers and data whose exact content matters to a test.
+  Conversation with the user can follow their preferred language.
+- The core governs the workflow. Adapters access it through the public protocol
+  and keep harness-specific details inside their own packages.
+- Add behavior to the block responsible for it and use explicit dependencies.
+  Do not introduce global containers, command buses, or empty modules to
+  anticipate future needs.
+- Keep each architecture check with its owner. A new adapter must have its own
+  instructions, guide, and checks; if it is an npm workspace, define `boundaries`
+  to participate in the aggregate command.
+- When changing a public contract, review the schema, fixtures, Rust
+  implementation, affected consumers, and compatibility tests together.
+  Preserve error and version semantics or document their evolution.
+- A deliberate change to boundaries must update the guide and its checks with
+  a justification. Do not disable a rule to make code pass when it belongs in
+  another module.
+- Do not edit generated output (`target/`, `adapters/pi/dist/`, `node_modules/`)
+  or use local `.xper/` state as a fixture. Tests must use synthetic data and
+  isolated resources, without model credentials.
 
-## Verificación y entrega
+## Verification and delivery
 
-Los requisitos y la instalación están en [Desarrollo](README.md#desarrollo).
-Todos los comandos de estas instrucciones se ejecutan desde la raíz.
+Requirements and installation are covered in [Development](README.md#development).
+Run all commands in these instructions from the repository root.
 
-- Durante la implementación, ejecuta las pruebas del comportamiento afectado y
-  los checks de su área. Añade pruebas cuando cambies comportamiento observable;
-  una corrección debe cubrir la regresión que resuelve.
-- Antes de entregar cambios de código, dependencias o configuración de build,
-  ejecuta `npm run check`: formato, lint, límites de arquitectura, typecheck y
-  tests. Es el conjunto de comprobaciones que ejecuta CI.
-- Para cambios sólo de documentación, comprueba enlaces, rutas, comandos y
-  `git diff --check`; no hace falta repetir toda la suite.
-- Actualiza la documentación de las responsabilidades o contratos que cambien.
-  Si trabajas sobre una tarea del backlog, mantén su estado y evidencia conforme
-  a sus criterios de aceptación.
-- Revisa el diff final y explica qué cambió, por qué pertenece a esos módulos
-  y qué verificaste. Indica los checks que no pudiste ejecutar y su causa; no
-  declares un resultado correcto sin evidencia.
+- During implementation, run tests for the affected behavior and the checks for
+  its area. Add tests when changing observable behavior; a fix must cover the
+  regression it addresses.
+- Before delivering changes to code, dependencies, or build configuration, run
+  `npm run check`: formatting, lint, architecture boundaries, typecheck, and
+  tests. This is the set of checks run by CI.
+- For documentation-only changes, check links, paths, commands, and
+  `git diff --check`; there is no need to repeat the entire suite.
+- Update documentation for responsibilities or contracts that change. When
+  working on a backlog task, maintain its status and evidence according to its
+  acceptance criteria.
+- Review the final diff and explain what changed, why it belongs in those
+  modules, and what you verified. State which checks you could not run and why;
+  do not claim success without evidence.
 
-`.pi/agents/xper.md` define el agente que usa el producto. Las instrucciones para
-desarrollar este repositorio son estos `AGENTS.md`; son responsabilidades distintas.
+`.pi/agents/xper.md` defines the agent used by the product. These `AGENTS.md`
+files provide instructions for developing this repository; they serve different
+responsibilities.

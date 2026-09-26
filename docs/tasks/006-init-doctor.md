@@ -1,46 +1,46 @@
-# XP-006: Configuración, init y doctor
+# XP-006: Configuration, init, and doctor
 
-- Estado: `done`
+- Status: `done`
 - Milestone: M1
-- Dependencias: XP-002 y XP-005
+- Dependencies: XP-002 and XP-005
 
-## Objetivo
+## Goal
 
-Preparar y diagnosticar una instalación reproducible sin arrancar un workflow.
+Prepare and diagnose a reproducible installation without starting a workflow.
 
-## Alcance
+## Scope
 
-- Implementar scopes global, proyecto y local del proyecto.
-- Definir merge, precedencia y validación de configuración.
-- Implementar `xper init` y `xper init --global`.
-- Implementar `xper doctor` y `xper doctor --json`.
-- Detectar Pi, `pi-open-agents`, adapter, versiones y conflictos.
-- Crear o reparar la definición del agente principal con confirmación.
-- Mostrar el comando de instalación cuando falte una dependencia.
-- Evitar instalación silenciosa en modo no interactivo.
+- Implement global, project, and project-local scopes.
+- Define configuration merge, precedence, and validation.
+- Implement `xper init` and `xper init --global`.
+- Implement `xper doctor` and `xper doctor --json`.
+- Detect Pi, `pi-open-agents`, the adapter, versions, and conflicts.
+- Create or repair the primary agent definition with confirmation.
+- Show the installation command when a dependency is missing.
+- Prevent silent installation in noninteractive mode.
 
-## Criterios de aceptación
+## Acceptance criteria
 
-- `doctor` no modifica archivos ni paquetes.
-- Los códigos `PASS`, `WARN` y `FAIL` tienen IDs estables.
-- Falta de Pi o `pi-open-agents` produce una acción concreta.
-- Ejecutar `init` dos veces es idempotente y preserva cambios del usuario.
-- Ningún secret se escribe en configuración o logs.
-- Existen fixtures para instalaciones válidas, parciales e incompatibles.
+- `doctor` does not modify files or packages.
+- `PASS`, `WARN`, and `FAIL` checks have stable IDs.
+- Missing Pi or `pi-open-agents` produces a concrete action.
+- Running `init` twice is idempotent and preserves user changes.
+- No secrets are written to configuration or logs.
+- Fixtures exist for valid, partial, and incompatible installations.
 
-## Fuera de alcance
+## Out of scope
 
-- Autenticar proveedores automáticamente.
-- Ejecutar un run o elegir modelos adaptativamente.
+- Automatically authenticating providers.
+- Executing a run or choosing models adaptively.
 
-## Resultado
+## Result
 
-- `xper-config` resuelve global, proyecto y local con merge de mapas, precedencia
-  definida y validación de estructura y campos de credenciales.
-- `xper init` y `xper init --global` crean configuración, fijan la dependencia
-  probada en Pi y crean o reparan el agente principal con confirmación. Conservan
-  archivos válidos y respaldan una definición reparada.
-- `xper doctor` y `--json` emiten checks con IDs estables para Pi, dependencia,
-  adapter, conflictos, agente y configuración sin escribir archivos.
-- Fixtures y tests cubren instalaciones válidas, parciales e incompatibles,
-  idempotencia, ausencia de escrituras en doctor y rechazo de credenciales.
+- `xper-config` resolves global, project, and local scopes with map merging,
+  defined precedence, and validation of structure and credential fields.
+- `xper init` and `xper init --global` create configuration, pin the tested Pi
+  dependency, and create or repair the primary agent with confirmation. They
+  preserve valid files and back up a repaired definition.
+- `xper doctor` and `--json` emit checks with stable IDs for Pi, the dependency,
+  adapter, conflicts, agent, and configuration without writing files.
+- Fixtures and tests cover valid, partial, and incompatible installations,
+  idempotency, read-only doctor behavior, and credential rejection.

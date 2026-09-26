@@ -1,33 +1,33 @@
-# XP-011: Loop Implementation–Verify
+# XP-011: Implementation–Verify loop
 
-- Estado: `pending`
+- Status: `pending`
 - Milestone: M3
-- Dependencias: XP-010
+- Dependencies: XP-010
 
-## Objetivo
+## Goal
 
-Implementar incrementos pequeños mediante Driver/Navigator y obtener evidencia
-independiente antes de presentarlos a Judgment Day.
+Implement small increments through Driver/Navigator and obtain independent
+evidence before presenting them to Judgment Day.
 
-## Alcance
+## Scope
 
-- Materializar Driver y Navigator con responsabilidades separadas.
-- Gestionar incrementos, attempts y rotación configurable de roles.
-- Crear workspaces aislados para trabajo concurrente.
-- Registrar tests, commits, decisiones locales y evidencia de integración.
-- Ejecutar Verify con un agente distinto del implementador.
-- Volver a Implementation, Design o Define según la causa del fallo.
-- Limitar rework y escalada humana.
+- Instantiate Driver and Navigator with separate responsibilities.
+- Manage increments, attempts, and configurable role rotation.
+- Create isolated workspaces for concurrent work.
+- Record tests, commits, local decisions, and integration evidence.
+- Run Verify with an agent other than the implementer.
+- Return to Implementation, Design, or Define according to the failure's cause.
+- Bound rework and escalation to humans.
 
-## Criterios de aceptación
+## Acceptance criteria
 
-- Un incremento sólo avanza con tests locales y criterios evidenciados.
-- Verifier no modifica el código que evalúa.
-- Dos agentes no escriben simultáneamente sobre el mismo workspace.
-- Cancelar o agotar un budget deja estado recuperable.
-- El motivo de cada loop de rework queda estructurado y medible.
+- An increment advances only with local tests and evidence for its criteria.
+- Verifier does not modify the code it evaluates.
+- Two agents do not write to the same workspace simultaneously.
+- Cancellation or budget exhaustion leaves recoverable state.
+- The reason for every rework loop is structured and measurable.
 
-## Fuera de alcance
+## Out of scope
 
-- Publicar cambios o aceptar deuda automáticamente.
-- Optimización avanzada de scheduling.
+- Publishing changes or accepting debt automatically.
+- Advanced scheduling optimization.

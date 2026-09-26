@@ -1,90 +1,86 @@
 # xper
 
-`xper` es un harness de desarrollo multiagente basado en prácticas de
-Extreme Programming. Se integra en Pi como agente principal y añade una capa
-de coordinación para gobernar el workflow, asignar modelos según el rol y
-conservar evidencia local sobre calidad, tiempo, coste y rework.
+`xper` is a multi-agent development harness based on Extreme Programming
+practices. It integrates with Pi as the primary agent and adds a coordination
+layer to govern the workflow, assign models by role, and retain local evidence
+of quality, time, cost, and rework.
 
-> Estado: primera vertical slice ejecutable. Discovery puede delegarse desde
-> Pi y avanzar a Define con evidencia persistida; el resto del workflow sigue
-> en desarrollo.
+> Status: the first vertical slice is executable. Discovery can be delegated
+> from Pi and advance to Define with persisted evidence; the rest of the
+> workflow is still under development.
 
-## Objetivo
+## Goal
 
-Transformar una intención de desarrollo en incrementos pequeños, verificables
-e integrables mediante:
+Turn development intent into small, verifiable, integrable increments through:
 
-- Un workflow XP con feedback y retrocesos explícitos.
-- Roles multiagente con responsabilidades y permisos definidos.
-- Routing multimodelo reproducible por contexto, rol y fase.
-- Separación estricta entre identidades personales, corporativas y de cliente.
-- Observabilidad local para comparar ejecuciones, modelos y estrategias.
+- An XP workflow with explicit feedback and backward transitions.
+- Multi-agent roles with defined responsibilities and permissions.
+- Reproducible multimodel routing by context, role, and phase.
+- Strict separation of personal, corporate, and client identities.
+- Local observability to compare runs, models, and strategies.
 
-La unidad principal de trabajo no es el proyecto completo, sino un
-**incremento vertical de valor** que pueda definirse, implementarse, verificar
-y aceptar de forma independiente.
+The main unit of work is a **vertical increment of value** that can be defined,
+implemented, verified, and accepted independently, rather than an entire project.
 
-## Documentos de diseño
+## Design documents
 
-- [Arquitectura del core de xper y casos de uso](docs/architecture.md)
-- [Arquitectura del adaptador Pi](adapters/pi/docs/architecture.md)
-- [RFC 0001: Producto y workflow](docs/rfcs/0001-producto-y-workflow.md)
-- [RFC 0002: Configuración y routing multimodelo](docs/rfcs/0002-configuracion-multimodelo.md)
-- [RFC 0003: Observabilidad y métricas](docs/rfcs/0003-observabilidad-y-metricas.md)
-- [RFC 0004: Integración con Pi y agente principal](docs/rfcs/0004-integracion-con-pi.md)
-- [RFC 0005: Arquitectura modular y adaptadores de harness](docs/rfcs/0005-arquitectura-modular.md)
+- [xper core architecture and use cases](docs/architecture.md)
+- [Pi adapter architecture](adapters/pi/docs/architecture.md)
+- [RFC 0001: Product and workflow](docs/rfcs/0001-product-and-workflow.md)
+- [RFC 0002: Multimodel configuration and routing](docs/rfcs/0002-multimodel-configuration.md)
+- [RFC 0003: Observability and metrics](docs/rfcs/0003-observability-and-metrics.md)
+- [RFC 0004: Pi integration and primary agent](docs/rfcs/0004-pi-integration.md)
+- [RFC 0005: Modular architecture and harness adapters](docs/rfcs/0005-modular-architecture.md)
 
-## Camino de implementación
+## Implementation path
 
-El backlog técnico está organizado como una secuencia de tareas pequeñas y
-verificables en [docs/tasks/README.md](docs/tasks/README.md). La primera meta no
-es implementar todo el workflow, sino validar una vertical slice completa
-desde Pi hasta el core y SQLite.
+The technical backlog is organized as a sequence of small, verifiable tasks in
+[docs/tasks/README.md](docs/tasks/README.md). The first goal is to validate a
+complete vertical slice from Pi through the core to SQLite before implementing
+the entire workflow.
 
-## Definición resumida
+## Short definition
 
-> xper es un harness XP multiagente, multimodelo y observable que coordina
-> incrementos de software, enruta cada rol hacia el modelo apropiado y registra
-> evidencia local para medir tiempo, coste, rework, calidad y rendimiento de
-> forma reproducible.
+> xper is an observable, multi-agent, multimodel XP harness that coordinates
+> software increments, routes each role to the appropriate model, and records
+> local evidence to reproducibly measure time, cost, rework, quality, and
+> performance.
 
-## Principios
+## Principles
 
-- Las fases son gates de conocimiento, no silos ni un waterfall.
-- El coordinador gobierna el proceso; no actúa como desarrollador jefe.
-- Los agentes se comunican mediante artefactos y contratos estructurados.
-- Verify se ejecuta continuamente junto con Implementation.
-- Un fallo vuelve a la fase donde se originó, no siempre a Implementation.
-- El routing de modelos es determinista y auditable por defecto.
-- Las credenciales y los datos de trabajo y personales nunca se mezclan de
-  forma implícita.
-- La observabilidad nunca debe impedir que el workflow continúe.
-- Las métricas miden el comportamiento del sistema, no el valor humano ni la
-  productividad individual.
+- Phases are knowledge gates, not silos or a waterfall.
+- The coordinator governs the process; it does not act as a lead developer.
+- Agents communicate through artifacts and structured contracts.
+- Verify runs continuously alongside Implementation.
+- A failure returns to its originating phase, not always to Implementation.
+- Model routing is deterministic and auditable by default.
+- Work and personal credentials and data are never mixed implicitly.
+- Observability must never prevent the workflow from continuing.
+- Metrics measure system behavior, not human value or individual productivity.
 
-## Relación con Pi
+## Relationship with Pi
 
-Pi permanece como runtime y experiencia interactiva. En la primera versión,
-`xper` se materializa como un agente `primary` de Pi mediante
-[`pi-open-agents`](https://pi.dev/packages/pi-open-agents), acompañado de una
-extensión propia para el workflow, los comandos, el estado, la observabilidad
-y el lifecycle durable de las delegaciones. El
-[spike XP-001](docs/spikes/001-integracion-pi.md) descartó usar la API interna
-de `pi-open-agents` como plano de control de attempts.
+Pi remains the runtime and interactive experience. In the first version,
+`xper` takes the form of a Pi `primary` agent through
+[`pi-open-agents`](https://pi.dev/packages/pi-open-agents), accompanied by its
+own extension for workflow, commands, state, observability, and the durable
+lifecycle of delegations. The
+[XP-001 spike](docs/spikes/001-pi-integration.md) ruled out using the internal
+`pi-open-agents` API as the attempt control plane.
 
-Pi es el primer adaptador, no una dependencia del dominio. El núcleo de xper
-se diseña en Rust y se comunica mediante un protocolo versionado con
-adaptadores externos, que pueden estar escritos en la tecnología requerida por
-cada harness. La extensión TypeScript de Pi traduce su API, hooks y TUI a ese
-contrato sin introducir tipos ni conceptos de Pi en la máquina de estados XP.
+Pi is the first adapter, not a domain dependency. The xper core is designed in
+Rust and communicates through a versioned protocol with external adapters,
+which can use the technology required by each harness. The Pi TypeScript
+extension translates its API, hooks, and TUI into that contract without
+introducing Pi types or concepts into the XP state machine.
 
-El usuario inicia Pi con `xper` como agente principal:
+Start Pi with `xper` as the primary agent:
 
 ```bash
 pi --approve --agent xper
 ```
 
-En este checkout, prepara el bridge y la extensión antes del primer arranque:
+In this checkout, prepare the bridge and extension before the first launch:
 
 ```bash
 npm ci
@@ -94,177 +90,176 @@ pi install -l npm:pi-open-agents@0.1.22
 pi --approve --agent xper
 ```
 
-La definición `primary` está en `.pi/agents/xper.md`; `.pi/settings.json` fija
-`pi-open-agents@0.1.22` para este proyecto. La extensión de `.pi/extensions`
-usa `target/debug/xper` cuando existe y permite seleccionar otro binario con
-`XPER_BRIDGE_COMMAND`. Inicia y cierra el proceso con la sesión de Pi.
-`/xper start <objetivo>` inicia o reanuda un run del proyecto. La tool propia
-`xper_delegate` ejecuta `discovery.explorer` en un Pi hijo y registra un
-Discovery Brief antes de solicitar la transición a Define. `/xper status`
-muestra versiones, conexión, fase y resultados de attempts; `xper status
---json` consulta la proyección y timeline desde SQLite. Una caída del bridge
-deja la sesión de Pi utilizable y aparece como `offline`. La
-[demo de XP-008](docs/tasks/008-vertical-slice.md#demo-manual) detalla el flujo.
+The `primary` definition lives in `.pi/agents/xper.md`; `.pi/settings.json`
+pins `pi-open-agents@0.1.22` for this project. The extension in `.pi/extensions`
+uses `target/debug/xper` when available and allows selecting another binary
+with `XPER_BRIDGE_COMMAND`. It starts and stops the process with the Pi session.
+`/xper start <objective>` starts or resumes a project run. The custom
+`xper_delegate` tool runs `discovery.explorer` in a child Pi process and records
+a Discovery Brief before requesting the transition to Define. `/xper status`
+shows versions, connection, phase, and attempt outcomes; `xper status --json`
+queries the projection and timeline from SQLite. A bridge crash leaves the Pi
+session usable and is shown as `offline`. The
+[XP-008 demo](docs/tasks/008-vertical-slice.md#manual-demo) details this flow.
 
-Para conservar observaciones entre sesiones del prototipo `0.0.1`:
+To retain observations across sessions of prototype `0.0.1`:
 
 ```bash
 mkdir -p .xper/observations
 XPER_PI_OBSERVATIONS_FILE="$PWD/.xper/observations/pi.jsonl" pi --approve --agent xper
 ```
 
-El logger Winston escribe JSONL con rotación por tamaño: 5 MiB por archivo y
-cinco archivos como máximo (el actual y cuatro anteriores). Conserva el inicio
-y fin de sesión, el estado del bridge, las invocaciones de `/xper` (sin
-argumentos), las señales de `subagent` y la correlación entre la tool propia y
-el Attempt; no guarda tareas, prompts ni salidas.
-Si no se configura el archivo, los contadores de la sesión siguen disponibles.
-`reported done` sólo refleja lo comunicado por `pi-open-agents`: el
-[spike](docs/spikes/001-integracion-pi.md)
-demostró que una cancelación temprana puede parecer un éxito. La decisión de
-usarlo para trabajo no gobernado por xper y los criterios para revisarla están en el
-[RFC 0004](docs/rfcs/0004-integracion-con-pi.md).
+The Winston logger writes JSONL with size-based rotation: 5 MiB per file and
+at most five files (the current file and four previous ones). It records
+session start and end, bridge state, `/xper` invocations (without arguments),
+`subagent` signals, and correlation between the custom tool and the Attempt;
+it does not store tasks, prompts, or outputs.
+Session counters remain available when no file is configured.
+`reported done` only reflects what `pi-open-agents` reported: the
+[spike](docs/spikes/001-pi-integration.md) demonstrated that early cancellation
+can look like success. The decision to use it for work outside xper's control
+and the criteria for revisiting that decision are in
+[RFC 0004](docs/rfcs/0004-pi-integration.md).
 
-También puede activarlo dentro de una sesión con `/agent xper`. El CLI de
-`xper` configura, valida, diagnostica y exporta información; no sustituye la
-ejecución interactiva de Pi con un comando `xper run`.
+You can also activate it within a session with `/agent xper`. The `xper` CLI
+configures, validates, diagnoses, and exports information; it does not replace
+interactive Pi execution with an `xper run` command.
 
-`xper doctor` inspecciona Pi, `pi-open-agents`, el adapter, el agente principal,
-conflictos y configuración sin modificar archivos ni paquetes. `--json` devuelve
-checks con IDs estables y sale con código distinto de cero si alguno falla:
+`xper doctor` inspects Pi, `pi-open-agents`, the adapter, the primary agent,
+conflicts, and configuration without modifying files or packages. `--json`
+returns checks with stable IDs and exits with a nonzero code if any fail:
 
 ```bash
 xper doctor
 xper doctor --json
 ```
 
-`xper init` prepara el proyecto actual; `xper init --global` prepara el scope
-del usuario. Crea la configuración y la definición `primary` sólo tras pasar el
-preflight. Pide confirmación para crear o reparar el agente; en scripts se puede
-autorizar con `--yes`. Una reparación guarda la definición anterior como
-`xper.md.bak`. Los archivos existentes válidos se preservan y repetir `init` es
-idempotente. Si falta una dependencia, el comando indica cómo instalarla y no
-instala paquetes automáticamente:
+`xper init` prepares the current project; `xper init --global` prepares the user
+scope. It creates configuration and the `primary` definition only after
+preflight passes. It requests confirmation to create or repair the agent;
+scripts can authorize this with `--yes`. Repairs save the previous definition
+as `xper.md.bak`. Valid existing files are preserved, and repeating `init` is
+idempotent. If a dependency is missing, the command explains how to install it
+and does not install packages automatically:
 
 ```bash
 pi install npm:pi-open-agents
 ```
 
-La configuración se combina por claves: defaults, global
-(`${XDG_CONFIG_HOME:-~/.config}/xper/config.yaml`), proyecto
-(`.xper/config.yaml`) y local (`.xper/config.local.yaml`), en ese orden. Los
-arrays y escalares del scope superior reemplazan los inferiores. La configuración
-local se añade a `.gitignore` durante `init`. Las claves de credenciales se
-rechazan; se usan el almacén de Pi o variables de entorno. El lector admite
-mapas y listas YAML por indentación, escalares y JSON; rechaza características
-YAML avanzadas como anclas y tags.
+Configuration is merged by key in this order: defaults, global
+(`${XDG_CONFIG_HOME:-~/.config}/xper/config.yaml`), project
+(`.xper/config.yaml`), and local (`.xper/config.local.yaml`). Arrays and scalars
+from higher-precedence scopes replace lower values. Local configuration is
+added to `.gitignore` during `init`. Credential keys are rejected; use Pi's
+store or environment variables. The reader supports indented YAML maps and
+lists, scalars, and JSON; it rejects advanced YAML features such as anchors
+and tags.
 
-Referencias:
+References:
 
 - [Pi](https://pi.dev/)
-- [SDK de Pi](https://pi.dev/docs/latest/sdk)
-- [Extensiones y eventos](https://pi.dev/docs/latest/extensions)
-- [Modelos personalizados](https://pi.dev/docs/latest/models)
+- [Pi SDK](https://pi.dev/docs/latest/sdk)
+- [Extensions and events](https://pi.dev/docs/latest/extensions)
+- [Custom models](https://pi.dev/docs/latest/models)
 - [pi-open-agents](https://pi.dev/packages/pi-open-agents)
 
-## Desarrollo
+## Development
 
-El repositorio requiere Rust `1.97.0`, Node.js `24` y npm `11`. El toolchain
-de Rust está fijado en `rust-toolchain.toml` y las dependencias JavaScript en
-`package-lock.json`.
+The repository requires Rust `1.97.0`, Node.js `24`, and npm `11`. The Rust
+toolchain is pinned in `rust-toolchain.toml`, and JavaScript dependencies are
+locked in `package-lock.json`.
 
-Una instalación limpia ejecuta todas las comprobaciones así:
+A clean installation runs all checks as follows:
 
 ```bash
 npm ci
 npm run check
 ```
 
-Los gates también pueden ejecutarse por separado:
+The gates can also run separately:
 
 ```bash
 npm run format:check  # rustfmt + Biome
-npm run lint          # Clippy + Biome + límites de dependencias
-npm run typecheck     # TypeScript estricto
-npm test              # tests Rust + TypeScript
+npm run lint          # Clippy + Biome + dependency boundaries
+npm run typecheck     # strict TypeScript
+npm test              # Rust + TypeScript tests
 ```
 
-`npm run format` aplica el formato de Rust y TypeScript/JavaScript/JSON. El
-mismo conjunto de gates se ejecuta en CI.
+`npm run format` formats Rust and TypeScript/JavaScript/JSON. The same set of
+gates runs in CI.
 
-### Desarrollo con agentes
+### Development with agents
 
-El punto de entrada es [AGENTS.md](AGENTS.md): indica qué leer antes de editar,
-cómo elegir el módulo y qué verificar al entregar. Las reglas específicas viven
-junto a su código: [core Rust](crates/AGENTS.md) y
-[adaptador Pi](adapters/pi/AGENTS.md). Si el harness no carga instrucciones de
-subdirectorios, hay que leer explícitamente las del área afectada.
+Start with [AGENTS.md](AGENTS.md): it explains what to read before editing,
+how to choose a module, and what to verify before delivery. Area-specific
+rules live alongside their code: [Rust core](crates/AGENTS.md) and
+[Pi adapter](adapters/pi/AGENTS.md). If the harness does not load instructions
+from subdirectories, read the relevant area's instructions explicitly.
 
-Las guías de arquitectura explican las decisiones; los `AGENTS.md` las convierten
-en instrucciones de trabajo y los checks de límites detectan algunas infracciones
-en CI. Son comprobaciones estáticas, por lo que sigue siendo necesario revisar la
-responsabilidad de cada cambio. La [plantilla de PR](.github/pull_request_template.md)
-pide esa justificación y la evidencia de validación.
+The architecture guides explain the decisions; `AGENTS.md` files turn them
+into working instructions, and boundary checks detect some violations in CI.
+These are static checks, so each change still needs a responsibility review.
+The [PR template](.github/pull_request_template.md) asks for that justification
+and validation evidence.
 
-La configuración de `.pi/` ejecuta el producto y tiene un propósito distinto de
-estas instrucciones para desarrollar xper.
+The `.pi/` configuration runs the product and serves a different purpose from
+these instructions for developing xper.
 
-## Layout inicial
+## Initial layout
 
-XP-002 crea sólo los módulos necesarios para M1:
+XP-002 creates only the modules needed for M1:
 
 ```text
 crates/
-├── xper-domain/         # dominio puro
-├── xper-application/    # casos de uso y puertos
-├── xper-protocol/       # contrato público neutral
-├── xper-config/         # infraestructura de configuración
-├── xper-store-sqlite/   # infraestructura de persistencia
-└── xper-cli/            # binario xper
+├── xper-domain/         # pure domain
+├── xper-application/    # use cases and ports
+├── xper-protocol/       # neutral public contract
+├── xper-config/         # configuration infrastructure
+├── xper-store-sqlite/   # persistence infrastructure
+└── xper-cli/            # xper binary
 adapters/
-└── pi/                  # paquete TypeScript del adaptador
-schemas/                 # límite público de JSON Schema
-fixtures/                # mensajes neutrales para contract tests
+└── pi/                  # adapter TypeScript package
+schemas/                 # public JSON Schema boundary
+fixtures/                # neutral messages for contract tests
 ```
 
-El layout coincide con RFC 0005, por lo que no requiere un ADR adicional. Los
-crates futuros (`xper-workspaces`, `xper-observability` y `xper-tui`) se
-añadirán cuando una tarea necesite comportamiento real en esas capas.
+The layout matches RFC 0005, so no additional ADR is needed. Future crates
+(`xper-workspaces`, `xper-observability`, and `xper-tui`) will be added when a
+task needs real behavior in those layers.
 
-`scripts/check-core-boundaries.mjs` valida la arquitectura de los crates: el
-dominio no puede tener dependencias ni usar APIs de I/O, la aplicación sólo
-depende del dominio, y la infraestructura y el CLI apuntan hacia dentro.
-Cada adaptador mantiene sus propias comprobaciones: las de Pi viven en
-`adapters/pi/scripts/check-boundaries.mjs` y protegen tanto su estructura
-interna como el acceso al core exclusivamente mediante el protocolo público.
+`scripts/check-core-boundaries.mjs` validates crate architecture: the domain
+cannot have dependencies or use I/O APIs, the application depends only on the
+domain, and infrastructure and the CLI point inward. Each adapter maintains
+its own checks: Pi's live in `adapters/pi/scripts/check-boundaries.mjs` and
+protect both its internal structure and access to the core exclusively through
+the public protocol.
 
-`npm run boundaries` ejecuta las comprobaciones del core y las de todos los
-workspaces registrados. Se pueden ejecutar por separado con
-`npm run boundaries:core` y `npm run boundaries --workspace @xper/adapter-pi`.
+`npm run boundaries` runs checks for the core and all registered workspaces.
+They can run separately with `npm run boundaries:core` and
+`npm run boundaries --workspace @xper/adapter-pi`.
 
-Cada adaptador mantiene su guía de arquitectura en su propio paquete. Los
-adaptadores registrados como workspaces definen además un script `boundaries`:
-el comando conjunto lo ejecuta automáticamente y falla si falta. Así pueden
-evolucionar su documentación y sus reglas sin modificar las del core o las de
-otros adaptadores.
+Each adapter maintains its architecture guide in its own package. Adapters
+registered as workspaces also define a `boundaries` script: the aggregate
+command runs it automatically and fails if it is missing. This lets their
+documentation and rules evolve without changing those of the core or other
+adapters.
 
 ## Bridge v1
 
-El bridge se inicia con `xper bridge --stdio` (o
-`cargo run -p xper-cli -- bridge --stdio` durante el desarrollo). Usa un frame
-JSON-RPC 2.0 por línea, hasta 64 KiB por mensaje. `stdout` transporta sólo
-frames; los diagnósticos se escriben en `stderr`. El contrato público está en
-[schemas/protocol-v1.schema.json](schemas/protocol-v1.schema.json), con mensajes
-compartidos para tests en [fixtures/protocol-v1.json](fixtures/protocol-v1.json).
+Start the bridge with `xper bridge --stdio` (or
+`cargo run -p xper-cli -- bridge --stdio` during development). It uses one
+JSON-RPC 2.0 frame per line, up to 64 KiB per message. `stdout` carries only
+frames; diagnostics go to `stderr`. The public contract is in
+[schemas/protocol-v1.schema.json](schemas/protocol-v1.schema.json), with shared
+test messages in [fixtures/protocol-v1.json](fixtures/protocol-v1.json).
 
-El cliente TypeScript exporta `connectBridge` desde `@xper/adapter-pi`. Envía
-`initialize` con nombre, versión y capacidades del adaptador; el bridge pide
-`capabilities` al cliente y el cliente consulta las capacidades del bridge.
-Tras el handshake, ambos pares pueden iniciar peticiones. `ping` comprueba la
-conexión y `shutdown` responde antes de terminar el proceso. Cada nuevo
-proceso negocia desde cero, sin estado residente del protocolo.
+The TypeScript client exports `connectBridge` from `@xper/adapter-pi`. It sends
+`initialize` with the adapter name, version, and capabilities; the bridge asks
+the client for `capabilities`, and the client queries the bridge's capabilities.
+After the handshake, both peers can initiate requests. `ping` checks the
+connection, and `shutdown` responds before terminating the process. Each new
+process negotiates from scratch, with no resident protocol state.
 
-El adaptador mínimo añade `session.attach`, `session.detach` y `event.ingest`
-para errores de tools o compactación. El bridge valida la sesión y confirma
-estos mensajes; la persistencia y las decisiones del workflow pertenecen a
-tareas posteriores.
+The minimal adapter adds `session.attach`, `session.detach`, and `event.ingest`
+for tool or compaction errors. The bridge validates the session and acknowledges
+these messages; persistence and workflow decisions belong to later tasks.

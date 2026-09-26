@@ -1,43 +1,43 @@
-# Trabajo en el core Rust
+# Working on the Rust core
 
-Aplica junto al [AGENTS.md raíz](../AGENTS.md). Antes de modificar Rust, consulta
-la [arquitectura del core](../docs/architecture.md), especialmente su mapa de
-módulos y las garantías de los puertos.
+Apply these instructions together with the [root AGENTS.md](../AGENTS.md).
+Before changing Rust code, read the [core architecture](../docs/architecture.md),
+especially its module map and port guarantees.
 
-## Dónde introducir el cambio
+## Where changes belong
 
-- `xper-domain`: entidades, invariantes y transiciones puras. No añadas
-  dependencias externas, I/O ni conceptos de un harness.
-- `xper-application/src/use_cases/`: una operación del sistema por módulo con
-  `execute`, entradas y resultados explícitos. Coordina puertos; no recibe JSON,
-  argumentos de terminal ni conexiones SQLite concretas.
-- `xper-application/src/ports.rs`: necesidades de la aplicación y garantías de
-  sus dependencias. El reloj y los IDs también se inyectan.
-- `events.rs`, `read_models/` y `policies/`: hechos durables, replay y políticas
-  de evidencia, respectivamente. Mantén estas responsabilidades separadas de
-  la coordinación de los casos de uso.
-- `xper-store-sqlite` y `xper-config`: implementaciones de persistencia y
-  configuración. Conserva la atomicidad de los límites de workflow y la
-  compatibilidad de los datos persistidos; añade migraciones cuando corresponda.
-- `xper-cli`: traduce las entradas y presenta resultados. Los comandos y el
-  bridge invocan casos de uso; no construyen eventos ni persisten transiciones.
-  `composition.rs` conecta implementaciones concretas y `infrastructure/`
-  contiene los adaptadores locales de puertos.
-- `xper-protocol`: contrato neutral de transporte. Mantén sus cambios alineados
-  con [schemas y consumidores](../schemas/README.md). `stdout` del bridge sólo
-  admite frames JSONL; los diagnósticos van a `stderr`.
+- `xper-domain`: pure entities, invariants, and transitions. Do not add external
+  dependencies, I/O, or harness-specific concepts.
+- `xper-application/src/use_cases/`: one system operation per module, with
+  `execute` and explicit inputs and results. Coordinate ports; do not accept
+  JSON, terminal arguments, or concrete SQLite connections.
+- `xper-application/src/ports.rs`: application needs and dependency guarantees.
+  The clock and IDs are also injected.
+- `events.rs`, `read_models/`, and `policies/`: durable facts, replay, and
+  evidence policies, respectively. Keep these responsibilities separate from
+  use-case coordination.
+- `xper-store-sqlite` and `xper-config`: persistence and configuration
+  implementations. Preserve atomic workflow boundaries and compatibility with
+  persisted data; add migrations where needed.
+- `xper-cli`: translate inputs and present results. Commands and the bridge
+  invoke use cases; they do not construct events or persist transitions.
+  `composition.rs` wires concrete implementations, and `infrastructure/`
+  contains local port adapters.
+- `xper-protocol`: a neutral transport contract. Keep changes aligned with
+  [schemas and consumers](../schemas/README.md). Bridge `stdout` accepts only
+  JSONL frames; diagnostics go to `stderr`.
 
-Para ampliar una vertical, expresa la regla de dominio, coordínala en un caso de
-uso, prueba con dobles de sus puertos y conecta después el CLI o método RPC.
-Comprueba qué piezas necesita realmente la operación antes de crear módulos.
+To extend a vertical slice, express the domain rule, coordinate it in a use case,
+test it with port doubles, and then connect the CLI or RPC method. Check which
+pieces the operation actually needs before creating modules.
 
-El avance durable actual de Discovery se basa en proyecciones y eventos; todavía
-no rehidrata la entidad `Run` del dominio. Ten en cuenta esta limitación al
-ampliar las transiciones y evita duplicar sus reglas en otro lugar.
+The current durable Discovery transition relies on projections and events; it
+does not yet rehydrate the domain `Run` entity. Account for this limitation when
+extending transitions and avoid duplicating their rules elsewhere.
 
-## Verificación
+## Verification
 
-Desde la raíz, comprueba el área Rust con:
+From the root, check the Rust area with:
 
 ```bash
 npm run boundaries:core
@@ -46,8 +46,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets
 ```
 
-Durante la iteración puedes limitar las pruebas con `cargo test -p <crate>`.
-Los tests de aplicación usan puertos simulados y reloj/IDs deterministas; los
-de infraestructura e interfaces verifican transacciones, recuperación y errores
-con recursos temporales. Un cambio del bridge debe conservar también las pruebas
-de sus consumidores. La comprobación final conjunta es `npm run check`.
+During iteration, you can narrow tests with `cargo test -p <crate>`.
+Application tests use port doubles and deterministic clocks/IDs; infrastructure
+and interface tests verify transactions, recovery, and errors with temporary
+resources. A bridge change must also preserve its consumers' tests. The final
+aggregate check is `npm run check`.

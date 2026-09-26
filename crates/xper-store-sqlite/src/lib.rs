@@ -16,9 +16,9 @@ use std::{
 use rusqlite::{
     Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
 };
-use xper_application::events::{
-    EVENT_SCHEMA_VERSION, Event, EventKind, EventStore, RunProjection, WorkOutcome, replay,
-};
+use xper_application::events::{EVENT_SCHEMA_VERSION, Event, EventKind, WorkOutcome};
+use xper_application::ports::{RunReader, RunRepository};
+use xper_application::read_models::{RunProjection, replay};
 
 /// Stable package identity used by workspace dependency smoke tests.
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
@@ -196,7 +196,7 @@ impl SqliteEventStore {
         Ok(())
     }
 
-    /// Returns the run last bound to one Pi session.
+    /// Returns the run last bound to one adapter session.
     pub fn session_run(&self, session_key: &str) -> Result<Option<String>, StoreError> {
         Ok(self
             .connection
@@ -214,7 +214,7 @@ impl SqliteEventStore {
         self.append_with_session(events, None)
     }
 
-    /// Starts a run and binds its Pi session in the same transaction.
+    /// Starts a run and binds its adapter session in the same transaction.
     pub fn append_boundary_and_bind_session(
         &mut self,
         events: &[Event],
@@ -496,12 +496,8 @@ fn append_boundary_in_tx(
     Ok(inserted)
 }
 
-impl EventStore for SqliteEventStore {
+impl RunReader for SqliteEventStore {
     type Error = StoreError;
-
-    fn append_boundary(&mut self, events: &[Event]) -> Result<usize, Self::Error> {
-        SqliteEventStore::append_boundary(self, events)
-    }
 
     fn load_run(&self, run_id: &str) -> Result<Option<RunProjection>, Self::Error> {
         SqliteEventStore::load_run(self, run_id)
@@ -511,8 +507,27 @@ impl EventStore for SqliteEventStore {
         SqliteEventStore::load_events(self, run_id)
     }
 
-    fn replay_run(&self, run_id: &str) -> Result<Option<RunProjection>, Self::Error> {
-        SqliteEventStore::replay_run(self, run_id)
+    fn latest_run(&self) -> Result<Option<RunProjection>, Self::Error> {
+        SqliteEventStore::latest_run(self)
+    }
+
+    fn session_run(&self, session_id: &str) -> Result<Option<String>, Self::Error> {
+        SqliteEventStore::session_run(self, session_id)
+    }
+}
+
+impl RunRepository for SqliteEventStore {
+    fn append_boundary(&mut self, events: &[Event]) -> Result<usize, Self::Error> {
+        SqliteEventStore::append_boundary(self, events)
+    }
+
+    fn append_boundary_and_bind_session(
+        &mut self,
+        events: &[Event],
+        session_id: &str,
+        run_id: &str,
+    ) -> Result<usize, Self::Error> {
+        SqliteEventStore::append_boundary_and_bind_session(self, events, session_id, run_id)
     }
 }
 

@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 xper-domain.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

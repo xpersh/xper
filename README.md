@@ -26,6 +26,7 @@ y aceptar de forma independiente.
 
 ## Documentos de diseño
 
+- [Guía de la arquitectura actual y casos de uso](docs/architecture.md)
 - [RFC 0001: Producto y workflow](docs/rfcs/0001-producto-y-workflow.md)
 - [RFC 0002: Configuración y routing multimodelo](docs/rfcs/0002-configuracion-multimodelo.md)
 - [RFC 0003: Observabilidad y métricas](docs/rfcs/0003-observabilidad-y-metricas.md)

@@ -9,7 +9,8 @@ use std::{
 };
 
 use rusqlite::Connection;
-use xper_application::events::{AdapterMetadata, Event, EventKind, RunStatus, WorkOutcome};
+use xper_application::events::{AdapterMetadata, Event, EventKind, WorkOutcome};
+use xper_application::read_models::RunStatus;
 use xper_domain::{
     Clock, GateEvaluation, GateResult, IdGenerator, Identifier, Phase, Run, Timestamp,
     TransitionRequest,

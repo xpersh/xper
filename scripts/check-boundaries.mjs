@@ -92,6 +92,42 @@ for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates/xper-dom
   }
 }
 
+// Application code coordinates injected ports, including time and IDs. Catch
+// direct and grouped std imports, not only crate dependency violations.
+for (const sourceFile of filesWithExtension(
+  join(workspaceRoot, "crates/xper-application/src"),
+  ".rs",
+)) {
+  const source = readFileSync(sourceFile, "utf8");
+  const directIo = /\bstd\s*::\s*(?:fs|io|net|process|thread|env)\b/.test(source);
+  const groupedIo = [...source.matchAll(/\buse\s+std\s*::\s*\{([^;]+)\}\s*;/g)].some((match) =>
+    /\b(?:fs|io|net|process|thread|env)\b/.test(match[1]),
+  );
+  if (directIo || groupedIo || /\b(?:SystemTime|Instant)::now\s*\(/.test(source)) {
+    failures.push(`${relative(workspaceRoot, sourceFile)} must access I/O and time through ports`);
+  }
+  if (/\b(?:serde_json|xper_protocol)\s*::/.test(source)) {
+    failures.push(`${relative(workspaceRoot, sourceFile)} must not handle JSON/RPC transport`);
+  }
+}
+
+// CLI interfaces translate requests and present results. Composition and local
+// port implementations may depend on concrete adapters, but no CLI file may
+// construct workflow events or commit a workflow boundary itself.
+for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates/xper-cli/src"), ".rs")) {
+  const source = readFileSync(sourceFile, "utf8");
+  const path = relative(workspaceRoot, sourceFile).replaceAll("\\", "/");
+  if (/\bEventKind\b|\.append_boundary(?:_and_bind_session)?\s*\(|\bRun::start\s*\(/.test(source)) {
+    failures.push(`${path} must delegate workflow mutations to application use cases`);
+  }
+  if (path.includes("/infrastructure/") || path.endsWith("/composition.rs")) continue;
+  if (/\bxper_(?:domain|store_sqlite|config)\s*::/.test(source)) {
+    failures.push(
+      `${path} must obtain concrete dependencies through composition or infrastructure`,
+    );
+  }
+}
+
 const importPattern = /(?:from\s+|import\s*\()\s*["']([^"']+)["']/g;
 for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   const source = readFileSync(sourceFile, "utf8");

@@ -1,11 +1,11 @@
 //! Policy for the first evidence-backed Discovery gate.
 
-use crate::events::{RunProjection, WorkOutcome};
+use crate::{events::WorkOutcome, read_models::RunProjection};
 
 /// Returns whether the current Discovery visit has a usable Brief produced by
 /// a successful explorer assignment. The caller verifies artifact availability
 /// through a port so this policy never touches a filesystem or harness API.
-pub fn discovery_ready(
+pub(crate) fn discovery_ready(
     run: &RunProjection,
     mut artifact_available: impl FnMut(&str) -> bool,
 ) -> bool {

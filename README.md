@@ -192,6 +192,23 @@ npm test              # tests Rust + TypeScript
 `npm run format` aplica el formato de Rust y TypeScript/JavaScript/JSON. El
 mismo conjunto de gates se ejecuta en CI.
 
+### Desarrollo con agentes
+
+El punto de entrada es [AGENTS.md](AGENTS.md): indica qué leer antes de editar,
+cómo elegir el módulo y qué verificar al entregar. Las reglas específicas viven
+junto a su código: [core Rust](crates/AGENTS.md) y
+[adaptador Pi](adapters/pi/AGENTS.md). Si el harness no carga instrucciones de
+subdirectorios, hay que leer explícitamente las del área afectada.
+
+Las guías de arquitectura explican las decisiones; los `AGENTS.md` las convierten
+en instrucciones de trabajo y los checks de límites detectan algunas infracciones
+en CI. Son comprobaciones estáticas, por lo que sigue siendo necesario revisar la
+responsabilidad de cada cambio. La [plantilla de PR](.github/pull_request_template.md)
+pide esa justificación y la evidencia de validación.
+
+La configuración de `.pi/` ejecuta el producto y tiene un propósito distinto de
+estas instrucciones para desarrollar xper.
+
 ## Layout inicial
 
 XP-002 crea sólo los módulos necesarios para M1:

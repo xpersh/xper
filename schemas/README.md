@@ -19,4 +19,5 @@ Discovery Brief path. `run.advance` waits for all Discovery assignments to
 finish and evaluates persisted evidence before
 entering Define. Unknown methods receive
 `-32601`; incompatible versions receive `-32001`. The stable code catalog is
-in `crates/xper-protocol/src/lib.rs` and `adapters/pi/src/protocol.ts`.
+in [`crates/xper-protocol/src/lib.rs`](../crates/xper-protocol/src/lib.rs) and
+[`adapters/pi/src/bridge/protocol.ts`](../adapters/pi/src/bridge/protocol.ts).

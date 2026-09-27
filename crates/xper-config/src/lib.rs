@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+mod routing;
+pub use routing::resolve_profile;
+
 /// Stable package identity used by scaffold-level dependency smoke tests.
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 
@@ -248,15 +251,7 @@ pub fn validate(value: &Value) -> Result<(), ConfigError> {
         .as_object()
         .ok_or_else(|| ConfigError("configuration must be a mapping".into()))?;
     reject_credentials(value)?;
-    for key in [
-        "harness",
-        "adapters",
-        "contexts",
-        "model_presets",
-        "strategies",
-        "profiles",
-        "workflow",
-    ] {
+    for key in ["harness", "adapters", "contexts", "profiles", "workflow"] {
         if root.get(key).is_some_and(|v| !v.is_object()) {
             return Err(ConfigError(format!("{key} must be a mapping")));
         }
@@ -292,7 +287,7 @@ pub fn validate(value: &Value) -> Result<(), ConfigError> {
             "adapters.pi.require_pi_open_agents must be a boolean".into(),
         ));
     }
-    for key in ["contexts", "model_presets", "strategies", "profiles"] {
+    for key in ["contexts", "profiles"] {
         if root
             .get(key)
             .and_then(Value::as_object)

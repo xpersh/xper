@@ -19,6 +19,7 @@ const assignment = {
   assignmentId: "assignment-1",
   attemptId: "attempt-1",
   role: "discovery.explorer",
+  selection: null,
 };
 const status = {
   run: {
@@ -44,8 +45,31 @@ test("typed client preserves workflow requests and accepts additive response fie
   const start = responding(started);
   assert.deepEqual(await start.client.startRun("Explore"), started);
   assert.deepEqual(start.calls, [{ method: "run.start", params: { objective: "Explore" } }]);
+  const catalog = [{ provider: "corp", model: "m1", reasoning: true }];
+  const catalogCall = responding(started);
+  await catalogCall.client.startRun("Explore", catalog);
+  assert.deepEqual(catalogCall.calls, [
+    { method: "run.start", params: { objective: "Explore", models: catalog } },
+  ]);
   const resume = responding({ ...started, phase: null, resumed: true });
   assert.equal((await resume.client.startRun("Explore")).resumed, true);
+
+  const routing = {
+    profile: "work",
+    context: "company",
+    routes: {
+      "discovery.explorer": [
+        {
+          context: "company",
+          provider: "corp",
+          model: "m1",
+          thinking: "low",
+        },
+      ],
+    },
+  };
+  assert.deepEqual(await responding({ routing }).client.inspectProfile(), routing);
+  assert.equal(await responding({ routing: null }).client.inspectProfile(), null);
 
   const delegate = responding(assignment);
   assert.deepEqual(await delegate.client.startAssignment(), assignment);
@@ -104,12 +128,26 @@ test("typed client rejects malformed responses before consumers use IDs or proje
         ],
       },
       {
+        invoke: (client) => client.inspectProfile(),
+        invalidResults: [
+          { routing: undefined },
+          {
+            routing: {
+              profile: "work",
+              context: "company",
+              routes: { "discovery.explorer": [{}] },
+            },
+          },
+        ],
+      },
+      {
         invoke: (client) => client.startAssignment(),
         invalidResults: [
           { ...assignment, attemptId: 42 },
           { ...assignment, role: "" },
           { ...assignment, runId: null },
           { ...assignment, assignmentId: undefined },
+          { ...assignment, selection: { provider: "corp" } },
         ],
       },
       {

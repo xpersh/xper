@@ -32,7 +32,7 @@
           "then": { "properties": { "params": { "$ref": "#/$defs/initializeParams" } } }
         },
         {
-          "if": { "properties": { "method": { "enum": ["capabilities", "ping", "shutdown"] } } },
+          "if": { "properties": { "method": { "enum": ["capabilities", "ping", "shutdown", "profile.inspect"] } } },
           "then": { "properties": { "params": { "maxProperties": 0 } } }
         },
         {
@@ -150,7 +150,64 @@
     "runStartParams": {
       "type": "object",
       "required": ["objective"],
-      "properties": { "objective": { "type": "string", "minLength": 1 } },
+      "properties": {
+        "objective": { "type": "string", "minLength": 1 },
+        "models": { "type": "array", "items": { "$ref": "#/$defs/availableModel" } }
+      },
+      "additionalProperties": false
+    },
+    "availableModel": {
+      "type": "object",
+      "required": ["provider", "model", "reasoning"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "reasoning": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "modelSelection": {
+      "type": "object",
+      "required": ["context", "provider", "model", "thinking"],
+      "properties": {
+        "context": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "thinking": { "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"] }
+      },
+      "additionalProperties": false
+    },
+    "routingSnapshot": {
+      "type": "object",
+      "required": ["profile", "context", "routes"],
+      "properties": {
+        "profile": { "type": "string", "minLength": 1 },
+        "context": { "type": "string", "minLength": 1 },
+        "routes": { "type": "object", "additionalProperties": {
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/modelSelection" }
+        } }
+      }
+    },
+    "profileInspectResult": {
+      "type": "object",
+      "required": ["routing"],
+      "properties": { "routing": { "oneOf": [
+        { "$ref": "#/$defs/routingSnapshot" }, { "type": "null" }
+      ] } },
+      "additionalProperties": false
+    },
+    "assignmentStartResult": {
+      "type": "object",
+      "required": ["runId", "assignmentId", "attemptId", "role", "selection"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "assignmentId": { "type": "string", "minLength": 1 },
+        "attemptId": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "selection": { "oneOf": [
+          { "$ref": "#/$defs/modelSelection" }, { "type": "null" }
+        ] }
+      },
       "additionalProperties": false
     },
     "assignmentStartParams": {

@@ -1,8 +1,15 @@
 # RFC 0002: Multimodel configuration and routing
 
-- Status: draft
+- Status: superseded by XP-009
 - Date: 2026-09-22
 - Depends on: [RFC 0001](0001-product-and-workflow.md)
+
+This RFC records an earlier design proposal. The implemented XP-009 route is
+described in [Execution profiles and model routing](../routing.md): profiles
+map roles directly to one model with one attempt per assignment,
+and contexts enforce provider allowlists. Pi's current provider selection
+cannot distinguish two subscriptions under one provider identifier, so the
+credential isolation proposed below is not implemented.
 
 ## Summary
 
@@ -93,6 +100,7 @@ A model preset identifies a reusable execution configuration:
 ```yaml
 model_presets:
   local-coder:
+    context: personal
     provider: ollama
     model: qwen-coder
     thinking: medium
@@ -103,6 +111,7 @@ model_presets:
       - personal-cheap
 
   personal-cheap:
+    context: personal
     provider: openrouter
     model: mimo
     thinking: low
@@ -110,6 +119,7 @@ model_presets:
       max_cost_usd: 1.00
 
   company-sol:
+    context: company
     provider: company-openai
     model: sol
     thinking: high
@@ -144,6 +154,9 @@ strategies:
 ```
 
 Each context binds those lanes to concrete presets:
+
+The following examples are design proposals and are not the current
+configuration format. See the implementation guide linked above.
 
 ```yaml
 contexts:

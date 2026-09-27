@@ -454,6 +454,7 @@ fn append_boundary_in_tx(
             EventKind::AttemptStarted {
                 attempt_id,
                 assignment_id,
+                ..
             } => {
                 let owner = coordinator_id.ok_or_else(|| {
                     StoreError::InvalidHistory("attempt start requires a coordinator".into())

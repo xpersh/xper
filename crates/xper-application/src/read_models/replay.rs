@@ -8,17 +8,31 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
         if event.event_id.trim().is_empty() || event.run_id.trim().is_empty() {
             return Err("empty event or run identifier".into());
         }
-        if let EventKind::RunStarted { metadata } = &event.kind {
+        if let EventKind::RunStarted { metadata, routing } = &event.kind {
             if run.is_some()
                 || metadata.adapter.trim().is_empty()
                 || metadata.version.trim().is_empty()
+                || routing.as_ref().is_some_and(|snapshot| {
+                    snapshot.profile.trim().is_empty()
+                        || snapshot.context.trim().is_empty()
+                        || snapshot.routes.is_empty()
+                        || snapshot.routes.values().any(|candidates| {
+                            candidates.is_empty()
+                                || candidates.iter().any(|selection| {
+                                    selection.context != snapshot.context
+                                        || selection.provider.trim().is_empty()
+                                        || selection.model.trim().is_empty()
+                                })
+                        })
+                })
             {
-                return Err("duplicate run start or incomplete adapter metadata".into());
+                return Err("duplicate run start or invalid run metadata/routing".into());
             }
             run = Some(RunProjection {
                 run_id: event.run_id.clone(),
                 status: RunStatus::Active,
                 metadata: metadata.clone(),
+                routing: routing.clone(),
                 visits: Vec::new(),
                 gates: BTreeMap::new(),
                 assignments: BTreeMap::new(),
@@ -189,18 +203,38 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
             EventKind::AttemptStarted {
                 attempt_id,
                 assignment_id,
+                selection,
             } => {
                 if attempt_id.trim().is_empty()
                     || state.attempts.contains_key(attempt_id)
                     || !state.assignments.contains_key(assignment_id)
+                    || match (&state.routing, selection) {
+                        (Some(routing), Some(selection)) => {
+                            let assignment = &state.assignments[assignment_id];
+                            !routing
+                                .routes
+                                .get(&assignment.role)
+                                .is_some_and(|candidates| candidates.contains(selection))
+                        }
+                        (None, None) => false,
+                        _ => true,
+                    }
                 {
                     return Err("invalid attempt".into());
                 }
+                let ordinal = state
+                    .attempts
+                    .values()
+                    .filter(|attempt| attempt.assignment_id == *assignment_id)
+                    .count() as u32
+                    + 1;
                 state.attempts.insert(
                     attempt_id.clone(),
                     AttemptProjection {
                         attempt_id: attempt_id.clone(),
                         assignment_id: assignment_id.clone(),
+                        ordinal,
+                        selection: selection.clone(),
                         started_at_ms: event.occurred_at_ms,
                         finished_at_ms: None,
                         outcome: None,

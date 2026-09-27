@@ -8,11 +8,31 @@ export interface RunStarted {
   resumed: boolean;
 }
 
+export interface ModelSelection {
+  context: string;
+  provider: string;
+  model: string;
+  thinking: string;
+}
+
+export interface RoutingSnapshot {
+  profile: string;
+  context: string;
+  routes: Record<string, ModelSelection[]>;
+}
+
+export interface AvailableModel {
+  provider: string;
+  model: string;
+  reasoning: boolean;
+}
+
 export interface AssignmentStarted {
   runId: string;
   assignmentId: string;
   attemptId: string;
   role: string;
+  selection: ModelSelection | null;
 }
 
 export type FinishAttempt = { attemptId: string } & (
@@ -47,7 +67,8 @@ export interface RunStatus {
 
 /** Workflow operations available to adapter actions, independent of the transport. */
 export interface WorkflowClient {
-  startRun(objective: string): Promise<RunStarted>;
+  startRun(objective: string, models?: AvailableModel[]): Promise<RunStarted>;
+  inspectProfile(): Promise<RoutingSnapshot | null>;
   startAssignment(assignmentId?: string): Promise<AssignmentStarted>;
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;
   advanceRun(): Promise<RunAdvanced>;
@@ -72,6 +93,28 @@ function attemptOutcome(value: unknown): value is AttemptOutcome {
   );
 }
 
+function modelSelection(value: unknown): value is ModelSelection {
+  return (
+    object(value) &&
+    text(value.context) &&
+    text(value.provider) &&
+    text(value.model) &&
+    text(value.thinking)
+  );
+}
+
+function routingSnapshot(value: unknown): value is RoutingSnapshot {
+  return (
+    object(value) &&
+    text(value.profile) &&
+    text(value.context) &&
+    object(value.routes) &&
+    Object.values(value.routes).every(
+      (items) => Array.isArray(items) && items.length > 0 && items.every(modelSelection),
+    )
+  );
+}
+
 function runStarted(value: unknown): value is RunStarted {
   return (
     object(value) &&
@@ -87,7 +130,8 @@ function assignmentStarted(value: unknown): value is AssignmentStarted {
     text(value.runId) &&
     text(value.assignmentId) &&
     text(value.attemptId) &&
-    text(value.role)
+    text(value.role) &&
+    (value.selection === null || modelSelection(value.selection))
   );
 }
 
@@ -157,8 +201,18 @@ export class XperClient implements WorkflowClient {
     return result;
   }
 
-  startRun(objective: string): Promise<RunStarted> {
-    return this.call("run.start", { objective }, runStarted);
+  startRun(objective: string, models?: AvailableModel[]): Promise<RunStarted> {
+    return this.call("run.start", { objective, ...(models ? { models } : {}) }, runStarted);
+  }
+
+  async inspectProfile(): Promise<RoutingSnapshot | null> {
+    const value = await this.call(
+      "profile.inspect",
+      {},
+      (result): result is { routing: RoutingSnapshot | null } =>
+        object(result) && (result.routing === null || routingSnapshot(result.routing)),
+    );
+    return value.routing;
   }
 
   async startAssignment(assignmentId?: string): Promise<AssignmentStarted> {

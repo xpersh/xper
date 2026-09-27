@@ -2,10 +2,10 @@
 
 use std::{collections::BTreeMap, fs, io, path::Path};
 
-use xper_application::events::AdapterMetadata;
+use xper_application::events::{AdapterMetadata, RoutingSnapshot};
 use xper_store_sqlite::SqliteEventStore;
 
-use crate::infrastructure::{UniqueIds, WallClock, WorkspaceArtifacts};
+use crate::infrastructure::{UniqueIds, WallClock, WorkspaceArtifacts, profile_config};
 
 /// Resources owned by one bridge session; workflow decisions live in use cases.
 pub(crate) struct WorkflowRuntime {
@@ -14,6 +14,7 @@ pub(crate) struct WorkflowRuntime {
     pub(crate) clock: WallClock,
     pub(crate) ids: UniqueIds,
     pub(crate) metadata: AdapterMetadata,
+    pub(crate) routing: Option<RoutingSnapshot>,
     pub(crate) session_id: String,
 }
 
@@ -29,6 +30,7 @@ impl WorkflowRuntime {
         fs::create_dir_all(&directory)?;
         let store = SqliteEventStore::open_or_volatile(directory.join("events.sqlite"))
             .map_err(io::Error::other)?;
+        let routing = profile_config::resolved_active(root)?;
         Ok(Self {
             store,
             artifacts: WorkspaceArtifacts(root.to_path_buf()),
@@ -39,6 +41,7 @@ impl WorkflowRuntime {
                 version: version.into(),
                 capabilities,
             },
+            routing,
             session_id: session_id.into(),
         })
     }

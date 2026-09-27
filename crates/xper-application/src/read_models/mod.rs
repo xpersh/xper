@@ -1,6 +1,6 @@
 //! Read models derived from the durable event stream.
 
-use crate::events::{AdapterMetadata, GateOutcome, WorkOutcome};
+use crate::events::{AdapterMetadata, GateOutcome, ModelSelection, RoutingSnapshot, WorkOutcome};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -58,6 +58,10 @@ pub struct AttemptProjection {
     pub attempt_id: String,
     /// Owning logical assignment.
     pub assignment_id: String,
+    /// One-based start order within the assignment.
+    pub ordinal: u32,
+    /// Exact model used, absent only for pre-routing histories.
+    pub selection: Option<ModelSelection>,
     /// Start time in Unix milliseconds.
     pub started_at_ms: u64,
     /// Finish time, if an explicit terminal event exists.
@@ -105,6 +109,8 @@ pub struct RunProjection {
     pub status: RunStatus,
     /// Adapter identity captured at run start.
     pub metadata: AdapterMetadata,
+    /// Effective routing captured at run start, absent for legacy runs.
+    pub routing: Option<RoutingSnapshot>,
     /// Visits in event order.
     pub visits: Vec<VisitProjection>,
     /// Gate evaluations keyed by identity.

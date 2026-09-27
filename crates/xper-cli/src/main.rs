@@ -3,6 +3,7 @@
 mod bridge;
 mod composition;
 mod infrastructure;
+mod profile;
 mod setup;
 mod status;
 
@@ -52,6 +53,23 @@ enum Commands {
         #[arg(long)]
         run: Option<String>,
     },
+    /// Activate or inspect an execution profile.
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfileAction {
+    /// Select the profile for subsequent runs in this project.
+    Activate { name: String },
+    /// Show a profile and optionally every resolved role selection.
+    Inspect {
+        name: Option<String>,
+        #[arg(long)]
+        resolved: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -61,6 +79,12 @@ fn main() -> ExitCode {
         Commands::Doctor { json } => setup::doctor(json),
         Commands::Init { global, yes } => setup::init(global, yes),
         Commands::Status { json, run } => status::show(json, run.as_deref()),
+        Commands::Profile { action } => match action {
+            ProfileAction::Activate { name } => profile::activate(&name),
+            ProfileAction::Inspect { name, resolved } => {
+                profile::inspect(name.as_deref(), resolved)
+            }
+        },
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,

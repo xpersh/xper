@@ -6,7 +6,10 @@ use std::{
 };
 use xper_application::{
     ApplicationError,
-    events::{AdapterMetadata, Event, EventKind, GateOutcome, WorkOutcome},
+    events::{
+        AdapterMetadata, Event, EventKind, GateOutcome, ModelSelection, RoutingSnapshot,
+        WorkOutcome,
+    },
     ports::{ArtifactReader, Clock, IdGenerator, RunReader, RunRepository},
     read_models::{RunProjection, replay},
     use_cases::{advance_run, finish_attempt, get_run_status, start_discovery, start_run},
@@ -111,6 +114,8 @@ impl Workflow {
             start_run::Request {
                 session_id: session,
                 objective: "Explore the repository",
+                routing: None,
+                available_models: None,
                 metadata: &AdapterMetadata {
                     adapter: "test".into(),
                     version: "1".into(),
@@ -173,6 +178,107 @@ fn brief(attempt: &str) -> String {
 }
 
 #[test]
+fn routed_failure_finishes_after_one_attempt_and_keeps_exact_selection() {
+    let mut workflow = Workflow::default();
+    let selected = ModelSelection {
+        context: "company".into(),
+        provider: "corp".into(),
+        model: "m1".into(),
+        thinking: "low".into(),
+    };
+    let routing = RoutingSnapshot {
+        profile: "work".into(),
+        context: "company".into(),
+        routes: BTreeMap::from([("discovery.explorer".into(), vec![selected.clone()])]),
+    };
+    let metadata = AdapterMetadata {
+        adapter: "test".into(),
+        version: "1".into(),
+        capabilities: BTreeMap::new(),
+    };
+    let model = start_run::AvailableModel {
+        provider: "corp".into(),
+        model: "m1".into(),
+        reasoning: true,
+    };
+    let invalid = start_run::execute(
+        &mut workflow.store,
+        &mut FixedClock,
+        &mut workflow.ids,
+        start_run::Request {
+            session_id: "s",
+            objective: "Investigate",
+            metadata: &metadata,
+            routing: Some(&routing),
+            available_models: Some(&[]),
+        },
+    );
+    assert!(matches!(invalid, Err(ApplicationError::InvalidInput(_))));
+    assert!(workflow.store.events.is_empty());
+    let incapable = start_run::AvailableModel {
+        reasoning: false,
+        ..model.clone()
+    };
+    let invalid = start_run::execute(
+        &mut workflow.store,
+        &mut FixedClock,
+        &mut workflow.ids,
+        start_run::Request {
+            session_id: "s",
+            objective: "Investigate",
+            metadata: &metadata,
+            routing: Some(&routing),
+            available_models: Some(&[incapable]),
+        },
+    );
+    assert!(matches!(invalid, Err(ApplicationError::InvalidInput(_))));
+    let started = start_run::execute(
+        &mut workflow.store,
+        &mut FixedClock,
+        &mut workflow.ids,
+        start_run::Request {
+            session_id: "s",
+            objective: "Investigate",
+            metadata: &metadata,
+            routing: Some(&routing),
+            available_models: Some(&[model]),
+        },
+    )
+    .unwrap();
+    let attempt = workflow.delegate("s", None).unwrap();
+    assert_eq!(attempt.selection, Some(selected.clone()));
+    workflow
+        .finish("s", &attempt.attempt_id, WorkOutcome::Failed)
+        .unwrap();
+    let run = workflow.store.load_run(&started.run_id).unwrap().unwrap();
+    assert_eq!(run.routing, Some(routing));
+    assert_eq!(run.attempts[&attempt.attempt_id].selection, Some(selected));
+    assert_eq!(run.attempts.len(), 1);
+    assert_eq!(
+        run.assignments[&attempt.assignment_id].outcome,
+        Some(WorkOutcome::Failed)
+    );
+    assert!(
+        workflow
+            .delegate("s", Some(&attempt.assignment_id))
+            .is_err()
+    );
+    let mut corrupt = workflow.store.events.clone();
+    let event = corrupt
+        .iter_mut()
+        .find(|event| matches!(event.kind, EventKind::AttemptStarted { .. }))
+        .unwrap();
+    if let EventKind::AttemptStarted {
+        selection: Some(selection),
+        ..
+    } = &mut event.kind
+    {
+        selection.context = "personal".into();
+    }
+    assert!(replay(&corrupt).is_err());
+}
+
+#[test]
 fn start_is_atomic_resumable_and_deterministic() {
     let mut workflow = Workflow::default();
     let first = workflow.start("session").unwrap();
@@ -230,6 +336,8 @@ fn direct_callers_cannot_start_an_empty_objective_or_delegate_without_a_run() {
             session_id: "session",
             objective: "  ",
             metadata: &metadata,
+            routing: None,
+            available_models: None,
         },
     );
     assert!(matches!(result, Err(ApplicationError::InvalidInput(_))));

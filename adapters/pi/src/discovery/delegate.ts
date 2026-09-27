@@ -26,6 +26,7 @@ export function runDiscovery(
     timeoutMs?: number;
     systemPrompt: string;
     model?: string;
+    thinking?: string;
   },
 ): Promise<DelegateResult> {
   if (signal?.aborted) return Promise.resolve({ outcome: "cancelled" });
@@ -42,6 +43,7 @@ export function runDiscovery(
       "--tools",
       "read,bash",
       ...(options.model ? ["--model", options.model] : []),
+      ...(options.thinking ? ["--thinking", options.thinking] : []),
       "--system-prompt",
       options.systemPrompt,
     ],

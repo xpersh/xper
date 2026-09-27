@@ -72,6 +72,7 @@ action so it can save the Brief and report it to the core.
 | Public protocol envelopes and errors | [bridge/protocol.ts](../src/bridge/protocol.ts) |
 | Resolve roles, execute Pi, and normalize results | [discovery/delegate.ts](../src/discovery/delegate.ts) |
 | Write the Brief without overwriting existing evidence | [discovery/artifacts.ts](../src/discovery/artifacts.ts) |
+| Query Pi's available models and map routed selections | [discovery/models.ts](../src/discovery/models.ts) |
 
 ## Delegation flow
 
@@ -103,6 +104,16 @@ file, or Pi registration implementations. They do not need a service container
 or a second domain/application hierarchy.
 
 Installation setup through `xper init` and `xper doctor` belongs to the CLI.
+
+For an active profile, `/xper start` asks the core for its resolved routing,
+queries Pi's available models using its normal configuration, and
+passes the catalog to `run.start`. The core validates and freezes the route.
+`assignment.start` returns a neutral model selection, which the adapter maps to
+Pi's `--model` and `--thinking`. Pi credentials are shared with the primary
+process; contexts constrain provider names but cannot choose between accounts
+under the same provider identifier. A failed or timed-out execution settles
+its assignment after one attempt. Recovery can retry an interrupted attempt
+with its recorded model selection.
 Its [local Pi implementation](../../../crates/xper-cli/src/infrastructure/installation.rs)
 implements the core's `Installation` port; the extension does not duplicate
 that flow.

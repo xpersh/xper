@@ -304,7 +304,8 @@ impl BridgeState {
                     invalid_params(writer, id)?;
                 }
             }
-            "run.start" | "run.status" | "assignment.start" | "attempt.finish" | "run.advance" => {
+            "run.start" | "run.status" | "assignment.start" | "attempt.finish" | "run.advance"
+            | "profile.inspect" => {
                 let Some(workflow) = self.workflow.as_mut() else {
                     invalid_params(writer, id)?;
                     return Ok(true);

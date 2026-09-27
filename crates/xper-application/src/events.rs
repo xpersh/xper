@@ -19,6 +19,30 @@ pub struct AdapterMetadata {
     pub capabilities: BTreeMap<String, bool>,
 }
 
+/// Exact, harness-neutral model chosen for one physical attempt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelSelection {
+    /// Policy context for this execution; credentials remain Pi-owned.
+    pub context: String,
+    /// Exact provider identifier.
+    pub provider: String,
+    /// Exact model identifier.
+    pub model: String,
+    /// Exact requested thinking level.
+    pub thinking: String,
+}
+
+/// Frozen model selection for each role in a run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutingSnapshot {
+    /// Execution profile active at run start.
+    pub profile: String,
+    /// Fixed context for the run.
+    pub context: String,
+    /// Resolved selections by role, preserving the event payload shape.
+    pub routes: BTreeMap<String, Vec<ModelSelection>>,
+}
+
 /// A durable event. Payloads are a closed whitelist: transcripts, prompts,
 /// source code, and tool arguments cannot be serialized through this API.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,10 +60,15 @@ pub struct Event {
 impl Event {
     /// Converts an existing domain event to the durable vocabulary. The run
     /// objective and gate evidence are deliberately omitted.
-    pub fn from_domain(event: &DomainEvent, metadata: &AdapterMetadata) -> Self {
+    pub fn from_domain(
+        event: &DomainEvent,
+        metadata: &AdapterMetadata,
+        routing: Option<&RoutingSnapshot>,
+    ) -> Self {
         let kind = match event.kind() {
             DomainEventKind::RunStarted { .. } => EventKind::RunStarted {
                 metadata: metadata.clone(),
+                routing: routing.cloned(),
             },
             DomainEventKind::PhaseEntered {
                 phase_visit_id,
@@ -148,6 +177,8 @@ pub enum WorkOutcome {
 pub enum EventKind {
     RunStarted {
         metadata: AdapterMetadata,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        routing: Option<RoutingSnapshot>,
     },
     RunSuspended,
     RunResumed,
@@ -189,6 +220,8 @@ pub enum EventKind {
     AttemptStarted {
         attempt_id: String,
         assignment_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selection: Option<ModelSelection>,
     },
     AttemptFinished {
         attempt_id: String,

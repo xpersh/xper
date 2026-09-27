@@ -7,7 +7,7 @@ import {
   type DiscoveryExecution,
   type DiscoveryExecutionResult,
 } from "../actions/delegate-discovery.js";
-import type { FinishAttempt, RunAdvanced } from "../bridge/xper-client.js";
+import type { FinishAttempt, ModelSelection, RunAdvanced } from "../bridge/xper-client.js";
 
 function fixture() {
   const calls: string[] = [];
@@ -46,6 +46,7 @@ function fixture() {
           assignmentId: assignmentId ?? "assignment-1",
           attemptId: "attempt-1",
           role: "discovery.explorer",
+          selection: null,
         };
       },
       async finishAttempt(completion) {
@@ -195,6 +196,7 @@ test("an empty successful response cannot produce a successful durable result", 
   f.state.execution = { outcome: "succeeded", brief: " \n" };
   assert.equal((await delegateDiscovery(f.request, f.dependencies)).outcome, "failed");
   assert.deepEqual(f.calls, ["start", "execute", "finish"]);
+  assert.deepEqual(f.completions, [{ attemptId: "attempt-1", outcome: "failed" }]);
 });
 
 test("a rejected assignment does not start an agent or invent an attempt result", async () => {
@@ -230,4 +232,33 @@ test("a failed advance never rewrites an already settled successful attempt", as
   assert.equal(f.completions.length, 1);
   assert.equal(f.completions[0]?.outcome, "succeeded");
   assert.equal(f.observations.length, 2);
+});
+
+test("a failed routed execution settles after one attempt", async () => {
+  const f = fixture();
+  const selected: ModelSelection = {
+    context: "company",
+    provider: "corp",
+    model: "m1",
+    thinking: "low",
+  };
+  f.dependencies.workflow.startAssignment = async (assignmentId) => {
+    f.assignmentIds.push(assignmentId);
+    return {
+      runId: "run-1",
+      assignmentId: "assignment-1",
+      attemptId: "attempt-1",
+      role: "discovery.explorer",
+      selection: selected,
+    };
+  };
+  f.state.execution = { outcome: "failed" };
+  const result = await delegateDiscovery(f.request, f.dependencies);
+  assert.deepEqual(f.assignmentIds, [undefined]);
+  assert.deepEqual(
+    f.executions.map((execution) => execution.selection),
+    [selected],
+  );
+  assert.deepEqual(f.completions, [{ attemptId: "attempt-1", outcome: "failed" }]);
+  assert.equal(result.outcome, "failed");
 });

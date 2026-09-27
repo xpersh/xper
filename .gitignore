@@ -8,6 +8,7 @@
 /.xper/artifacts/
 /.xper/demo-008/
 /.xper/config.local.yaml
+/.xper/active-profile
 /spikes/
 *.log
 .DS_Store

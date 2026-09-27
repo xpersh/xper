@@ -55,6 +55,7 @@ fn started() -> Vec<Event> {
             100,
             EventKind::RunStarted {
                 metadata: metadata(),
+                routing: None,
             },
         ),
         event(
@@ -93,7 +94,7 @@ fn domain_events_replay_to_the_same_run_phase_and_visits() {
         Run::start("PRIVATE PROMPT: do not persist", &mut clock, &mut ids).into_parts();
     let durable_start: Vec<_> = start_events
         .iter()
-        .map(|e| Event::from_domain(e, &metadata()))
+        .map(|e| Event::from_domain(e, &metadata(), None))
         .collect();
     assert_eq!(store.append_boundary(&durable_start).unwrap(), 2);
     assert!(
@@ -117,7 +118,7 @@ fn domain_events_replay_to_the_same_run_phase_and_visits() {
         let events: Vec<_> = receipt
             .events()
             .iter()
-            .map(|e| Event::from_domain(e, &metadata()))
+            .map(|e| Event::from_domain(e, &metadata(), None))
             .collect();
         assert_eq!(store.append_boundary(&events).unwrap(), 4);
         assert_eq!(store.append_boundary(&events).unwrap(), 0);
@@ -166,6 +167,7 @@ fn domain_events_replay_to_the_same_run_phase_and_visits() {
                 EventKind::AttemptStarted {
                     attempt_id: "t-brief".into(),
                     assignment_id: "a-brief".into(),
+                    selection: None,
                 },
             ),
             event(
@@ -232,6 +234,7 @@ fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
                 EventKind::AttemptStarted {
                     attempt_id: "t1".into(),
                     assignment_id: "a1".into(),
+                    selection: None,
                 },
             ),
         ];
@@ -284,6 +287,7 @@ fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
                     EventKind::AttemptStarted {
                         attempt_id: "t2".into(),
                         assignment_id: "a2".into(),
+                        selection: None,
                     },
                 ),
                 event(
@@ -381,6 +385,7 @@ fn a_second_live_connection_does_not_interrupt_the_first_connections_attempt() {
                 EventKind::AttemptStarted {
                     attempt_id: "t1".into(),
                     assignment_id: "a1".into(),
+                    selection: None,
                 },
             ),
         ])
@@ -456,6 +461,7 @@ fn version_one_database_migrates_and_recovers_legacy_attempts() {
         EventKind::AttemptStarted {
             attempt_id: "t1".into(),
             assignment_id: "a1".into(),
+            selection: None,
         },
     ));
     for item in history {

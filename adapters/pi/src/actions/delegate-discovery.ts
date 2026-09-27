@@ -1,4 +1,9 @@
-import type { AttemptOutcome, FinishAttempt, WorkflowClient } from "../bridge/xper-client.js";
+import type {
+  AttemptOutcome,
+  FinishAttempt,
+  ModelSelection,
+  WorkflowClient,
+} from "../bridge/xper-client.js";
 
 export type DiscoveryExecutionResult =
   | { outcome: "succeeded"; brief: string }
@@ -11,6 +16,7 @@ export interface DiscoveryExecution {
   signal: AbortSignal;
   timeoutMs: number;
   model?: string;
+  selection?: ModelSelection;
 }
 
 type Observation =
@@ -64,7 +70,11 @@ export async function delegateDiscovery(
       role: started.role,
       signal: request.signal,
       timeoutMs: timeoutSeconds * 1_000,
-      ...(request.model ? { model: request.model } : {}),
+      ...(started.selection
+        ? { selection: started.selection }
+        : request.model
+          ? { model: request.model }
+          : {}),
     });
     if (result.outcome === "succeeded") {
       if (!result.brief.trim()) throw new Error("Discovery Brief is empty");
@@ -77,8 +87,7 @@ export async function delegateDiscovery(
     completion = { attemptId, outcome: request.signal.aborted ? "cancelled" : "failed" };
   }
 
-  // A bridge failure leaves the durable outcome unknown. Propagate it; do not
-  // invent a second result or retry a mutation that may already be committed.
+  // A bridge failure leaves the durable outcome unknown. Propagate it.
   const settled = await workflow.finishAttempt(completion);
   dependencies.observe?.({ type: "attempt.finished", attemptId, outcome: completion.outcome });
   const phase =

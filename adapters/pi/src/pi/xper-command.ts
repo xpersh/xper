@@ -1,6 +1,7 @@
 import type { PiExtensionAPI } from "./types.js";
 import { PROTOCOL_VERSION } from "../bridge/protocol.js";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
+import { listAvailableModels } from "../discovery/models.js";
 
 export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): void {
   pi.registerCommand("xper", {
@@ -21,7 +22,13 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         try {
           const result =
             action === "start"
-              ? await connection.workflow.startRun(rest.join(" "))
+              ? await (async () => {
+                  const routing = await connection.workflow.inspectProfile();
+                  if (routing && !routing.routes["discovery.explorer"]?.length)
+                    throw new Error("active profile has no Discovery route");
+                  const models = routing ? await listAvailableModels() : undefined;
+                  return connection.workflow.startRun(rest.join(" "), models);
+                })()
               : await connection.workflow.advanceRun();
           await session.refreshRun();
           ctx.ui.notify(`xper: ${JSON.stringify(result)}`, "info");

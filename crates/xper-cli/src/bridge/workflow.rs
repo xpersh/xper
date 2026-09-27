@@ -31,10 +31,44 @@ pub(super) fn handle(
         clock,
         ids,
         metadata,
+        routing,
         session_id,
     } = runtime;
     match method {
         "run.start" => {
+            let available_models = params
+                .get("models")
+                .map(|value| {
+                    value
+                        .as_array()
+                        .ok_or(ApplicationError::InvalidInput("models must be a list"))?
+                        .iter()
+                        .map(|model| {
+                            Ok(start_run::AvailableModel {
+                                provider: model
+                                    .get("provider")
+                                    .and_then(Value::as_str)
+                                    .filter(|text| !text.is_empty())
+                                    .ok_or(ApplicationError::InvalidInput(
+                                        "invalid model provider",
+                                    ))?
+                                    .into(),
+                                model: model
+                                    .get("model")
+                                    .and_then(Value::as_str)
+                                    .filter(|text| !text.is_empty())
+                                    .ok_or(ApplicationError::InvalidInput("invalid model ID"))?
+                                    .into(),
+                                reasoning: model.get("reasoning").and_then(Value::as_bool).ok_or(
+                                    ApplicationError::InvalidInput(
+                                        "invalid model reasoning capability",
+                                    ),
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, ApplicationError>>()
+                })
+                .transpose()?;
             let result = start_run::execute(
                 store,
                 clock,
@@ -42,6 +76,8 @@ pub(super) fn handle(
                 start_run::Request {
                     session_id,
                     metadata,
+                    routing: routing.as_ref(),
+                    available_models: available_models.as_deref(),
                     objective: params
                         .get("objective")
                         .and_then(Value::as_str)
@@ -74,7 +110,7 @@ pub(super) fn handle(
                 },
             )?;
             Ok(
-                json!({"runId":result.run_id,"assignmentId":result.assignment_id,"attemptId":result.attempt_id,"role":result.role}),
+                json!({"runId":result.run_id,"assignmentId":result.assignment_id,"attemptId":result.attempt_id,"role":result.role,"selection":result.selection}),
             )
         }
         "attempt.finish" => {
@@ -133,6 +169,7 @@ pub(super) fn handle(
             }
             Ok(value)
         }
+        "profile.inspect" if empty_params(params) => Ok(json!({"routing":routing})),
         _ => Err(ApplicationError::InvalidInput("invalid params")),
     }
 }

@@ -16,6 +16,22 @@
     "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-2","method":"ping","params":{}}
   },
   {
+    "name": "profile inspection request",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-profile","method":"profile.inspect","params":{}}
+  },
+  {
+    "name": "run start with adapter model catalog",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-run","method":"run.start","params":{"objective":"Investigate","models":[{"provider":"corp","model":"m1","reasoning":true}]}}
+  },
+  {
+    "name": "profile inspection result",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-profile","result":{"routing":{"profile":"work","context":"company","routes":{"discovery.explorer":[{"context":"company","provider":"corp","model":"m1","thinking":"low"}]}}}}
+  },
+  {
+    "name": "routed assignment result",
+    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-assignment","result":{"runId":"run-1","assignmentId":"assignment-1","attemptId":"attempt-1","role":"discovery.explorer","selection":{"context":"company","provider":"corp","model":"m1","thinking":"low"}}}
+  },
+  {
     "name": "shutdown response",
     "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-3","result":{"ok":true}}
   },

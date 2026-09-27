@@ -1,6 +1,7 @@
 //! Local implementations of application ports.
 
 pub(crate) mod installation;
+pub(crate) mod profile_config;
 
 use std::{
     fs, io,

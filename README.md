@@ -28,6 +28,7 @@ implemented, verified, and accepted independently, rather than an entire project
 - [Pi adapter architecture](adapters/pi/docs/architecture.md)
 - [RFC 0001: Product and workflow](docs/rfcs/0001-product-and-workflow.md)
 - [RFC 0002: Multimodel configuration and routing](docs/rfcs/0002-multimodel-configuration.md)
+- [Execution profiles and model routing](docs/routing.md)
 - [RFC 0003: Observability and metrics](docs/rfcs/0003-observability-and-metrics.md)
 - [RFC 0004: Pi integration and primary agent](docs/rfcs/0004-pi-integration.md)
 - [RFC 0005: Modular architecture and harness adapters](docs/rfcs/0005-modular-architecture.md)
@@ -54,7 +55,8 @@ the entire workflow.
 - Verify runs continuously alongside Implementation.
 - A failure returns to its originating phase, not always to Implementation.
 - Model routing is deterministic and auditable by default.
-- Work and personal credentials and data are never mixed implicitly.
+- Context policy prevents selection of a provider outside its allowlist;
+  Pi controls credential selection for each provider.
 - Observability must never prevent the workflow from continuing.
 - Metrics measure system behavior, not human value or individual productivity.
 

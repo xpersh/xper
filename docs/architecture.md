@@ -32,7 +32,7 @@ Solid arrows show calls. Implementations depend on core contracts.
 | RPC translation | `crates/xper-cli/src/bridge/workflow.rs` | JSON → typed request → result → JSON |
 | CLI presentation | `crates/xper-cli/src/status.rs`, `setup.rs` | Text/JSON and terminal confirmation |
 | Composition | `crates/xper-cli/src/composition.rs` | Opening SQLite and session resources |
-| Local adapters | `crates/xper-cli/src/infrastructure/` | Clock, IDs, artifacts, and local installation |
+| Local adapters | `crates/xper-cli/src/infrastructure/` | Clock, IDs, artifacts, installation, and active-profile files |
 | System actions | `crates/xper-application/src/use_cases/` | Coordination of each operation |
 | Action dependencies | `crates/xper-application/src/ports.rs` | Reads, transactions, evidence, and installation |
 | Durable vocabulary | `crates/xper-application/src/events.rs` | Normalized events and conversion from the domain |
@@ -40,6 +40,7 @@ Solid arrows show calls. Implementations depend on core contracts.
 | Evidence policy | `crates/xper-application/src/policies/discovery.rs` | Relationships between visit, assignment, attempt, and Brief |
 | Kernel rules | `crates/xper-domain/src/` | Entities, state machine, and pure transitions |
 | Persistence | `crates/xper-store-sqlite/` | Transactions, migrations, leases, and recovery |
+| Profile resolution | `crates/xper-config/src/routing.rs` | Resolve context policy and one model per role |
 
 ## Use cases as the application API
 
@@ -51,6 +52,7 @@ connection.
 | Entry point | Use case | Result |
 | --- | --- | --- |
 | `run.start` | `start_run` | Start Intake → Discovery or resume the session's active run |
+| `profile.inspect`, `xper profile` | Configuration and CLI | Resolve and present the active route without starting a run |
 | `assignment.start` | `start_discovery` | Create an assignment/attempt or retry a pending assignment |
 | `attempt.finish` | `finish_attempt` | Record the result, evidence, and assignment completion |
 | `run.advance` | `advance_run` | Evaluate the Discovery gate and enter Define |
@@ -83,6 +85,10 @@ An operation coordinates one coherent unit of persistence: finishing a
 successful attempt records its result, artifact, and assignment in the same
 commit. Queries return only persisted state. The session resolves its run
 through the repository without keeping another copy of the binding in the bridge.
+When a profile is active, `start_run` validates the adapter's model catalog
+before committing the frozen routing snapshot. `start_discovery` chooses the
+selection from that snapshot, with the exact model recorded in the attempt's
+start event. Failures and timeouts complete the assignment after one attempt.
 
 Leases, volatile fallback, and opening and closing the database belong to the
 adapter and process lifecycle. The bridge adds durability information to its

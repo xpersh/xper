@@ -2,7 +2,7 @@
 
 use crate::{
     ApplicationError,
-    events::EventKind,
+    events::{EventKind, ModelSelection},
     ports::{Clock, IdGenerator, RunRepository},
 };
 
@@ -27,6 +27,8 @@ pub struct Outcome {
     pub attempt_id: String,
     /// Harness-neutral role to execute.
     pub role: &'static str,
+    /// Exact selection to pass to the harness, if routing is configured.
+    pub selection: Option<ModelSelection>,
 }
 
 /// Records the assignment and attempt together before execution is dispatched.
@@ -66,12 +68,47 @@ pub fn execute(
             "assignment already has a running attempt",
         ));
     }
+    let role = "discovery.explorer";
+    let selection = if let Some(routing) = &run.routing {
+        let candidates = routing
+            .routes
+            .get(role)
+            .ok_or(ApplicationError::InvalidInput(
+                "active profile has no discovery.explorer route",
+            ))?;
+        let previous = pending.and_then(|assignment| {
+            run.attempts
+                .values()
+                .filter(|attempt| attempt.assignment_id == assignment.assignment_id)
+                .max_by_key(|attempt| attempt.ordinal)
+        });
+        let chosen = if let Some(attempt) = previous {
+            let selected = attempt
+                .selection
+                .as_ref()
+                .ok_or(ApplicationError::InvalidInput(
+                    "previous attempt has no routed selection",
+                ))?;
+            if !candidates.contains(selected) {
+                return Err(ApplicationError::InvalidInput(
+                    "previous selection is outside the run snapshot",
+                ));
+            }
+            selected
+        } else {
+            candidates.first().ok_or(ApplicationError::InvalidInput(
+                "active profile has no model for discovery.explorer",
+            ))?
+        };
+        Some(chosen.clone())
+    } else {
+        None
+    };
     let assignment_id = pending.map_or_else(
         || ids.next_id().as_str().to_owned(),
         |assignment| assignment.assignment_id.clone(),
     );
     let attempt_id = ids.next_id().as_str().to_owned();
-    let role = "discovery.explorer";
     let mut events = Vec::new();
     if pending.is_none() {
         events.push(event(
@@ -92,6 +129,7 @@ pub fn execute(
         EventKind::AttemptStarted {
             attempt_id: attempt_id.clone(),
             assignment_id: assignment_id.clone(),
+            selection: selection.clone(),
         },
     ));
     store
@@ -102,5 +140,6 @@ pub fn execute(
         assignment_id,
         attempt_id,
         role,
+        selection,
     })
 }

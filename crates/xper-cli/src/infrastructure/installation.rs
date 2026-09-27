@@ -13,7 +13,8 @@ use xper_application::{
 };
 use xper_config::{DEFAULT_CONFIG, ScopePaths, load_effective, load_global};
 
-const PI_VERSION: &str = "0.85.1";
+const MIN_PI_VERSION: &str = "0.85.1";
+const MAX_PI_VERSION: &str = "0.87.1";
 const OPEN_AGENTS_VERSION: &str = "0.1.22";
 const PACKAGE: &str = "npm:pi-open-agents@0.1.22";
 const AGENT: &str = "---\nname: xper\ndescription: XP development coordinator backed by xper\nmode: primary\nsystemPrompt: replace\n---\n\nYou are xper, the primary agent for an Extreme Programming development session.\nStart a run with /xper start before delegating Discovery. Use xper_delegate for the discovery.explorer assignment and report the Discovery Brief and current phase. A failed or cancelled attempt does not satisfy the Discovery gate. Report bridge problems clearly.\n";
@@ -138,6 +139,31 @@ fn agent_valid(path: &Path) -> Result<bool, io::Error> {
     Ok(valid)
 }
 
+/// Accept only canonical stable releases from Pi's `--version` output.
+fn parse_pi_version(version: &str) -> Option<[u64; 3]> {
+    let mut parts = version.split('.');
+    let mut release = [0; 3];
+    for component in &mut release {
+        let part = parts.next()?;
+        if (part.len() > 1 && part.starts_with('0'))
+            || !part.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return None;
+        }
+        *component = part.parse().ok()?;
+    }
+    parts.next().is_none().then_some(release)
+}
+
+fn supports_pi_version(version: &str) -> bool {
+    let Some(version) = parse_pi_version(version) else {
+        return false;
+    };
+    let minimum = parse_pi_version(MIN_PI_VERSION).expect("valid minimum Pi version");
+    let maximum = parse_pi_version(MAX_PI_VERSION).expect("valid maximum Pi version");
+    (minimum..=maximum).contains(&version)
+}
+
 fn inspect(context: &Context, global: bool) -> Vec<Check> {
     let mut checks = Vec::new();
     match Command::new("pi").arg("--version").output() {
@@ -161,7 +187,7 @@ fn inspect(context: &Context, global: bool) -> Vec<Check> {
         )),
         Ok(output) => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-            if version == PI_VERSION {
+            if supports_pi_version(&version) {
                 checks.push(Check::new(
                     "PI_VERSION",
                     Status::Pass,
@@ -172,8 +198,12 @@ fn inspect(context: &Context, global: bool) -> Vec<Check> {
                 checks.push(Check::new(
                     "PI_VERSION",
                     Status::Fail,
-                    format!("Pi {version}; tested version is {PI_VERSION}"),
-                    Some("Install the tested Pi version"),
+                    format!(
+                        "Pi {version}; supported stable versions are {MIN_PI_VERSION} through {MAX_PI_VERSION} (inclusive)"
+                    ),
+                    Some(&format!(
+                        "Install a stable Pi version from {MIN_PI_VERSION} through {MAX_PI_VERSION} (inclusive)"
+                    )),
                 ));
             }
         }

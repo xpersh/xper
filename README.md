@@ -136,6 +136,12 @@ xper doctor
 xper doctor --json
 ```
 
+Installation checks accept Pi `0.85.1` through `0.87.1`, both inclusive,
+using numeric version comparison. Only plain stable `major.minor.patch`
+versions are accepted; prerelease and build suffixes are rejected.
+`pi-open-agents` remains pinned to `0.1.22`. The same Pi version check applies
+to `xper init` preflight.
+
 `xper init` prepares the current project; `xper init --global` prepares the user
 scope. It creates configuration and the `primary` definition only after
 preflight passes. It requests confirmation to create or repair the agent;

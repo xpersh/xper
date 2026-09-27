@@ -57,8 +57,9 @@ observed but was not a durable xper capability.
 
 The decision will be reviewed before using delegations for automatic
 transitions, when new discrepancies or unpaired completions appear, and before
-changing the pinned Pi or `pi-open-agents` versions. The tested combination
-remains Pi `0.85.1` + `pi-open-agents 0.1.22`; the Windows probe is still pending.
+changing the accepted Pi or pinned `pi-open-agents` versions. The prototype's
+tested combination was Pi `0.85.1` + `pi-open-agents 0.1.22`; the Windows probe
+is still pending.
 
 ## Revision for XP-008 (2026-09-26)
 
@@ -70,6 +71,20 @@ process over RPC. Its explicit outcome (`succeeded`, `failed`, `cancelled`, or
 tool remains available for exploration outside the workflow's control, and
 its signals cannot pass the Discovery gate. Commands, artifacts, gates, and
 events for this revision are described in [XP-008](../tasks/008-vertical-slice.md).
+
+## Pi compatibility revision (2026-09-27)
+
+Installation checks now accept stable Pi versions from `0.85.1` through
+`0.87.1`, inclusive, for both `doctor` and `init`. Comparison uses numeric
+major, minor, and patch components; malformed versions, prereleases, and build
+suffixes are rejected. `pi-open-agents` remains pinned to `0.1.22`.
+
+On macOS, Pi `0.87.1` passed the isolated, credential-free XP-001 core probe
+for extension registration, tool hooks, UI status over RPC, child-process
+communication, and graceful shutdown. The adapter also parsed the real Pi
+model catalog in an isolated offline environment. The workspace checks passed.
+This evidence does not cover every intermediate release, Windows, or a new
+end-to-end run with `pi-open-agents` and real models.
 
 ## Decision
 

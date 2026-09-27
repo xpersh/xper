@@ -128,6 +128,105 @@ fn valid_doctor_is_read_only_and_has_stable_ids() {
 }
 
 #[test]
+fn doctor_accepts_stable_pi_versions_within_the_inclusive_numeric_range() {
+    for version in ["0.85.1", "0.85.10", "0.86.0", "0.87.0", "0.87.1"] {
+        let workspace = Workspace::fixture("valid", Some(version));
+        let before = snapshot(&workspace.root);
+        let output = workspace.command(&["doctor", "--json"]);
+        let json = report(&output);
+        assert!(output.status.success(), "Pi {version}: {json}");
+        assert_eq!(
+            status(&json, "PI_VERSION").as_deref(),
+            Some("PASS"),
+            "Pi {version}: {json}"
+        );
+        assert_eq!(snapshot(&workspace.root), before, "Pi {version}");
+    }
+}
+
+#[test]
+fn doctor_rejects_unsupported_and_noncanonical_pi_versions_without_writes() {
+    for version in [
+        "0.85.0",
+        "0.87.2",
+        "0.100.0",
+        "1.0.0",
+        "",
+        "0.87",
+        "0.87.1.0",
+        "v0.87.1",
+        "0.87.1-rc.1",
+        "0.87.1+build.1",
+        "00.87.1",
+        "0.087.1",
+        "0.87.01",
+        "+0.87.1",
+        "0.87.-1",
+        "0.８７.1",
+        "0.87.18446744073709551616",
+        "0.87.1\nunexpected output",
+    ] {
+        let workspace = Workspace::fixture("valid", Some(version));
+        let before = snapshot(&workspace.root);
+        let output = workspace.command(&["doctor", "--json"]);
+        let json = report(&output);
+        assert!(!output.status.success(), "Pi {version:?}: {json}");
+        assert_eq!(
+            status(&json, "PI_VERSION").as_deref(),
+            Some("FAIL"),
+            "Pi {version:?}: {json}"
+        );
+        let check = json["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["id"] == "PI_VERSION")
+            .unwrap();
+        let evidence = check["evidence"].as_str().unwrap();
+        let action = check["action"].as_str().unwrap();
+        for bound in ["0.85.1", "0.87.1"] {
+            assert!(evidence.contains(bound), "Pi {version:?}: {check}");
+            assert!(action.contains(bound), "Pi {version:?}: {check}");
+        }
+        assert_eq!(snapshot(&workspace.root), before, "Pi {version:?}");
+    }
+}
+
+#[test]
+fn init_accepts_the_latest_supported_pi_version() {
+    let workspace = Workspace::fixture("partial", Some("0.87.1"));
+    let output = workspace.command(&["init", "--yes"]);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(workspace.root.join(".xper/config.yaml").is_file());
+    assert!(workspace.root.join(".pi/agents/xper.md").is_file());
+}
+
+#[test]
+fn init_rejects_pi_versions_outside_the_supported_range_without_writes() {
+    for version in ["0.85.0", "0.87.2"] {
+        let workspace = Workspace::fixture("partial", Some(version));
+        let before = snapshot(&workspace.root);
+        let output = workspace.command(&["init", "--yes"]);
+        assert!(!output.status.success(), "Pi {version}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let version_check = stdout
+            .lines()
+            .find(|line| line.contains("PI_VERSION"))
+            .unwrap();
+        assert!(version_check.starts_with("FAIL"), "{stdout}");
+        for bound in ["0.85.1", "0.87.1"] {
+            assert!(version_check.contains(bound), "{stdout}");
+        }
+        assert_eq!(snapshot(&workspace.root), before, "Pi {version}");
+    }
+}
+
+#[test]
 fn partial_init_is_idempotent_and_preserves_user_configuration() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
     let first = workspace.command(&["init", "--yes"]);

@@ -44,3 +44,9 @@ Prepare and diagnose a reproducible installation without starting a workflow.
   adapter, conflicts, agent, and configuration without writing files.
 - Fixtures and tests cover valid, partial, and incompatible installations,
   idempotency, read-only doctor behavior, and credential rejection.
+- Pi version preflight accepts stable `0.85.1` through `0.87.1`, inclusive,
+  for both `doctor` and `init`; `pi-open-agents` remains pinned to `0.1.22`.
+  CLI regression tests cover the bounds, intermediate versions, numeric
+  ordering, malformed versions, and rejection without writes. Runtime evidence
+  and its limits are recorded in the
+  [Pi compatibility revision](../rfcs/0004-pi-integration.md#pi-compatibility-revision-2026-09-27).

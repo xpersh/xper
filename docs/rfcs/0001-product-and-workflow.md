@@ -13,9 +13,9 @@ gates, and feedback.
 
 The user starts a workflow through `/xper` in a Pi session. Its extension
 connects commands and agent execution to the independent core, which owns
-workflow state, gates, routing, and evidence. The current vertical slice
-covers Discovery through Define; the remaining phases below describe the
-product direction.
+workflow state, gates, routing, and evidence. The executable knowledge workflow covers Discovery through Plan;
+[its contracts and limits](../knowledge-workflow.md) describe the current slice.
+The remaining phases below describe the product direction.
 
 ## Goals
 

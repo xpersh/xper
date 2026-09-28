@@ -8,8 +8,8 @@ not automatically load `AGENTS.md` files from subdirectories.
 
 1. Review `git status` and preserve existing changes outside your task.
 2. Read the [README](README.md) to understand the product's current capabilities.
-   The first vertical slice goes from Discovery to Define; the backlog does not
-   necessarily describe implemented features.
+   The implemented knowledge workflow covers Discovery through Plan; the backlog
+   does not necessarily describe implemented features.
 3. Identify the responsibility affected by the change and read the relevant guides:
 
    | Area | Instructions and reference |

@@ -111,6 +111,27 @@ pub struct RunProjection {
     pub metadata: AdapterMetadata,
     /// Effective routing captured at run start, absent for legacy runs.
     pub routing: Option<RoutingSnapshot>,
+    /// Frozen run limits, defaulted for historical runs.
+    #[serde(default)]
+    pub policy: crate::knowledge::WorkflowPolicy,
+    /// Frozen artifact inputs per logical assignment.
+    #[serde(default)]
+    pub inputs: BTreeMap<String, Vec<String>>,
+    /// Conservative charged cost per attempt, retained on interruption.
+    #[serde(default)]
+    pub charges: BTreeMap<String, u64>,
+    /// SHA-256 of registered evidence where supported by the artifact reader.
+    #[serde(default)]
+    pub seals: BTreeMap<String, String>,
+    /// Accepted evidence on the current knowledge branch, keyed by phase.
+    #[serde(default)]
+    pub accepted: BTreeMap<String, String>,
+    /// Artifact explaining the current revisit.
+    #[serde(default)]
+    pub feedback: Option<String>,
+    /// Current human request as (visit, artifact).
+    #[serde(default)]
+    pub human_input: Option<(String, String)>,
     /// Visits in event order.
     pub visits: Vec<VisitProjection>,
     /// Gate evaluations keyed by identity.

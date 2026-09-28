@@ -8,7 +8,7 @@ pub mod finish_attempt;
 pub mod get_run_status;
 pub mod initialize_workspace;
 pub mod inspect_installation;
-pub mod start_discovery;
+pub mod start_assignment;
 pub mod start_run;
 
 mod support;

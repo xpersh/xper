@@ -1,17 +1,17 @@
-import { delegateDiscovery, type DiscoveryDependencies } from "../actions/delegate-discovery.js";
+import { delegateKnowledge, type KnowledgeDependencies } from "../actions/delegate-knowledge.js";
 import type { PiExtensionAPI } from "./types.js";
 import type { XperSession } from "./session.js";
 
 export function registerXperDelegate(
   pi: PiExtensionAPI,
   session: XperSession,
-  execution: Pick<DiscoveryDependencies, "execute" | "saveBrief">,
+  execution: Pick<KnowledgeDependencies, "execute" | "saveBrief">,
 ): void {
   pi.registerTool({
     name: "xper_delegate",
-    label: "Xper Discovery explorer",
+    label: "Xper knowledge phase",
     description:
-      "Delegate the current Discovery task and record a Discovery Brief before entering Define. Start a run with /xper first.",
+      "Execute the current knowledge assignment from its input artifacts and ask the core to evaluate its gate. Supports Discovery through Plan. Start a run with /xper first.",
     parameters: {
       type: "object",
       properties: {
@@ -27,7 +27,7 @@ export function registerXperDelegate(
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const connection = session.connection;
       if (!connection) throw new Error(session.error ?? "xper bridge offline");
-      const result = await delegateDiscovery(
+      const result = await delegateKnowledge(
         {
           ...params,
           cwd: ctx.cwd,
@@ -47,7 +47,7 @@ export function registerXperDelegate(
         content: [
           {
             type: "text",
-            text: `Discovery attempt ${attemptId}: ${outcome}; phase ${phase}${artifactPath ? `; brief ${artifactPath}` : ""}`,
+            text: `Knowledge attempt ${attemptId}: ${outcome}; phase ${phase}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
           },
         ],
         details: { attemptId, outcome, phase, artifactId },

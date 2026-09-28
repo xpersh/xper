@@ -528,3 +528,145 @@ fn failed_disk_open_uses_an_explicit_volatile_store() {
     assert_eq!(store.load_run("r1").unwrap().unwrap().visits.len(), 1);
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn knowledge_plan_and_human_decisions_survive_reopen_and_projection_rebuild() {
+    use xper_application::{
+        knowledge::{KnowledgeArtifact, WorkflowPolicy},
+        ports::ArtifactReader,
+        use_cases::{advance_run, finish_attempt, start_assignment, start_run},
+    };
+    #[derive(Default)]
+    struct Evidence(BTreeMap<String, KnowledgeArtifact>);
+    impl ArtifactReader for Evidence {
+        type Error = std::io::Error;
+        fn is_available(&self, _: &str) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+        fn digest(&self, _: &str) -> Result<Option<String>, Self::Error> {
+            Ok(Some("a".repeat(64)))
+        }
+        fn read_contract(
+            &self,
+            path: &str,
+        ) -> Result<Option<(KnowledgeArtifact, String)>, Self::Error> {
+            Ok(self.0.get(path).map(|doc| (doc.clone(), "a".repeat(64))))
+        }
+    }
+    let (directory, path) = temp_db();
+    let fixtures: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/knowledge-v1.json")).unwrap();
+    let mut clock = ClockAt(100);
+    let mut ids = Ids(0);
+    let mut evidence = Evidence::default();
+    let expected = {
+        let mut store = SqliteEventStore::open(&path).unwrap();
+        let mut adapter = metadata();
+        adapter.capabilities.insert("humanApproval".into(), true);
+        let started = start_run::execute(
+            &mut store,
+            &mut clock,
+            &mut ids,
+            start_run::Request {
+                session_id: "knowledge",
+                objective: "Synthetic plan",
+                metadata: &adapter,
+                routing: None,
+                available_models: None,
+                policy: Some(&WorkflowPolicy {
+                    human_gates: vec!["define".into()],
+                    ..Default::default()
+                }),
+            },
+        )
+        .unwrap();
+        for phase in ["discovery", "define", "design", "breakdown", "plan"] {
+            let assignment = start_assignment::execute(
+                &mut store,
+                &evidence,
+                &mut clock,
+                &mut ids,
+                start_assignment::Request {
+                    session_id: "knowledge",
+                    retry_assignment_id: None,
+                },
+            )
+            .unwrap();
+            if phase != "discovery" {
+                let fixture = fixtures
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|f| f["phase"] == phase)
+                    .unwrap();
+                let mut document: KnowledgeArtifact =
+                    serde_json::from_value(fixture["artifact"].clone()).unwrap();
+                document.inputs = assignment
+                    .input_artifacts
+                    .iter()
+                    .map(|a| a.artifact_id.clone())
+                    .collect();
+                evidence
+                    .0
+                    .insert(assignment.artifact_path.clone(), document);
+            }
+            finish_attempt::execute(
+                &mut store,
+                &evidence,
+                &mut clock,
+                &mut ids,
+                finish_attempt::Request {
+                    session_id: "knowledge",
+                    attempt_id: &assignment.attempt_id,
+                    outcome: WorkOutcome::Succeeded,
+                    artifact_path: Some(&assignment.artifact_path),
+                },
+            )
+            .unwrap();
+            let gate = advance_run::execute(
+                &mut store,
+                &evidence,
+                &mut clock,
+                &mut ids,
+                advance_run::Request {
+                    session_id: "knowledge",
+                    approved_artifact_id: None,
+                },
+            )
+            .unwrap();
+            if phase == "define" {
+                advance_run::execute(
+                    &mut store,
+                    &evidence,
+                    &mut clock,
+                    &mut ids,
+                    advance_run::Request {
+                        session_id: "knowledge",
+                        approved_artifact_id: gate.human_artifact_id.as_deref(),
+                    },
+                )
+                .unwrap();
+            } else {
+                assert!(gate.advanced);
+            }
+        }
+        let state = store.load_run(&started.run_id).unwrap().unwrap();
+        assert!(state.accepted.contains_key("plan"));
+        assert_eq!(state.seals.len(), 5);
+        assert_eq!(state.inputs.len(), 5);
+        assert_eq!(state.charges.len(), 5);
+        state
+    };
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    store.rebuild_all().unwrap();
+    assert_eq!(store.load_run(&expected.run_id).unwrap().unwrap(), expected);
+    assert!(
+        store
+            .load_events(&expected.run_id)
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e.kind, EventKind::HumanApproved { .. }))
+    );
+    drop(store);
+    fs::remove_dir_all(directory).unwrap();
+}

@@ -3,8 +3,8 @@ use crate::{ArtifactId, GateId, PhaseVisitId, Timestamp};
 /// A phase known to the xper workflow.
 ///
 /// XP-003 only enables transitions between [`Phase::Intake`],
-/// [`Phase::Discovery`], and [`Phase::Define`]. The remaining values make
-/// unsupported transitions explicit without implementing the full workflow.
+/// knowledge phases through [`Phase::Plan`]. Later phases remain explicit
+/// unsupported targets until their implementation slices are delivered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Phase {
     /// Establishes the request, authority, repository, and constraints.

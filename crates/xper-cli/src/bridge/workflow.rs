@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use xper_application::{
     ApplicationError,
     events::WorkOutcome,
-    use_cases::{advance_run, finish_attempt, get_run_status, start_discovery, start_run},
+    use_cases::{advance_run, finish_attempt, get_run_status, start_assignment, start_run},
 };
 
 use super::empty_params;
@@ -32,6 +32,7 @@ pub(super) fn handle(
         ids,
         metadata,
         routing,
+        policy,
         session_id,
     } = runtime;
     match method {
@@ -74,6 +75,16 @@ pub(super) fn handle(
                 clock,
                 ids,
                 start_run::Request {
+                    policy: params
+                        .get("policy")
+                        .map(|value| {
+                            serde_json::from_value(value.clone()).map_err(|_| {
+                                ApplicationError::InvalidInput("invalid workflow policy")
+                            })
+                        })
+                        .transpose()?
+                        .as_ref()
+                        .or(Some(policy)),
                     session_id,
                     metadata,
                     routing: routing.as_ref(),
@@ -100,17 +111,18 @@ pub(super) fn handle(
             } else {
                 return Err(ApplicationError::InvalidInput("invalid params"));
             };
-            let result = start_discovery::execute(
+            let result = start_assignment::execute(
                 store,
+                artifacts,
                 clock,
                 ids,
-                start_discovery::Request {
+                start_assignment::Request {
                     session_id,
                     retry_assignment_id,
                 },
             )?;
             Ok(
-                json!({"runId":result.run_id,"assignmentId":result.assignment_id,"attemptId":result.attempt_id,"role":result.role,"selection":result.selection}),
+                json!({"runId":result.run_id,"assignmentId":result.assignment_id,"attemptId":result.attempt_id,"role":result.role,"selection":result.selection,"phase":result.phase,"artifactKind":result.artifact_kind,"artifactPath":result.artifact_path,"inputArtifacts":result.input_artifacts,"timeoutMs":result.timeout_ms,"budget":result.budget}),
             )
         }
         "attempt.finish" => {
@@ -141,24 +153,27 @@ pub(super) fn handle(
                 )
             }
         }
-        "run.advance" if empty_params(params) => {
-            match advance_run::execute(
+        "run.advance" => {
+            if !params.is_null()
+                && !params.as_object().is_some_and(|p| {
+                    p.keys().all(|k| k == "approvedArtifactId")
+                        && p.get("approvedArtifactId")
+                            .is_none_or(|id| id.as_str().is_some_and(|s| !s.trim().is_empty()))
+                })
+            {
+                return Err(ApplicationError::InvalidInput("invalid advance parameters"));
+            }
+            let result = advance_run::execute(
                 store,
                 artifacts,
                 clock,
                 ids,
-                advance_run::Request { session_id },
-            )? {
-                advance_run::Outcome::Blocked { reason } => {
-                    Ok(json!({"advanced":false,"phase":"discovery","reason":reason}))
-                }
-                advance_run::Outcome::Advanced { resumed: true } => {
-                    Ok(json!({"advanced":true,"phase":"define","resumed":true}))
-                }
-                advance_run::Outcome::Advanced { resumed: false } => {
-                    Ok(json!({"advanced":true,"phase":"define"}))
-                }
-            }
+                advance_run::Request {
+                    session_id,
+                    approved_artifact_id: params.get("approvedArtifactId").and_then(Value::as_str),
+                },
+            )?;
+            Ok(json!(result))
         }
         "run.status" if empty_params(params) => {
             let result =

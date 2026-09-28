@@ -9,6 +9,7 @@ pub const DOMAIN_PACKAGE_NAME: &str = xper_domain::PACKAGE_NAME;
 pub mod error;
 pub mod events;
 pub mod installation;
+pub mod knowledge;
 mod policies;
 pub mod ports;
 pub mod read_models;

@@ -19,13 +19,15 @@
     "format": "cargo fmt --all && biome format --write .",
     "format:check": "cargo fmt --all -- --check && biome format .",
     "lint": "cargo clippy --workspace --all-targets --all-features -- -D warnings && biome lint . && npm run boundaries",
-    "test": "cargo test --workspace --all-targets && npm run test:ts",
+    "test": "cargo test --workspace --all-targets && npm run test:contracts && npm run test:ts",
     "test:ts": "npm run test --workspace @xper/adapter-pi",
-    "typecheck": "npm run typecheck --workspace @xper/adapter-pi"
+    "typecheck": "npm run typecheck --workspace @xper/adapter-pi",
+    "test:contracts": "node scripts/check-contracts.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "24.13.6",
+    "ajv": "^8.20.0",
     "typescript": "5.9.3"
   }
 }

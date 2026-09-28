@@ -6,6 +6,7 @@
 //! change exactly.
 
 mod execution;
+pub mod planning;
 mod primitives;
 mod run;
 mod workflow;
@@ -19,7 +20,7 @@ pub use primitives::{
 };
 pub use run::{
     Change, DomainEvent, DomainEventKind, Run, TransitionError, TransitionReceipt,
-    TransitionRequest,
+    TransitionRequest, is_allowed_transition,
 };
 pub use workflow::{
     ArtifactKind, ArtifactReference, Gate, GateEvaluation, GateResult, Phase, PhaseVisit,

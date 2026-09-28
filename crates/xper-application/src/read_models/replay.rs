@@ -4,6 +4,7 @@ use crate::events::{Event, EventKind};
 /// Replays ordered events for a single run and rejects inconsistent histories.
 pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
     let mut run: Option<RunProjection> = None;
+    let mut configured = false;
     for event in events {
         if event.event_id.trim().is_empty() || event.run_id.trim().is_empty() {
             return Err("empty event or run identifier".into());
@@ -33,6 +34,13 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 status: RunStatus::Active,
                 metadata: metadata.clone(),
                 routing: routing.clone(),
+                policy: Default::default(),
+                inputs: BTreeMap::new(),
+                charges: BTreeMap::new(),
+                seals: BTreeMap::new(),
+                accepted: BTreeMap::new(),
+                human_input: None,
+                feedback: None,
                 visits: Vec::new(),
                 gates: BTreeMap::new(),
                 assignments: BTreeMap::new(),
@@ -47,6 +55,109 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
         }
         match &event.kind {
             EventKind::RunStarted { .. } => unreachable!(),
+            EventKind::FeedbackRecorded { artifact_id } => {
+                if !state.artifacts.contains_key(artifact_id) {
+                    return Err("unknown feedback artifact".into());
+                }
+                state.feedback = Some(artifact_id.clone());
+            }
+            EventKind::WorkflowConfigured { policy } => {
+                policy.validate()?;
+                if configured || !state.attempts.is_empty() {
+                    return Err("workflow policy is immutable".into());
+                }
+                configured = true;
+                state.policy = policy.clone();
+            }
+            EventKind::AssignmentInputs {
+                assignment_id,
+                artifact_ids,
+            } => {
+                if !state.assignments.contains_key(assignment_id)
+                    || state.inputs.contains_key(assignment_id)
+                    || artifact_ids
+                        .iter()
+                        .any(|id| !state.artifacts.contains_key(id))
+                {
+                    return Err("invalid assignment inputs".into());
+                }
+                state
+                    .inputs
+                    .insert(assignment_id.clone(), artifact_ids.clone());
+            }
+            EventKind::AttemptCharged {
+                attempt_id,
+                cost_micros,
+            } => {
+                if !state.attempts.contains_key(attempt_id)
+                    || state
+                        .charges
+                        .insert(attempt_id.clone(), *cost_micros)
+                        .is_some()
+                {
+                    return Err("invalid attempt charge".into());
+                }
+            }
+            EventKind::ArtifactSealed {
+                artifact_id,
+                digest,
+            } => {
+                if !state.artifacts.contains_key(artifact_id)
+                    || digest.is_empty()
+                    || state
+                        .seals
+                        .insert(artifact_id.clone(), digest.clone())
+                        .is_some()
+                {
+                    return Err("invalid artifact seal".into());
+                }
+            }
+            EventKind::HumanInputRequested {
+                visit_id,
+                artifact_id,
+            }
+            | EventKind::HumanApproved {
+                visit_id,
+                artifact_id,
+            }
+            | EventKind::PhaseAccepted {
+                visit_id,
+                artifact_id,
+            } => {
+                let artifact = state
+                    .artifacts
+                    .get(artifact_id)
+                    .ok_or("unknown gate artifact")?;
+                let attempt = &state.attempts[&artifact.attempt_id];
+                let assignment = &state.assignments[&attempt.assignment_id];
+                let visit = state.visits.last().ok_or("missing gate visit")?;
+                if visit.visit_id != *visit_id
+                    || visit.exited_at_ms.is_some()
+                    || assignment.visit_id != *visit_id
+                {
+                    return Err("gate artifact is outside the current visit".into());
+                }
+                match &event.kind {
+                    EventKind::PhaseAccepted { .. } => {
+                        state
+                            .accepted
+                            .insert(visit.phase.clone(), artifact_id.clone());
+                        state.human_input = None;
+                        state.feedback = None;
+                    }
+                    EventKind::HumanInputRequested { .. } => {
+                        state.human_input = Some((visit_id.clone(), artifact_id.clone()))
+                    }
+                    _ => {
+                        if state.human_input.as_ref()
+                            != Some(&(visit_id.clone(), artifact_id.clone()))
+                        {
+                            return Err("stale human approval".into());
+                        }
+                        state.human_input = None;
+                    }
+                }
+            }
             EventKind::RunSuspended if state.status == RunStatus::Active => {
                 state.status = RunStatus::Suspended
             }
@@ -86,6 +197,21 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 {
                     return Err("invalid phase entry".into());
                 }
+                if let Some(previous) = state.visits.last() {
+                    let from = xper_domain::Phase::knowledge(&previous.phase)
+                        .ok_or("unknown source phase")?;
+                    let target =
+                        xper_domain::Phase::knowledge(phase).ok_or("unknown target phase")?;
+                    if !xper_domain::is_allowed_transition(from, target) {
+                        return Err("unsupported phase transition".into());
+                    }
+                    if matches!(event.kind, EventKind::PhaseRevisited { .. }) {
+                        state.accepted.retain(|name, _| {
+                            xper_domain::Phase::knowledge(name).is_some_and(|p| p < target)
+                        });
+                    }
+                }
+                state.human_input = None;
                 state.visits.push(VisitProjection {
                     visit_id: visit_id.clone(),
                     phase: phase.clone(),
@@ -116,6 +242,32 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 }
                 visit.exited_at_ms = Some(event.occurred_at_ms);
                 visit.exit_gate_id = Some(gate_id.clone());
+                // XP-008 histories recorded a Discovery gate but no acceptance
+                // event. Recover its input reference without inventing content.
+                if phase == "discovery" && !state.accepted.contains_key(phase) {
+                    let accepted = events
+                        .iter()
+                        .rev()
+                        .filter_map(|e| match &e.kind {
+                            EventKind::ArtifactRegistered { artifact_id, .. } => {
+                                state.artifacts.get(artifact_id)
+                            }
+                            _ => None,
+                        })
+                        .find(|artifact| {
+                            let attempt = &state.attempts[&artifact.attempt_id];
+                            let assignment = &state.assignments[&attempt.assignment_id];
+                            assignment.visit_id == *visit_id
+                                && assignment.role == "discovery.explorer"
+                                && assignment.outcome == Some(WorkOutcome::Succeeded)
+                                && artifact.kind == "discovery_brief"
+                        });
+                    if let Some(artifact) = accepted {
+                        state
+                            .accepted
+                            .insert(phase.clone(), artifact.artifact_id.clone());
+                    }
+                }
             }
             EventKind::GateEvaluated {
                 visit_id,
@@ -142,15 +294,10 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                 );
             }
             EventKind::GatePassed { visit_id, gate_id } => {
-                if state
-                    .visits
-                    .last()
-                    .is_some_and(|visit| visit.phase == "discovery")
-                    && state.assignments.values().any(|assignment| {
-                        assignment.visit_id == *visit_id && assignment.outcome.is_none()
-                    })
-                {
-                    return Err("Discovery assignments are still running".into());
+                if state.assignments.values().any(|assignment| {
+                    assignment.visit_id == *visit_id && assignment.outcome.is_none()
+                }) {
+                    return Err("phase assignments are still running".into());
                 }
                 let gate = state
                     .gates
@@ -221,6 +368,23 @@ pub fn replay(events: &[Event]) -> Result<Option<RunProjection>, String> {
                     }
                 {
                     return Err("invalid attempt".into());
+                }
+                if configured {
+                    state.policy.budget().check(
+                        state.attempts.len(),
+                        state
+                            .attempts
+                            .values()
+                            .filter(|a| a.outcome.is_none())
+                            .count(),
+                        event
+                            .occurred_at_ms
+                            .saturating_sub(state.visits[0].entered_at_ms),
+                        state
+                            .charges
+                            .values()
+                            .fold(0u64, |sum, c| sum.saturating_add(*c)),
+                    )?;
                 }
                 let ordinal = state
                     .attempts

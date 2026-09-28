@@ -10,9 +10,13 @@ use xper_application::{
         AdapterMetadata, Event, EventKind, GateOutcome, ModelSelection, RoutingSnapshot,
         WorkOutcome,
     },
+    knowledge::{
+        Criterion, FeedbackReason, KnowledgeArtifact, KnowledgeOutput, PlannedAssignment, Story,
+        WorkflowPolicy,
+    },
     ports::{ArtifactReader, Clock, IdGenerator, RunReader, RunRepository},
     read_models::{RunProjection, replay},
-    use_cases::{advance_run, finish_attempt, get_run_status, start_discovery, start_run},
+    use_cases::{advance_run, finish_attempt, get_run_status, start_assignment, start_run},
 };
 use xper_domain::{Identifier, Timestamp};
 
@@ -91,11 +95,21 @@ impl IdGenerator for SequentialIds {
     }
 }
 #[derive(Default)]
-struct Artifacts(BTreeSet<String>);
+struct Artifacts(BTreeSet<String>, BTreeMap<String, KnowledgeArtifact>);
 impl ArtifactReader for Artifacts {
     type Error = io::Error;
     fn is_available(&self, path: &str) -> io::Result<bool> {
         Ok(self.0.contains(path))
+    }
+    fn read_contract(&self, path: &str) -> io::Result<Option<(KnowledgeArtifact, String)>> {
+        Ok(self
+            .1
+            .get(path)
+            .filter(|_| self.0.contains(path))
+            .map(|document| (document.clone(), format!("{document:?}"))))
+    }
+    fn digest(&self, path: &str) -> io::Result<Option<String>> {
+        Ok(self.1.get(path).map(|document| format!("{document:?}")))
     }
 }
 
@@ -112,6 +126,7 @@ impl Workflow {
             &mut FixedClock,
             &mut self.ids,
             start_run::Request {
+                policy: None,
                 session_id: session,
                 objective: "Explore the repository",
                 routing: None,
@@ -128,12 +143,13 @@ impl Workflow {
         &mut self,
         session: &str,
         retry: Option<&str>,
-    ) -> Result<start_discovery::Outcome, ApplicationError> {
-        start_discovery::execute(
+    ) -> Result<start_assignment::Outcome, ApplicationError> {
+        start_assignment::execute(
             &mut self.store,
+            &self.artifacts,
             &mut FixedClock,
             &mut self.ids,
-            start_discovery::Request {
+            start_assignment::Request {
                 session_id: session,
                 retry_assignment_id: retry,
             },
@@ -165,6 +181,7 @@ impl Workflow {
             &mut FixedClock,
             &mut self.ids,
             advance_run::Request {
+                approved_artifact_id: None,
                 session_id: session,
             },
         )
@@ -206,6 +223,7 @@ fn routed_failure_finishes_after_one_attempt_and_keeps_exact_selection() {
         &mut FixedClock,
         &mut workflow.ids,
         start_run::Request {
+            policy: None,
             session_id: "s",
             objective: "Investigate",
             metadata: &metadata,
@@ -224,6 +242,7 @@ fn routed_failure_finishes_after_one_attempt_and_keeps_exact_selection() {
         &mut FixedClock,
         &mut workflow.ids,
         start_run::Request {
+            policy: None,
             session_id: "s",
             objective: "Investigate",
             metadata: &metadata,
@@ -237,6 +256,7 @@ fn routed_failure_finishes_after_one_attempt_and_keeps_exact_selection() {
         &mut FixedClock,
         &mut workflow.ids,
         start_run::Request {
+            policy: None,
             session_id: "s",
             objective: "Investigate",
             metadata: &metadata,
@@ -333,6 +353,7 @@ fn direct_callers_cannot_start_an_empty_objective_or_delegate_without_a_run() {
         &mut FixedClock,
         &mut workflow.ids,
         start_run::Request {
+            policy: None,
             session_id: "session",
             objective: "  ",
             metadata: &metadata,
@@ -350,7 +371,10 @@ fn missing_or_wrong_evidence_never_settles_a_successful_attempt() {
     workflow.start("session").unwrap();
     assert!(matches!(
         workflow.advance("session").unwrap(),
-        advance_run::Outcome::Blocked { .. }
+        advance_run::Outcome {
+            advanced: false,
+            ..
+        }
     ));
     let run = workflow.status("session").run.unwrap();
     assert_eq!(
@@ -396,7 +420,10 @@ fn discovery_waits_for_parallel_work_and_rechecks_artifact_availability() {
         .unwrap();
     assert!(matches!(
         workflow.advance("session").unwrap(),
-        advance_run::Outcome::Blocked { .. }
+        advance_run::Outcome {
+            advanced: false,
+            ..
+        }
     ));
     workflow
         .finish("session", &two.attempt_id, WorkOutcome::Cancelled)
@@ -404,20 +431,19 @@ fn discovery_waits_for_parallel_work_and_rechecks_artifact_availability() {
     workflow.artifacts.0.clear();
     assert!(matches!(
         workflow.advance("session").unwrap(),
-        advance_run::Outcome::Blocked { .. }
+        advance_run::Outcome {
+            advanced: false,
+            ..
+        }
     ));
     workflow.artifacts.0.insert(brief(&one.attempt_id));
-    assert_eq!(
-        workflow.advance("session").unwrap(),
-        advance_run::Outcome::Advanced { resumed: false }
-    );
-    assert_eq!(workflow.store.boundaries.last().unwrap().len(), 4);
-    let history = workflow.store.events.clone();
-    assert_eq!(
-        workflow.advance("session").unwrap(),
-        advance_run::Outcome::Advanced { resumed: true }
-    );
-    assert_eq!(workflow.store.events, history);
+    let advanced = workflow.advance("session").unwrap();
+    assert!(advanced.advanced);
+    assert_eq!(advanced.phase, "define");
+    assert_eq!(workflow.store.boundaries.last().unwrap().len(), 5);
+    let next_gate = workflow.advance("session").unwrap();
+    assert!(!next_gate.advanced);
+    assert_eq!(next_gate.phase, "define");
     assert_eq!(
         workflow
             .status("session")
@@ -429,7 +455,10 @@ fn discovery_waits_for_parallel_work_and_rechecks_artifact_availability() {
             .phase,
         "define"
     );
-    assert!(workflow.delegate("session", None).is_err());
+    assert_eq!(
+        workflow.delegate("session", None).unwrap().role,
+        "define.product"
+    );
 }
 
 #[test]
@@ -574,4 +603,559 @@ fn status_handles_empty_and_unknown_runs_without_writes() {
         get_run_status::execute(&workflow.store, get_run_status::Query::Run("absent")).is_err()
     );
     assert!(workflow.store.boundaries.is_empty());
+}
+
+fn definition() -> KnowledgeOutput {
+    KnowledgeOutput::DefinitionContract {
+        goal: "Observable result".into(),
+        scope: vec!["Small increment".into()],
+        exclusions: vec![],
+        criteria: vec![Criterion {
+            id: "c1".into(),
+            behavior: "Returns the result".into(),
+            example: "Given A, returns B".into(),
+        }],
+    }
+}
+fn design(feasible: bool) -> KnowledgeOutput {
+    KnowledgeOutput::DesignDecisions {
+        approach: "Pure function".into(),
+        interfaces: vec!["A -> B".into()],
+        alternatives: vec!["Stateful implementation rejected".into()],
+        risks: vec![],
+        feasible,
+    }
+}
+fn stories(independent: bool) -> KnowledgeOutput {
+    KnowledgeOutput::StoryMap {
+        stories: vec![Story {
+            id: "s1".into(),
+            value: "Observable result".into(),
+            criteria: vec!["c1".into()],
+            verification: vec!["assert result(A) == B".into()],
+            independently_verifiable: independent,
+            dependencies: vec![],
+        }],
+    }
+}
+fn plan() -> KnowledgeOutput {
+    KnowledgeOutput::ExecutionPlan {
+        assignments: [
+            ("driver", "implementation.driver", vec![]),
+            (
+                "navigator",
+                "implementation.navigator",
+                vec!["driver".into()],
+            ),
+            ("verifier", "verify.verifier", vec!["navigator".into()]),
+        ]
+        .into_iter()
+        .map(|(id, role, dependencies)| PlannedAssignment {
+            id: id.into(),
+            increment_id: "s1".into(),
+            role: role.into(),
+            dependencies,
+            workspace: "increment-s1".into(),
+            resources: vec![],
+            max_attempts: 1,
+            max_time_ms: 1000,
+            max_cost_micros: 0,
+        })
+        .collect(),
+    }
+}
+impl Workflow {
+    fn start_with_policy(&mut self, policy: WorkflowPolicy) {
+        start_run::execute(
+            &mut self.store,
+            &mut FixedClock,
+            &mut self.ids,
+            start_run::Request {
+                session_id: "s",
+                objective: "Synthetic workflow",
+                policy: Some(&policy),
+                routing: None,
+                available_models: None,
+                metadata: &AdapterMetadata {
+                    adapter: "test".into(),
+                    version: "1".into(),
+                    capabilities: BTreeMap::from([("humanApproval".into(), true)]),
+                },
+            },
+        )
+        .unwrap();
+    }
+    fn submit(&mut self, output: Option<KnowledgeOutput>) -> (start_assignment::Outcome, String) {
+        let assignment = self.delegate("s", None).unwrap();
+        self.artifacts.0.insert(assignment.artifact_path.clone());
+        if let Some(output) = output {
+            self.artifacts.1.insert(
+                assignment.artifact_path.clone(),
+                KnowledgeArtifact {
+                    schema_version: 1,
+                    inputs: assignment
+                        .input_artifacts
+                        .iter()
+                        .map(|a| a.artifact_id.clone())
+                        .collect(),
+                    output,
+                },
+            );
+        }
+        let result = finish_attempt::execute(
+            &mut self.store,
+            &self.artifacts,
+            &mut FixedClock,
+            &mut self.ids,
+            finish_attempt::Request {
+                session_id: "s",
+                attempt_id: &assignment.attempt_id,
+                outcome: WorkOutcome::Succeeded,
+                artifact_path: Some(&assignment.artifact_path),
+            },
+        )
+        .unwrap();
+        (assignment, result.artifact_id.unwrap())
+    }
+    fn through(&mut self, phase: &str) {
+        self.start("s").unwrap();
+        for output in [
+            None,
+            Some(definition()),
+            Some(design(true)),
+            Some(stories(true)),
+        ] {
+            if self.status("s").run.unwrap().visits.last().unwrap().phase == phase {
+                break;
+            }
+            self.submit(output);
+            let gate = self.advance("s").unwrap();
+            assert!(gate.advanced, "{gate:?}");
+        }
+    }
+}
+
+#[test]
+fn all_knowledge_phases_use_artifacts_and_finish_with_a_ready_plan() {
+    let mut workflow = Workflow::default();
+    workflow.through("plan");
+    let (assignment, artifact) = workflow.submit(Some(plan()));
+    assert_eq!(assignment.role, "plan.planner");
+    assert_eq!(assignment.input_artifacts.len(), 4);
+    let result = workflow.advance("s").unwrap();
+    assert!(result.advanced && result.ready);
+    assert_eq!(result.phase, "plan");
+    let run = workflow.status("s").run.unwrap();
+    assert_eq!(run.accepted["plan"], artifact);
+    assert_eq!(run.visits.len(), 6);
+    assert_eq!(run.attempts.len(), 5);
+    assert_eq!(replay(&workflow.store.events).unwrap().unwrap(), run);
+    assert!(workflow.advance("s").unwrap().resumed);
+    assert!(workflow.delegate("s", None).is_err());
+}
+
+#[test]
+fn uncertainty_returns_to_its_origin_and_invalidates_downstream_artifacts() {
+    for (reason, target, retained) in [
+        (FeedbackReason::AmbiguousCriteria, "define", 1),
+        (FeedbackReason::InfeasibleDesign, "design", 2),
+        (FeedbackReason::OversizedStory, "breakdown", 3),
+        (FeedbackReason::MissingContext, "discovery", 0),
+    ] {
+        let mut workflow = Workflow::default();
+        workflow.through("plan");
+        let (_, feedback) = workflow.submit(Some(KnowledgeOutput::Feedback {
+            reason,
+            evidence: "A concrete uncertainty".into(),
+        }));
+        let gate = workflow.advance("s").unwrap();
+        assert!(gate.advanced);
+        assert_eq!(gate.phase, target);
+        let run = workflow.status("s").run.unwrap();
+        assert_eq!(run.visits.last().unwrap().visit_number, 2);
+        assert_eq!(run.accepted.len(), retained);
+        assert_eq!(run.feedback.as_deref(), Some(feedback.as_str()));
+        let next = workflow.delegate("s", None).unwrap();
+        assert_eq!(next.input_artifacts.len(), retained + 1);
+        assert!(
+            next.input_artifacts
+                .iter()
+                .any(|a| a.artifact_id == feedback)
+        );
+    }
+}
+
+#[test]
+fn invalid_design_and_unverifiable_stories_block_the_responsible_gate() {
+    let mut workflow = Workflow::default();
+    workflow.through("design");
+    workflow.submit(Some(design(false)));
+    assert!(!workflow.advance("s").unwrap().advanced);
+    workflow.submit(Some(design(true)));
+    assert_eq!(workflow.advance("s").unwrap().phase, "breakdown");
+    workflow.submit(Some(stories(false)));
+    let rejected = workflow.advance("s").unwrap();
+    assert!(!rejected.advanced);
+    assert!(
+        rejected
+            .reason
+            .unwrap()
+            .contains("independently verifiable")
+    );
+    let mut unknown = stories(true);
+    if let KnowledgeOutput::StoryMap { stories } = &mut unknown {
+        stories[0].criteria = vec!["unknown".into()];
+    }
+    workflow.submit(Some(unknown));
+    assert!(
+        workflow
+            .advance("s")
+            .unwrap()
+            .reason
+            .unwrap()
+            .contains("criterion")
+    );
+    workflow.submit(Some(stories(true)));
+    assert_eq!(workflow.advance("s").unwrap().phase, "plan");
+}
+
+#[test]
+fn plan_rejects_cycles_unknown_dependencies_and_workspace_conflicts() {
+    for defect in ["cycle", "unknown", "workspace", "coverage", "budget"] {
+        let mut workflow = Workflow::default();
+        workflow.through("plan");
+        let mut output = plan();
+        let KnowledgeOutput::ExecutionPlan { assignments } = &mut output else {
+            unreachable!()
+        };
+        match defect {
+            "cycle" => assignments[0].dependencies.push("verifier".into()),
+            "unknown" => assignments[0].dependencies.push("missing".into()),
+            "workspace" => assignments[1].dependencies.clear(),
+            "coverage" => {
+                assignments.pop();
+            }
+            _ => assignments[0].max_attempts = 100,
+        }
+        workflow.submit(Some(output));
+        let result = workflow.advance("s").unwrap();
+        assert!(!result.advanced && !result.ready, "{defect}: {result:?}");
+    }
+}
+
+#[test]
+fn human_gate_is_persisted_and_approval_is_bound_to_the_current_artifact() {
+    let mut workflow = Workflow::default();
+    workflow.start_with_policy(WorkflowPolicy {
+        human_gates: vec!["define".into()],
+        ..Default::default()
+    });
+    workflow.submit(None);
+    workflow.advance("s").unwrap();
+    let (assignment, artifact) = workflow.submit(Some(definition()));
+    let waiting = workflow.advance("s").unwrap();
+    assert_eq!(
+        waiting.human_artifact_id.as_deref(),
+        Some(artifact.as_str())
+    );
+    assert!(!waiting.advanced);
+    let approve = |workflow: &mut Workflow, id: &str| {
+        advance_run::execute(
+            &mut workflow.store,
+            &workflow.artifacts,
+            &mut FixedClock,
+            &mut workflow.ids,
+            advance_run::Request {
+                session_id: "s",
+                approved_artifact_id: Some(id),
+            },
+        )
+    };
+    assert!(approve(&mut workflow, "stale-id").is_err());
+    let original = workflow.artifacts.1[&assignment.artifact_path].clone();
+    workflow
+        .artifacts
+        .1
+        .get_mut(&assignment.artifact_path)
+        .unwrap()
+        .output = design(true);
+    assert!(approve(&mut workflow, &artifact).is_err());
+    workflow
+        .artifacts
+        .1
+        .insert(assignment.artifact_path, original);
+    assert_eq!(approve(&mut workflow, &artifact).unwrap().phase, "design");
+    assert!(
+        workflow
+            .store
+            .events
+            .iter()
+            .any(|e| matches!(e.kind, EventKind::HumanApproved { .. }))
+    );
+}
+
+#[test]
+fn wrong_input_contract_does_not_settle_and_changed_upstream_evidence_blocks() {
+    let mut workflow = Workflow::default();
+    workflow.through("design");
+    let assignment = workflow.delegate("s", None).unwrap();
+    workflow
+        .artifacts
+        .0
+        .insert(assignment.artifact_path.clone());
+    workflow.artifacts.1.insert(
+        assignment.artifact_path.clone(),
+        KnowledgeArtifact {
+            schema_version: 1,
+            inputs: vec![],
+            output: design(true),
+        },
+    );
+    assert!(
+        finish_attempt::execute(
+            &mut workflow.store,
+            &workflow.artifacts,
+            &mut FixedClock,
+            &mut workflow.ids,
+            finish_attempt::Request {
+                session_id: "s",
+                attempt_id: &assignment.attempt_id,
+                outcome: WorkOutcome::Succeeded,
+                artifact_path: Some(&assignment.artifact_path)
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(
+        workflow.status("s").run.unwrap().attempts[&assignment.attempt_id].outcome,
+        None
+    );
+    workflow
+        .finish("s", &assignment.attempt_id, WorkOutcome::Failed)
+        .unwrap();
+    workflow.submit(Some(design(true)));
+    let define = assignment
+        .input_artifacts
+        .iter()
+        .find(|a| a.kind == "definition_contract")
+        .unwrap();
+    workflow
+        .artifacts
+        .1
+        .get_mut(&define.path)
+        .unwrap()
+        .inputs
+        .clear();
+    assert!(
+        workflow
+            .advance("s")
+            .unwrap()
+            .reason
+            .unwrap()
+            .contains("input artifact")
+    );
+}
+
+#[test]
+fn dispatch_enforces_attempt_cost_concurrency_and_elapsed_time_budgets() {
+    for policy in [
+        WorkflowPolicy {
+            max_attempts: 1,
+            ..Default::default()
+        },
+        WorkflowPolicy {
+            max_concurrency: 1,
+            ..Default::default()
+        },
+        WorkflowPolicy {
+            max_cost_micros: Some(10),
+            attempt_cost_micros: 10,
+            ..Default::default()
+        },
+    ] {
+        let mut workflow = Workflow::default();
+        workflow.start_with_policy(policy);
+        workflow.delegate("s", None).unwrap();
+        let count = workflow.store.events.len();
+        assert!(workflow.delegate("s", None).is_err());
+        assert_eq!(workflow.store.events.len(), count);
+    }
+    struct LateClock;
+    impl Clock for LateClock {
+        fn now(&mut self) -> Timestamp {
+            Timestamp::from_millis(3_600_100)
+        }
+    }
+    let mut workflow = Workflow::default();
+    workflow.start("s").unwrap();
+    assert!(
+        start_assignment::execute(
+            &mut workflow.store,
+            &workflow.artifacts,
+            &mut LateClock,
+            &mut workflow.ids,
+            start_assignment::Request {
+                session_id: "s",
+                retry_assignment_id: None
+            }
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn failed_knowledge_gate_commit_does_not_leave_half_a_transition() {
+    let mut workflow = Workflow::default();
+    workflow.through("define");
+    workflow.submit(Some(definition()));
+    let before = workflow.store.events.clone();
+    workflow.store.fail_next = true;
+    assert!(workflow.advance("s").is_err());
+    assert_eq!(workflow.store.events, before);
+    assert_eq!(workflow.advance("s").unwrap().phase, "design");
+}
+
+#[test]
+fn late_success_is_durably_a_timeout_and_can_be_replayed() {
+    struct LateClock;
+    impl Clock for LateClock {
+        fn now(&mut self) -> Timestamp {
+            Timestamp::from_millis(120_100)
+        }
+    }
+    let mut workflow = Workflow::default();
+    workflow.start("s").unwrap();
+    let assignment = workflow.delegate("s", None).unwrap();
+    let result = finish_attempt::execute(
+        &mut workflow.store,
+        &workflow.artifacts,
+        &mut LateClock,
+        &mut workflow.ids,
+        finish_attempt::Request {
+            session_id: "s",
+            attempt_id: &assignment.attempt_id,
+            outcome: WorkOutcome::Succeeded,
+            artifact_path: Some(&assignment.artifact_path),
+        },
+    )
+    .unwrap();
+    assert_eq!(result.outcome, WorkOutcome::TimedOut);
+    assert!(result.artifact_id.is_none());
+    assert_eq!(
+        workflow
+            .finish("s", &assignment.attempt_id, WorkOutcome::Succeeded)
+            .unwrap()
+            .outcome,
+        WorkOutcome::TimedOut
+    );
+    assert!(workflow.status("s").run.unwrap().artifacts.is_empty());
+}
+
+#[test]
+fn accepted_legacy_discovery_is_an_input_after_replay() {
+    let mut workflow = Workflow::default();
+    workflow.through("define");
+    workflow.store.events.retain(|e| {
+        !matches!(
+            e.kind,
+            EventKind::WorkflowConfigured { .. }
+                | EventKind::PhaseAccepted { .. }
+                | EventKind::AssignmentInputs { .. }
+                | EventKind::AttemptCharged { .. }
+        )
+    });
+    let next = workflow.delegate("s", None).unwrap();
+    assert_eq!(next.input_artifacts.len(), 1);
+    assert_eq!(next.input_artifacts[0].kind, "discovery_brief");
+}
+
+#[test]
+fn plan_requires_the_verification_of_prerequisite_increments() {
+    let mut workflow = Workflow::default();
+    workflow.through("breakdown");
+    let mut output = stories(true);
+    let KnowledgeOutput::StoryMap { stories } = &mut output else {
+        unreachable!()
+    };
+    let mut second = stories[0].clone();
+    second.id = "s2".into();
+    second.dependencies = vec!["s1".into()];
+    stories.push(second);
+    workflow.submit(Some(output));
+    assert!(workflow.advance("s").unwrap().advanced);
+    let mut output = plan();
+    let KnowledgeOutput::ExecutionPlan { assignments } = &mut output else {
+        unreachable!()
+    };
+    let second: Vec<_> = assignments
+        .iter()
+        .map(|a| {
+            let mut next = a.clone();
+            next.id = format!("{}2", a.id);
+            next.increment_id = "s2".into();
+            next.workspace = "s2".into();
+            next.dependencies = a.dependencies.iter().map(|id| format!("{id}2")).collect();
+            next
+        })
+        .collect();
+    assignments.extend(second);
+    workflow.submit(Some(output.clone()));
+    assert!(
+        workflow
+            .advance("s")
+            .unwrap()
+            .reason
+            .unwrap()
+            .contains("increment dependency")
+    );
+    let KnowledgeOutput::ExecutionPlan { assignments } = &mut output else {
+        unreachable!()
+    };
+    assignments[3].dependencies.push("verifier".into());
+    workflow.submit(Some(output));
+    assert!(workflow.advance("s").unwrap().ready);
+}
+
+#[test]
+fn concurrent_admission_is_rechecked_when_the_atomic_boundary_replays() {
+    let mut workflow = Workflow::default();
+    workflow.start_with_policy(WorkflowPolicy {
+        max_concurrency: 1,
+        ..Default::default()
+    });
+    let started = workflow.delegate("s", None).unwrap();
+    let before = workflow.store.events.clone();
+    let visit = workflow
+        .status("s")
+        .run
+        .unwrap()
+        .visits
+        .last()
+        .unwrap()
+        .visit_id
+        .clone();
+    let race = [
+        Event {
+            event_id: "race-a".into(),
+            run_id: started.run_id.clone(),
+            occurred_at_ms: 100,
+            kind: EventKind::AssignmentCreated {
+                assignment_id: "racing-assignment".into(),
+                visit_id: visit,
+                role: "discovery.explorer".into(),
+            },
+        },
+        Event {
+            event_id: "race-t".into(),
+            run_id: started.run_id,
+            occurred_at_ms: 100,
+            kind: EventKind::AttemptStarted {
+                attempt_id: "racing-attempt".into(),
+                assignment_id: "racing-assignment".into(),
+                selection: None,
+            },
+        },
+    ];
+    assert!(workflow.store.append_boundary(&race).is_err());
+    assert_eq!(workflow.store.events, before);
 }

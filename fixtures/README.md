@@ -13,3 +13,11 @@ definition. The historically named `incompatible` fixture retains third-party
 package metadata and agent definitions to verify that xper accepts and
 preserves user-managed Pi resources. Version failures are supplied through a
 fake Pi executable; every test uses an isolated home directory.
+
+
+`knowledge-v1.json` contains synthetic Definition, Design, Story Map, Execution
+Plan, and feedback artifacts. Rust deserialization tests and the fake-executor
+bridge test consume these same examples. Their input IDs are replaced by actual
+registered IDs during the integration test. `npm run test:contracts` validates
+both fixture files against the public schemas; protocol result fixtures can name
+a `resultSchema` to validate method-specific response fields as well.

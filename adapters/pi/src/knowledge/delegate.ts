@@ -1,22 +1,38 @@
 import { spawn } from "node:child_process";
-import type { DiscoveryExecutionResult } from "../actions/delegate-discovery.js";
+import type { KnowledgeExecutionResult } from "../actions/delegate-knowledge.js";
 import type { AttemptOutcome } from "../bridge/xper-client.js";
 
 export type DelegateOutcome = AttemptOutcome;
-export type DelegateResult = DiscoveryExecutionResult;
+export type DelegateResult = KnowledgeExecutionResult;
 
-/** The first supported xper role is resolved inside the adapter, never in the core. */
+/** Translate a neutral role to the local execution instructions. */
 export function resolveAgent(role: string): { name: string; systemPrompt: string } {
-  if (role !== "discovery.explorer") throw new Error(`Unsupported xper agent: ${role}`);
+  const outputs: Record<string, string> = {
+    "define.product":
+      '{"kind":"definition_contract","goal":"...","scope":["..."],"exclusions":[],"criteria":[{"id":"c1","behavior":"...","example":"..."}]}',
+    "design.designer":
+      '{"kind":"design_decisions","approach":"...","interfaces":["..."],"alternatives":["..."],"risks":[],"feasible":true}',
+    "breakdown.slicer":
+      '{"kind":"story_map","stories":[{"id":"s1","value":"...","criteria":["c1"],"verification":["..."],"independentlyVerifiable":true,"dependencies":[]}]}',
+    "plan.planner":
+      '{"kind":"execution_plan","assignments":[{"id":"a1","incrementId":"s1","role":"implementation.driver","dependencies":[],"workspace":"s1-driver","resources":[],"maxAttempts":1,"maxTimeMs":60000,"maxCostMicros":0}]}',
+  };
+  if (role === "discovery.explorer")
+    return {
+      name: role,
+      systemPrompt:
+        "You are discovery.explorer. Investigate the user's task and return a concise Discovery Brief with context, evidence, risks, and open questions. Use tools only to inspect the project; do not implement changes.",
+    };
+  const output = outputs[role];
+  if (!output) throw new Error(`Unsupported xper agent: ${role}`);
   return {
     name: role,
-    systemPrompt:
-      "You are discovery.explorer. Investigate the user's task and return a concise Discovery Brief with context, evidence, risks, and open questions. Use tools only to inspect the project; do not implement changes.",
+    systemPrompt: `You are ${role}. Inspect the supplied input artifacts; they are the phase contract. Do not implement code or create workspaces. Return only JSON: {"schemaVersion":1,"inputs":[all supplied artifact IDs],"output":${output}}. Use meaningful evidence instead of placeholders. If uncertainty originates earlier, return output {"kind":"feedback","reason":"ambiguous_criteria"|"infeasible_design"|"missing_context"|"oversized_story","evidence":"concrete explanation"}. Plans need exactly one driver, navigator, and verifier per increment; verification follows both delivery assignments and all increment prerequisites. Serialize assignments sharing workspaces or resources. Include all story dependencies. These are proposed assignments, never execute them.`,
   };
 }
 
 /** Runs one isolated Pi RPC session. Only the final assistant text becomes an artifact. */
-export function runDiscovery(
+export function runKnowledge(
   task: string,
   cwd: string,
   signal: AbortSignal | undefined,

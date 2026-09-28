@@ -21,6 +21,8 @@ pub struct Request<'a> {
     pub metadata: &'a AdapterMetadata,
     /// Resolved routing frozen for a new run, if a profile is active.
     pub routing: Option<&'a RoutingSnapshot>,
+    /// Optional explicit limits; defaults apply when absent.
+    pub policy: Option<&'a crate::knowledge::WorkflowPolicy>,
     /// Harness-reported model catalog for the selected context.
     pub available_models: Option<&'a [AvailableModel]>,
 }
@@ -69,6 +71,15 @@ pub fn execute(
             resumed: true,
         });
     }
+    let policy = request.policy.cloned().unwrap_or_default();
+    policy.validate().map_err(ApplicationError::InvalidInput)?;
+    if !policy.human_gates.is_empty()
+        && request.metadata.capabilities.get("humanApproval") != Some(&true)
+    {
+        return Err(ApplicationError::InvalidInput(
+            "human gates require humanApproval capability",
+        ));
+    }
     if let Some(routing) = request.routing {
         let available = request
             .available_models
@@ -106,11 +117,17 @@ pub fn execute(
         )
         .map_err(ApplicationError::dependency)?;
     domain_events.extend_from_slice(transition.events());
-    let events: Vec<_> = domain_events
+    let mut events: Vec<_> = domain_events
         .iter()
         .map(|event| Event::from_domain(event, request.metadata, request.routing))
         .collect();
     let run_id = run.id().as_str().to_owned();
+    events.push(super::support::event(
+        clock,
+        ids,
+        &run_id,
+        crate::events::EventKind::WorkflowConfigured { policy },
+    ));
     store
         .append_boundary_and_bind_session(&events, request.session_id, &run_id)
         .map_err(ApplicationError::dependency)?;

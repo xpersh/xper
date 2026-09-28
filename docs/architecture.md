@@ -37,7 +37,7 @@ Solid arrows show calls. Implementations depend on core contracts.
 | Action dependencies | `crates/xper-application/src/ports.rs` | Reads, transactions, evidence, and installation |
 | Durable vocabulary | `crates/xper-application/src/events.rs` | Normalized events and conversion from the domain |
 | Queryable state | `crates/xper-application/src/read_models/` | Projections and deterministic replay |
-| Evidence policy | `crates/xper-application/src/policies/discovery.rs` | Relationships between visit, assignment, attempt, and Brief |
+| Evidence policy | `crates/xper-application/src/policies/knowledge.rs` | Evidence provenance, frozen inputs, and cross-artifact gates |
 | Kernel rules | `crates/xper-domain/src/` | Entities, state machine, and pure transitions |
 | Persistence | `crates/xper-store-sqlite/` | Transactions, migrations, leases, and recovery |
 | Profile resolution | `crates/xper-config/src/routing.rs` | Resolve context policy and one model per role |
@@ -53,9 +53,9 @@ connection.
 | --- | --- | --- |
 | `run.start` | `start_run` | Start Intake → Discovery or resume the session's active run |
 | `profile.inspect`, `xper profile` | Configuration and CLI | Resolve and present the active route without starting a run |
-| `assignment.start` | `start_discovery` | Create an assignment/attempt or retry a pending assignment |
+| `assignment.start` | `start_assignment` | Dispatch the current knowledge role with artifact inputs and budgets, or retry an interrupted assignment |
 | `attempt.finish` | `finish_attempt` | Record the result, evidence, and assignment completion |
-| `run.advance` | `advance_run` | Evaluate the Discovery gate and enter Define |
+| `run.advance` | `advance_run` | Evaluate a knowledge gate, request/record human approval, revisit an origin, or mark Plan ready |
 | `run.status`, `xper status` | `get_run_status` | Read the projection and timeline |
 | `xper doctor` | `inspect_installation` | Diagnose the installation without modifying it |
 | `xper init` | `initialize_workspace` | Coordinate preflight, consent, and setup |
@@ -76,7 +76,9 @@ leaves Pi packages, settings, and agent definitions under the user's control.
   `get_run_status` requires only this contract.
 - `RunRepository`: adds commits of complete boundaries. Creating a run and
   binding its session are a single atomic port operation.
-- `ArtifactReader`: check evidence availability relative to the workspace.
+- `ArtifactReader`: check evidence availability, read bounded typed contracts,
+  and fingerprint content relative to the workspace. JSON parsing and SHA-256
+  hashing belong to the local infrastructure adapter.
 - `Installation`: inspect and prepare configuration in the selected scope.
   Preserve existing files and do not install or change harness packages.
 - `Clock` and `IdGenerator`: existing domain contracts reused by use cases to
@@ -87,7 +89,7 @@ successful attempt records its result, artifact, and assignment in the same
 commit. Queries return only persisted state. The session resolves its run
 through the repository without keeping another copy of the binding in the bridge.
 When a profile is active, `start_run` validates the adapter's model catalog
-before committing the frozen routing snapshot. `start_discovery` chooses the
+before committing the frozen routing snapshot. `start_assignment` chooses the current role
 selection from that snapshot, with the exact model recorded in the attempt's
 start event. Failures and timeouts complete the assignment after one attempt.
 
@@ -99,7 +101,7 @@ response; use cases do not know about SQLite.
 
 - A rule about an entity's states or transitions belongs in the domain.
 - Coordination between persisted state, evidence, and effects belongs in a
-  use case. The Discovery policy checks relationships in the projection;
+  use case. The knowledge policy checks artifact relationships in the projection;
   actual file availability is queried through a port.
 - A durable event describes a fact using xper's public vocabulary. Conversion
   from domain events excludes objectives and textual evidence.
@@ -126,11 +128,25 @@ Do not create modules for future phases or a class hierarchy for each use case.
 Local adapters remain executable modules while only that executable composes
 them; they can move to another crate when another executable needs them.
 
-The durable Discovery transition still uses the first vertical slice's
-projection and events. This refactoring does not add rehydration of the `Run`
-entity from the log or generalize transitions to unimplemented phases.
-Extending the workflow will require resolving that integration with the kernel
-and avoiding two independent sets of transition rules.
+The durable workflow replays events for mutations and uses the domain's shared
+`is_allowed_transition` policy for both live transitions and replay validation.
+It does not rehydrate a second `Run` entity. The domain also owns dependency DAG
+and budget admission invariants; application evidence policies check minimum
+contracts and relationships against frozen artifact inputs.
+
+`knowledge.rs` defines serializable artifact documents and workflow policy;
+content stays outside the event log. New events record frozen policy, inputs,
+charges, artifact digests, phase acceptance, feedback, and human decisions.
+Projection fields have defaults for existing databases, and legacy Discovery
+exits recover their accepted Brief reference from the old event sequence.
+No SQL table migration is needed: these additions use the existing versioned
+event stream and JSON projection. Rebuild and reopen retain the same state.
+
+A revisit invalidates accepted artifacts from its target onward while keeping
+history. Plan validates both increment and assignment dependencies, exclusive
+workspace/resource ownership, and remaining budgets; it records acceptance but
+does not enter Implementation. See the [knowledge workflow](knowledge-workflow.md)
+for the implemented scope, cost-reservation semantics, and human approval flow.
 
 ## Core verification
 

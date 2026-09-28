@@ -44,6 +44,20 @@ pub trait ArtifactReader {
 
     /// Whether a workspace-relative artifact is a nonempty file.
     fn is_available(&self, path: &str) -> Result<bool, Self::Error>;
+
+    /// Read a bounded structured artifact and its SHA-256 digest. Unsupported
+    /// readers cannot satisfy knowledge gates beyond legacy Discovery.
+    fn read_contract(
+        &self,
+        _path: &str,
+    ) -> Result<Option<(crate::knowledge::KnowledgeArtifact, String)>, Self::Error> {
+        Ok(None)
+    }
+
+    /// Fingerprint evidence so later mutations cannot satisfy an approved gate.
+    fn digest(&self, _path: &str) -> Result<Option<String>, Self::Error> {
+        Ok(None)
+    }
 }
 
 /// Installation inspection and preparation for one selected workspace scope.

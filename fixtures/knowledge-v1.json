@@ -1,0 +1,149 @@
+[
+  {
+    "phase": "define",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": [
+        "brief-1"
+      ],
+      "output": {
+        "kind": "definition_contract",
+        "goal": "Return a greeting",
+        "scope": [
+          "One greeting"
+        ],
+        "exclusions": [
+          "Localization"
+        ],
+        "criteria": [
+          {
+            "id": "c1",
+            "behavior": "Returns a greeting",
+            "example": "Given a name, returns Hello plus the name"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "phase": "design",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": [
+        "brief-1",
+        "definition-1"
+      ],
+      "output": {
+        "kind": "design_decisions",
+        "approach": "Use a pure function",
+        "interfaces": [
+          "name -> greeting"
+        ],
+        "alternatives": [
+          "A stateful service adds no value"
+        ],
+        "risks": [],
+        "feasible": true
+      }
+    }
+  },
+  {
+    "phase": "breakdown",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": [
+        "brief-1",
+        "definition-1",
+        "design-1"
+      ],
+      "output": {
+        "kind": "story_map",
+        "stories": [
+          {
+            "id": "s1",
+            "value": "Receive a greeting",
+            "criteria": [
+              "c1"
+            ],
+            "verification": [
+              "assert greeting for a synthetic name"
+            ],
+            "independentlyVerifiable": true,
+            "dependencies": []
+          }
+        ]
+      }
+    }
+  },
+  {
+    "phase": "plan",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": [
+        "brief-1",
+        "definition-1",
+        "design-1",
+        "stories-1"
+      ],
+      "output": {
+        "kind": "execution_plan",
+        "assignments": [
+          {
+            "id": "driver",
+            "incrementId": "s1",
+            "role": "implementation.driver",
+            "dependencies": [],
+            "workspace": "s1",
+            "resources": [],
+            "maxAttempts": 1,
+            "maxTimeMs": 1000,
+            "maxCostMicros": 0
+          },
+          {
+            "id": "navigator",
+            "incrementId": "s1",
+            "role": "implementation.navigator",
+            "dependencies": [
+              "driver"
+            ],
+            "workspace": "s1",
+            "resources": [],
+            "maxAttempts": 1,
+            "maxTimeMs": 1000,
+            "maxCostMicros": 0
+          },
+          {
+            "id": "verifier",
+            "incrementId": "s1",
+            "role": "verify.verifier",
+            "dependencies": [
+              "navigator"
+            ],
+            "workspace": "s1",
+            "resources": [],
+            "maxAttempts": 1,
+            "maxTimeMs": 1000,
+            "maxCostMicros": 0
+          }
+        ]
+      }
+    }
+  },
+  {
+    "phase": "plan",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": [
+        "brief-1",
+        "definition-1",
+        "design-1",
+        "stories-1"
+      ],
+      "output": {
+        "kind": "feedback",
+        "reason": "ambiguous_criteria",
+        "evidence": "The expected behavior omits the empty name case"
+      }
+    }
+  }
+]

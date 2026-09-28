@@ -41,7 +41,7 @@ for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
     if (
       adapterPath.startsWith("actions/") &&
       (specifier?.startsWith("node:") ||
-        /(?:^|\/)(?:pi|discovery)\//.test(specifier ?? "") ||
+        /(?:^|\/)(?:pi|knowledge)\//.test(specifier ?? "") ||
         specifier?.endsWith("/bridge/client.js"))
     ) {
       failures.push(`${adapterPath} must receive Pi execution and I/O through its dependencies`);

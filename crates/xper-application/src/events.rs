@@ -180,6 +180,36 @@ pub enum EventKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         routing: Option<RoutingSnapshot>,
     },
+    FeedbackRecorded {
+        artifact_id: String,
+    },
+    WorkflowConfigured {
+        policy: crate::knowledge::WorkflowPolicy,
+    },
+    AssignmentInputs {
+        assignment_id: String,
+        artifact_ids: Vec<String>,
+    },
+    AttemptCharged {
+        attempt_id: String,
+        cost_micros: u64,
+    },
+    ArtifactSealed {
+        artifact_id: String,
+        digest: String,
+    },
+    PhaseAccepted {
+        visit_id: String,
+        artifact_id: String,
+    },
+    HumanInputRequested {
+        visit_id: String,
+        artifact_id: String,
+    },
+    HumanApproved {
+        visit_id: String,
+        artifact_id: String,
+    },
     RunSuspended,
     RunResumed,
     RunCompleted,
@@ -242,6 +272,14 @@ impl EventKind {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::RunStarted { .. } => "run.started",
+            Self::FeedbackRecorded { .. } => "feedback.recorded",
+            Self::WorkflowConfigured { .. } => "workflow.configured",
+            Self::AssignmentInputs { .. } => "assignment.inputs",
+            Self::AttemptCharged { .. } => "attempt.charged",
+            Self::ArtifactSealed { .. } => "artifact.sealed",
+            Self::PhaseAccepted { .. } => "phase.accepted",
+            Self::HumanInputRequested { .. } => "human.input_requested",
+            Self::HumanApproved { .. } => "human.approved",
             Self::RunSuspended => "run.suspended",
             Self::RunResumed => "run.resumed",
             Self::RunCompleted => "run.completed",

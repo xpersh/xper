@@ -17,7 +17,8 @@ diagram. These rules also guide changes to the checkout's `.pi/` integration.
   make workflow RPC calls from other modules.
 - `src/bridge/client.ts` handles transport, correlation, and the handshake;
   `src/bridge/protocol.ts` handles contract envelopes and errors.
-- `src/discovery/` implements Pi execution and Brief writing. Keep these effects
+- `src/knowledge/` implements Pi execution, role prompts, model selection, and
+  artifact writing for Discovery through Plan. Keep these effects
   outside the action that coordinates them.
 
 The core decides gates and transitions. Do not import crate internals or

@@ -4,9 +4,9 @@
 practices. Its Pi extension coordinates the workflow, assigns models by role,
 and retains local evidence of quality, time, cost, and rework.
 
-> Status: the first vertical slice is executable. Discovery can be delegated
-> from Pi and advance to Define with persisted evidence; the rest of the
-> workflow is still under development.
+> Status: Discovery, Define, Design, Breakdown, and Plan are executable from
+> Pi with artifact contracts, feedback, gates, and persisted evidence.
+> Implementation, verification, and final judgment are still under development.
 
 ## Goal
 
@@ -27,6 +27,7 @@ implemented, verified, and accepted independently, rather than an entire project
 - [Pi adapter architecture](adapters/pi/docs/architecture.md)
 - [RFC 0001: Product and workflow](docs/rfcs/0001-product-and-workflow.md)
 - [RFC 0002: Multimodel configuration and routing](docs/rfcs/0002-multimodel-configuration.md)
+- [Knowledge workflow and phase contracts](docs/knowledge-workflow.md)
 - [Execution profiles and model routing](docs/routing.md)
 - [RFC 0003: Observability and metrics](docs/rfcs/0003-observability-and-metrics.md)
 - [RFC 0004: Pi integration and workflow activation](docs/rfcs/0004-pi-integration.md)
@@ -63,7 +64,7 @@ the entire workflow.
 
 Pi provides the runtime, interactive session, models, credentials, and tools.
 The xper extension owns its commands, workflow integration, observations, and
-Discovery execution. It does not require an external agent-manager package.
+knowledge-phase execution. It does not require an external agent-manager package.
 
 Pi is the first adapter, not a domain dependency. The Rust core communicates
 through a versioned protocol with external adapters. The Pi TypeScript
@@ -96,8 +97,13 @@ The extension in `.pi/extensions` uses `target/debug/xper` when available and
 allows selecting another binary with `XPER_BRIDGE_COMMAND`. It starts and
 stops the bridge with the Pi session. Starting a workflow creates or resumes
 the run associated with that session. The custom `xper_delegate` tool executes
-`discovery.explorer` in a child Pi process and records a Discovery Brief before
-requesting the transition to Define. `xper status --json` queries the projection
+the current knowledge role in a child Pi process,
+saves its artifact, and asks the core to evaluate the gate. Discovery keeps its
+Markdown Brief; later phases use structured JSON contracts. Feedback returns to
+the responsible phase, configured human gates use `/xper approve <artifactId>`,
+and Plan stops with a validated execution DAG. The
+[knowledge workflow guide](docs/knowledge-workflow.md) covers contracts and
+budgets. `xper status --json` queries the projection
 and timeline from SQLite. A bridge crash leaves Pi usable and is shown as
 `offline`. The [XP-008 demo](docs/tasks/008-vertical-slice.md#manual-demo)
 details this flow.

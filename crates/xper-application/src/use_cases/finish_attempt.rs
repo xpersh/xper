@@ -1,4 +1,4 @@
-//! Settle an attempt and register its Discovery evidence on success.
+//! Settle an attempt and register its phase evidence on success.
 
 use crate::{
     ApplicationError,
@@ -16,7 +16,7 @@ pub struct Request<'a> {
     pub attempt_id: &'a str,
     /// Terminal result; interruption is reserved for recovery.
     pub outcome: WorkOutcome,
-    /// Workspace-relative Discovery Brief path, required on success.
+    /// Workspace-relative phase artifact path, required on success.
     pub artifact_path: Option<&'a str>,
 }
 
@@ -42,7 +42,7 @@ pub fn execute(
     request: Request<'_>,
 ) -> Result<Outcome, ApplicationError> {
     let attempt_id = request.attempt_id;
-    let result = request.outcome;
+    let mut result = request.outcome;
     if result == WorkOutcome::Interrupted {
         return Err(ApplicationError::InvalidInput(
             "interruption is reserved for recovery",
@@ -54,10 +54,12 @@ pub fn execute(
         .get(attempt_id)
         .ok_or(ApplicationError::InvalidInput("unknown attempt"))?;
     if let Some(existing) = attempt.outcome {
-        if existing == result {
+        if existing == result
+            || (existing == WorkOutcome::TimedOut && result == WorkOutcome::Succeeded)
+        {
             return Ok(Outcome {
                 attempt_id: attempt_id.into(),
-                outcome: result,
+                outcome: existing,
                 artifact_id: None,
                 replayed: true,
             });
@@ -65,6 +67,31 @@ pub fn execute(
         return Err(ApplicationError::InvalidInput(
             "attempt already settled differently",
         ));
+    }
+    let assignment = &run.assignments[&attempt.assignment_id];
+    let visit = run
+        .visits
+        .last()
+        .ok_or(ApplicationError::InvalidInput("missing phase visit"))?;
+    if assignment.visit_id != visit.visit_id {
+        return Err(ApplicationError::InvalidInput(
+            "attempt belongs to an earlier visit",
+        ));
+    }
+    let phase = crate::policies::knowledge::phase(&run)?;
+    if result == WorkOutcome::Succeeded
+        && (clock
+            .now()
+            .as_millis()
+            .saturating_sub(attempt.started_at_ms)
+            >= run.policy.attempt_time_ms
+            || clock
+                .now()
+                .as_millis()
+                .saturating_sub(run.visits[0].entered_at_ms)
+                >= run.policy.max_time_ms)
+    {
+        result = WorkOutcome::TimedOut;
     }
     let mut events = vec![event(
         clock,
@@ -82,10 +109,10 @@ pub fn execute(
             .ok_or(ApplicationError::InvalidInput(
                 "missing or empty workflow parameter",
             ))?;
-        let expected = format!(".xper/artifacts/discovery-brief-{attempt_id}.md");
+        let expected = crate::policies::knowledge::output_path(phase, attempt_id);
         if relative != expected {
             return Err(ApplicationError::InvalidInput(
-                "unexpected Discovery Brief path",
+                "unexpected phase artifact path",
             ));
         }
         if !artifacts
@@ -93,9 +120,36 @@ pub fn execute(
             .map_err(ApplicationError::dependency)?
         {
             return Err(ApplicationError::InvalidInput(
-                "Discovery Brief is missing or empty",
+                "phase artifact is missing or empty",
             ));
         }
+        let digest = if phase == xper_domain::Phase::Discovery {
+            artifacts
+                .digest(relative)
+                .map_err(ApplicationError::dependency)?
+        } else {
+            let (document, digest) = artifacts
+                .read_contract(relative)
+                .map_err(ApplicationError::dependency)?
+                .ok_or(ApplicationError::InvalidInput(
+                    "structured phase artifact required",
+                ))?;
+            crate::policies::knowledge::validate_inputs(
+                &document,
+                run.inputs
+                    .get(&assignment.assignment_id)
+                    .map_or(&[], Vec::as_slice),
+            )
+            .map_err(ApplicationError::InvalidInput)?;
+            if document.output.kind() != phase.contract().expect("knowledge phase").1
+                && document.output.kind() != "feedback"
+            {
+                return Err(ApplicationError::InvalidInput(
+                    "artifact kind does not match the phase",
+                ));
+            }
+            Some(digest)
+        };
         let artifact_id = ids.next_id().as_str().to_owned();
         events.push(event(
             clock,
@@ -104,11 +158,27 @@ pub fn execute(
             EventKind::ArtifactRegistered {
                 artifact_id: artifact_id.clone(),
                 attempt_id: attempt_id.into(),
-                kind: "discovery_brief".into(),
+                kind: phase.contract().expect("knowledge phase").1.into(),
                 path: relative.into(),
-                version: 1,
+                version: run
+                    .artifacts
+                    .values()
+                    .filter(|a| a.kind == phase.contract().expect("knowledge phase").1)
+                    .count() as u32
+                    + 1,
             },
         ));
+        if let Some(digest) = digest {
+            events.push(event(
+                clock,
+                ids,
+                &run.run_id,
+                EventKind::ArtifactSealed {
+                    artifact_id: artifact_id.clone(),
+                    digest,
+                },
+            ));
+        }
         Some(artifact_id)
     } else {
         None

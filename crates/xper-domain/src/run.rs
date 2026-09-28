@@ -177,8 +177,8 @@ impl Run {
 
     /// Applies a minimal workflow transition transactionally.
     ///
-    /// The supported edges are `Intake -> Discovery`, `Discovery -> Define`,
-    /// and the `Define -> Discovery` revisit. Validation errors do not mutate
+    /// Supports the knowledge phases through Plan and explicit revisits.
+    /// Validation errors do not mutate
     /// the run or consume the injected services.
     pub fn transition(
         &mut self,
@@ -355,12 +355,22 @@ impl Run {
     }
 }
 
-fn is_allowed_transition(from: Phase, target: Phase) -> bool {
+/// The single transition policy shared by live entities and durable workflows.
+pub fn is_allowed_transition(from: Phase, target: Phase) -> bool {
     matches!(
         (from, target),
         (Phase::Intake, Phase::Discovery)
             | (Phase::Discovery, Phase::Define)
             | (Phase::Define, Phase::Discovery)
+            | (Phase::Define, Phase::Design)
+            | (Phase::Design, Phase::Breakdown)
+            | (Phase::Breakdown, Phase::Plan)
+            | (
+                Phase::Design | Phase::Breakdown | Phase::Plan,
+                Phase::Discovery | Phase::Define
+            )
+            | (Phase::Breakdown | Phase::Plan, Phase::Design)
+            | (Phase::Plan, Phase::Breakdown)
     )
 }
 

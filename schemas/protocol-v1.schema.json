@@ -56,8 +56,12 @@
           "then": { "properties": { "params": { "$ref": "#/$defs/assignmentStartParams" } } }
         },
         {
-          "if": { "properties": { "method": { "enum": ["run.status", "run.advance"] } } },
+          "if": { "properties": { "method": { "enum": ["run.status"] } } },
           "then": { "properties": { "params": { "maxProperties": 0 } } }
+        },
+        {
+          "if": { "properties": { "method": { "const": "run.advance" } } },
+          "then": { "properties": { "params": { "$ref": "#/$defs/runAdvanceParams" } } }
         },
         {
           "if": { "properties": { "method": { "const": "attempt.finish" } } },
@@ -152,7 +156,8 @@
       "required": ["objective"],
       "properties": {
         "objective": { "type": "string", "minLength": 1 },
-        "models": { "type": "array", "items": { "$ref": "#/$defs/availableModel" } }
+        "models": { "type": "array", "items": { "$ref": "#/$defs/availableModel" } },
+        "policy": { "$ref": "#/$defs/workflowPolicy" }
       },
       "additionalProperties": false
     },
@@ -204,6 +209,12 @@
         "assignmentId": { "type": "string", "minLength": 1 },
         "attemptId": { "type": "string", "minLength": 1 },
         "role": { "type": "string", "minLength": 1 },
+        "phase": {"enum": ["discovery", "define", "design", "breakdown", "plan"]},
+        "artifactKind": {"enum": ["discovery_brief", "definition_contract", "design_decisions", "story_map", "execution_plan"]},
+        "artifactPath": {"type": "string", "minLength": 1},
+        "inputArtifacts": {"type": "array", "items": {"$ref": "#/$defs/artifactInput"}},
+        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "budget": {"type": "object", "required": ["attempts", "timeMs", "costMicros", "concurrency"], "properties": {"attempts": {"type": "integer", "minimum": 0}, "timeMs": {"type": "integer", "minimum": 1}, "costMicros": {"type": ["integer", "null"], "minimum": 0}, "concurrency": {"type": "integer", "minimum": 1}}, "additionalProperties": false},
         "selection": { "oneOf": [
           { "$ref": "#/$defs/modelSelection" }, { "type": "null" }
         ] }
@@ -223,6 +234,144 @@
         "outcome": { "enum": ["succeeded", "failed", "cancelled", "timed_out"] },
         "artifactPath": { "type": "string", "minLength": 1 }
       },
+      "additionalProperties": false
+    },
+    "workflowPolicy": {
+      "type": "object",
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxTimeMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "attemptTimeMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxCostMicros": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attemptCostMicros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "humanGates": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "discovery",
+              "define",
+              "design",
+              "breakdown",
+              "plan"
+            ]
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "artifactInput": {
+      "type": "object",
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "artifact_id",
+        "attempt_id",
+        "kind",
+        "path",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "runAdvanceParams": {
+      "type": "object",
+      "properties": {
+        "approvedArtifactId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "runAdvanceResult": {
+      "type": "object",
+      "properties": {
+        "advanced": {
+          "type": "boolean"
+        },
+        "phase": {
+          "enum": [
+            "discovery",
+            "define",
+            "design",
+            "breakdown",
+            "plan"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "resumed": {
+          "type": "boolean"
+        },
+        "humanArtifactId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "advanced",
+        "phase"
+      ],
       "additionalProperties": false
     },
     "errorEventParams": {

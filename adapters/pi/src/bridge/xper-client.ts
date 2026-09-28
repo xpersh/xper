@@ -27,12 +27,42 @@ export interface AvailableModel {
   reasoning: boolean;
 }
 
+export interface ArtifactInput {
+  artifact_id: string;
+  kind: string;
+  path: string;
+  version: number;
+}
+
+export interface WorkflowPolicy {
+  maxAttempts?: number;
+  maxTimeMs?: number;
+  attemptTimeMs?: number;
+  maxConcurrency?: number;
+  maxCostMicros?: number | null;
+  attemptCostMicros?: number;
+  humanGates?: string[];
+}
+
+export interface RemainingBudget {
+  attempts: number;
+  timeMs: number;
+  costMicros: number | null;
+  concurrency: number;
+}
+
 export interface AssignmentStarted {
   runId: string;
   assignmentId: string;
   attemptId: string;
   role: string;
   selection: ModelSelection | null;
+  phase?: string;
+  artifactKind?: string;
+  artifactPath?: string;
+  inputArtifacts?: ArtifactInput[];
+  timeoutMs?: number;
+  budget?: RemainingBudget;
 }
 
 export type FinishAttempt = { attemptId: string } & (
@@ -45,9 +75,10 @@ export type AttemptFinished = { attemptId: string; outcome: AttemptOutcome } & (
   | { replayed?: false; artifactId: string | null }
 );
 
-export type RunAdvanced =
+export type RunAdvanced = { ready?: boolean; humanArtifactId?: string } & (
   | { advanced: true; phase: string; resumed?: boolean }
-  | { advanced: false; phase: string; reason: string };
+  | { advanced: false; phase: string; reason: string }
+);
 
 /** The projection fields used by this adapter; other core fields remain opaque. */
 export interface RunSummary {
@@ -55,6 +86,8 @@ export interface RunSummary {
   visits: Array<{ phase: string }>;
   attempts: Record<string, { outcome: AttemptOutcome | "interrupted" | null }>;
   artifacts: Record<string, unknown>;
+  accepted?: Record<string, string>;
+  human_input?: [string, string] | null;
 }
 
 export interface RunStatus {
@@ -67,11 +100,15 @@ export interface RunStatus {
 
 /** Workflow operations available to adapter actions, independent of the transport. */
 export interface WorkflowClient {
-  startRun(objective: string, models?: AvailableModel[]): Promise<RunStarted>;
+  startRun(
+    objective: string,
+    models?: AvailableModel[],
+    policy?: WorkflowPolicy,
+  ): Promise<RunStarted>;
   inspectProfile(): Promise<RoutingSnapshot | null>;
   startAssignment(assignmentId?: string): Promise<AssignmentStarted>;
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;
-  advanceRun(): Promise<RunAdvanced>;
+  advanceRun(approvedArtifactId?: string): Promise<RunAdvanced>;
   getRunStatus(): Promise<RunStatus>;
 }
 
@@ -131,7 +168,34 @@ function assignmentStarted(value: unknown): value is AssignmentStarted {
     text(value.assignmentId) &&
     text(value.attemptId) &&
     text(value.role) &&
-    (value.selection === null || modelSelection(value.selection))
+    (value.selection === null || modelSelection(value.selection)) &&
+    (value.budget === undefined ||
+      (object(value.budget) &&
+        Number.isSafeInteger(value.budget.attempts) &&
+        Number(value.budget.attempts) >= 0 &&
+        Number.isSafeInteger(value.budget.timeMs) &&
+        Number(value.budget.timeMs) > 0 &&
+        Number.isSafeInteger(value.budget.concurrency) &&
+        Number(value.budget.concurrency) > 0 &&
+        (value.budget.costMicros === null ||
+          (Number.isSafeInteger(value.budget.costMicros) &&
+            Number(value.budget.costMicros) >= 0)))) &&
+    (value.phase === undefined || text(value.phase)) &&
+    (value.artifactKind === undefined || text(value.artifactKind)) &&
+    (value.artifactPath === undefined || text(value.artifactPath)) &&
+    (value.timeoutMs === undefined ||
+      (Number.isSafeInteger(value.timeoutMs) && Number(value.timeoutMs) > 0)) &&
+    (value.inputArtifacts === undefined ||
+      (Array.isArray(value.inputArtifacts) &&
+        value.inputArtifacts.every(
+          (artifact: unknown) =>
+            object(artifact) &&
+            text(artifact.artifact_id) &&
+            text(artifact.kind) &&
+            text(artifact.path) &&
+            Number.isSafeInteger(artifact.version) &&
+            Number(artifact.version) > 0,
+        )))
   );
 }
 
@@ -145,7 +209,13 @@ function attemptFinished(value: unknown): value is AttemptFinished {
 }
 
 function runAdvanced(value: unknown): value is RunAdvanced {
-  if (!object(value) || !text(value.phase)) return false;
+  if (
+    !object(value) ||
+    !text(value.phase) ||
+    (value.ready !== undefined && typeof value.ready !== "boolean") ||
+    (value.humanArtifactId !== undefined && !text(value.humanArtifactId))
+  )
+    return false;
   if (value.advanced === false) return text(value.reason);
   return (
     value.advanced === true && (value.resumed === undefined || typeof value.resumed === "boolean")
@@ -166,7 +236,14 @@ function runSummary(value: unknown): value is RunSummary {
           attempt.outcome === "interrupted" ||
           attemptOutcome(attempt.outcome)),
     ) &&
-    object(value.artifacts)
+    object(value.artifacts) &&
+    (value.accepted === undefined ||
+      (object(value.accepted) && Object.values(value.accepted).every(text))) &&
+    (value.human_input === undefined ||
+      value.human_input === null ||
+      (Array.isArray(value.human_input) &&
+        value.human_input.length === 2 &&
+        value.human_input.every(text)))
   );
 }
 
@@ -201,8 +278,16 @@ export class XperClient implements WorkflowClient {
     return result;
   }
 
-  startRun(objective: string, models?: AvailableModel[]): Promise<RunStarted> {
-    return this.call("run.start", { objective, ...(models ? { models } : {}) }, runStarted);
+  startRun(
+    objective: string,
+    models?: AvailableModel[],
+    policy?: WorkflowPolicy,
+  ): Promise<RunStarted> {
+    return this.call(
+      "run.start",
+      { objective, ...(models ? { models } : {}), ...(policy ? { policy } : {}) },
+      runStarted,
+    );
   }
 
   async inspectProfile(): Promise<RoutingSnapshot | null> {
@@ -228,14 +313,18 @@ export class XperClient implements WorkflowClient {
 
   async finishAttempt(completion: FinishAttempt): Promise<AttemptFinished> {
     const result = await this.call("attempt.finish", { ...completion }, attemptFinished);
-    if (result.attemptId !== completion.attemptId || result.outcome !== completion.outcome) {
+    if (
+      result.attemptId !== completion.attemptId ||
+      (result.outcome !== completion.outcome &&
+        !(completion.outcome === "succeeded" && result.outcome === "timed_out"))
+    ) {
       throw invalidResult("attempt.finish");
     }
     return result;
   }
 
-  advanceRun(): Promise<RunAdvanced> {
-    return this.call("run.advance", {}, runAdvanced);
+  advanceRun(approvedArtifactId?: string): Promise<RunAdvanced> {
+    return this.call("run.advance", approvedArtifactId ? { approvedArtifactId } : {}, runAdvanced);
   }
 
   getRunStatus(): Promise<RunStatus> {

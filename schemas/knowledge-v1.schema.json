@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/myugen/xper/schemas/knowledge-v1.schema.json",
+  "title": "xper knowledge artifact v1",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "output": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "definition_contract"
+            },
+            "goal": {
+              "type": "string",
+              "minLength": 1
+            },
+            "scope": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "exclusions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "criteria": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/criterion"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "kind",
+            "goal",
+            "scope",
+            "exclusions",
+            "criteria"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "design_decisions"
+            },
+            "approach": {
+              "type": "string",
+              "minLength": 1
+            },
+            "interfaces": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "alternatives": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "risks": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "feasible": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "approach",
+            "interfaces",
+            "alternatives",
+            "risks",
+            "feasible"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "story_map"
+            },
+            "stories": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/story"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "kind",
+            "stories"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "execution_plan"
+            },
+            "assignments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/assignment"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "kind",
+            "assignments"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "feedback"
+            },
+            "reason": {
+              "enum": [
+                "missing_context",
+                "ambiguous_criteria",
+                "infeasible_design",
+                "oversized_story"
+              ]
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "reason",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "inputs",
+    "output"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "criterion": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "behavior": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "behavior",
+        "example"
+      ],
+      "additionalProperties": false
+    },
+    "story": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "verification": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "independentlyVerifiable": {
+          "type": "boolean"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "id",
+        "value",
+        "criteria",
+        "verification",
+        "independentlyVerifiable",
+        "dependencies"
+      ],
+      "additionalProperties": false
+    },
+    "assignment": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "incrementId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "implementation.driver",
+            "implementation.navigator",
+            "verify.verifier"
+          ]
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxTimeMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxCostMicros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "incrementId",
+        "role",
+        "dependencies",
+        "workspace",
+        "resources",
+        "maxAttempts",
+        "maxTimeMs",
+        "maxCostMicros"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,7 +1,7 @@
 import type { BridgeOptions } from "./bridge/client.js";
-import { saveDiscoveryBrief } from "./discovery/artifacts.js";
-import { resolveAgent, runDiscovery } from "./discovery/delegate.js";
-import { piModelOptions } from "./discovery/models.js";
+import { saveArtifact } from "./knowledge/artifacts.js";
+import { resolveAgent, runKnowledge } from "./knowledge/delegate.js";
+import { piModelOptions } from "./knowledge/models.js";
 import type { PiExtensionAPI } from "./pi/types.js";
 import { registerPiHooks } from "./pi/hooks.js";
 import { XperSession } from "./pi/session.js";
@@ -16,13 +16,31 @@ export function createXperExtension(
   const session = new XperSession(options);
   registerXperCommand(pi, session);
   registerXperDelegate(pi, session, {
-    execute: ({ task, cwd, signal, role, timeoutMs, model, selection }) =>
-      runDiscovery(task, cwd, signal, {
-        systemPrompt: resolveAgent(role).systemPrompt,
-        timeoutMs,
-        ...(selection ? piModelOptions(selection) : model ? { model } : {}),
-      }),
-    saveBrief: saveDiscoveryBrief,
+    execute: ({
+      task,
+      cwd,
+      signal,
+      role,
+      timeoutMs,
+      model,
+      selection,
+      inputArtifacts,
+      artifactKind,
+      budget,
+    }) =>
+      runKnowledge(
+        inputArtifacts?.length
+          ? `${task}\n\nInput artifacts (read these files):\n${JSON.stringify(inputArtifacts)}\nRequired output: ${artifactKind}\nRemaining budget: ${JSON.stringify(budget)}`
+          : task,
+        cwd,
+        signal,
+        {
+          systemPrompt: resolveAgent(role).systemPrompt,
+          timeoutMs,
+          ...(selection ? piModelOptions(selection) : model ? { model } : {}),
+        },
+      ),
+    saveBrief: saveArtifact,
   });
   registerPiHooks(pi, session);
 }

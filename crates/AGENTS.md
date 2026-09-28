@@ -31,9 +31,10 @@ To extend a vertical slice, express the domain rule, coordinate it in a use case
 test it with port doubles, and then connect the CLI or RPC method. Check which
 pieces the operation actually needs before creating modules.
 
-The current durable Discovery transition relies on projections and events; it
-does not yet rehydrate the domain `Run` entity. Account for this limitation when
-extending transitions and avoid duplicating their rules elsewhere.
+Durable transitions use projections and events with the domain
+`is_allowed_transition` policy shared by live entities and replay. Preserve
+that single rule source. Artifact provenance and cross-artifact evidence checks
+belong to the knowledge policy; JSON parsing and hashing stay in infrastructure.
 
 ## Verification
 

@@ -29,11 +29,11 @@ flowchart LR
         tool["Tool xper_delegate"]
         hooks["Pi hooks"]
         session["XperSession<br/>Connection and session state"]
-        action["delegateDiscovery<br/>Coordinates delegation"]
+        action["delegateKnowledge<br/>Coordinates delegation"]
         client["XperClient<br/>Typed operations and validation"]
         bridge["BridgeClient<br/>Transport and handshake"]
-        executor["runDiscovery<br/>Executes the agent"]
-        writer["saveDiscoveryBrief<br/>Saves evidence"]
+        executor["runKnowledge<br/>Executes the agent"]
+        writer["saveArtifact<br/>Saves evidence"]
 
         command --> client
         tool --> action
@@ -47,8 +47,8 @@ flowchart LR
     end
 
     core["Rust core · xper bridge --stdio<br/>Use cases, gates and persistence"]
-    child["Child Pi process<br/>Role discovery.explorer"]
-    brief["Brief file<br/>.xper/artifacts/"]
+    child["Child Pi process<br/>Current knowledge role"]
+    brief["Phase artifact<br/>.xper/artifacts/"]
 
     bridge <-->|JSONL over stdio| core
     executor --> child
@@ -57,8 +57,10 @@ flowchart LR
 
 The action requests an assignment from the core, records the result, and asks
 to advance after success. The core decides the transition and evaluates gates.
-The child Pi process executes the assigned role; its result returns to the
-action so it can save the Brief and report it to the core.
+The child Pi process executes the assigned role using the artifact references
+and remaining budget returned by the core. Its result returns to the action to
+save the phase artifact and report it to the core. Discovery uses Markdown;
+Define through Plan produce versioned JSON.
 
 | Responsibility | Module |
 | --- | --- |
@@ -67,13 +69,13 @@ action so it can save the Brief and report it to the core.
 | Session and tool hooks | [pi/hooks.ts](../src/pi/hooks.ts) |
 | Connection, lifecycle, and latest typed state | [pi/session.ts](../src/pi/session.ts) |
 | Pi observations and local log | [pi/observations.ts](../src/pi/observations.ts) |
-| Coordinate a local delegation | [actions/delegate-discovery.ts](../src/actions/delegate-discovery.ts) |
+| Coordinate a local delegation | [actions/delegate-knowledge.ts](../src/actions/delegate-knowledge.ts) |
 | Typed xper operations and response validation | [bridge/xper-client.ts](../src/bridge/xper-client.ts) |
 | JSONL transport, correlation, and handshake | [bridge/client.ts](../src/bridge/client.ts) |
 | Public protocol envelopes and errors | [bridge/protocol.ts](../src/bridge/protocol.ts) |
-| Resolve roles, execute Pi, and normalize results | [discovery/delegate.ts](../src/discovery/delegate.ts) |
-| Write the Brief without overwriting existing evidence | [discovery/artifacts.ts](../src/discovery/artifacts.ts) |
-| Query Pi's available models and map routed selections | [discovery/models.ts](../src/discovery/models.ts) |
+| Resolve roles, execute Pi, and normalize results | [knowledge/delegate.ts](../src/knowledge/delegate.ts) |
+| Write phase artifacts without overwriting existing evidence | [knowledge/artifacts.ts](../src/knowledge/artifacts.ts) |
+| Query Pi's available models and map routed selections | [knowledge/models.ts](../src/knowledge/models.ts) |
 
 ## Workflow activation
 
@@ -82,24 +84,27 @@ operation to start or resume the session's run. Bare `/xper` asks for the
 objective through Pi's interactive UI; callers without that UI provide it
 inline. The command displays the phase and suggests the next action.
 `/xper status` inspects state, and `/xper advance` asks the core to evaluate
-the current gate.
+the current gate. `/xper approve <artifactId>` supplies an explicit decision for
+a pending human gate. The delegation action never grants approval.
 
 Starting a workflow does not replace Pi's system prompt or invoke a model
-automatically. `xper_delegate` remains the explicit Discovery execution tool.
+automatically. `xper_delegate` remains the explicit knowledge-phase execution tool.
 This separates command input and presentation from model execution and the
 core's durable workflow state without adding an agent-loader abstraction.
 
 ## Delegation flow
 
-`delegateDiscovery` receives execution and writing functions, a workflow
+`delegateKnowledge` receives execution and writing functions, a workflow
 client, and an optional observation callback. It can be tested without
 processes, files, or the Pi API. It creates the assignment through the core,
-executes the agent, saves evidence, and reports the result. After success it
+executes the agent, saves evidence at the core-specified output path, and reports
+the result. After success it
 requests advancement and returns the phase reported by the core, including a
 blocked gate.
 
 Local execution or write errors produce a failed result; cancellation remains
-cancellation. An empty Brief does not produce success, and the artifact path is
+cancellation. An empty artifact or invalid JSON does not produce success, and
+the artifact path is
 returned only after saving it. If the bridge fails while recording the result
 or advancing, the error propagates without inventing another result or retrying
 a mutation that may already have committed.
@@ -132,6 +137,25 @@ with its recorded model selection.
 Its [local Pi implementation](../../../crates/xper-cli/src/infrastructure/installation.rs)
 implements the core's `Installation` port; the extension does not duplicate
 that flow.
+
+## Knowledge-phase extension
+
+The former Discovery execution block is now `src/knowledge/`, because the same
+process and file effects serve all five knowledge roles. The action remains in
+`src/actions/`, and the boundary check protects the renamed effects directory.
+No workflow rule moved into the adapter. The typed client validates the additive
+phase, artifact, timeout, budget, and approval fields before actions use them.
+
+The core may normalize a late success to `timed_out`; the action uses the durable
+outcome and does not advance or publish an accepted artifact path in that case.
+Gate reasons and approval IDs are shown in the tool result; status also shows
+pending approval and a ready Execution Plan after a session restart. Existing
+transport failures still propagate without retrying an uncertain mutation. An
+explicit invalid-params rejection of a successful output guarantees no commit;
+the action then records the attempt as failed and presents the rejection reason.
+
+[Knowledge workflow contracts](../../../docs/knowledge-workflow.md) document the
+JSON shapes, conservative cost reservations, feedback origins, and Plan limits.
 
 ## Extending the adapter
 

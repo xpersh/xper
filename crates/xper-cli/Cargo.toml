@@ -19,6 +19,7 @@ xper-protocol.workspace = true
 xper-store-sqlite.workspace = true
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
+sha2 = "0.10"
 
 [lints]
 workspace = true

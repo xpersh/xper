@@ -67,5 +67,81 @@
     "name": "invalid response result",
     "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-9","result":null},
     "errorCode": -32600
+  },
+  {
+    "name": "run start with knowledge policy",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "run-start-with-knowledge-policy",
+      "method": "run.start",
+      "params": {
+        "objective": "Synthetic knowledge workflow",
+        "policy": {
+          "maxAttempts": 20,
+          "humanGates": [
+            "define"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "human approval of current artifact",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "human-approval-of-current-artifact",
+      "method": "run.advance",
+      "params": {
+        "approvedArtifactId": "definition-1"
+      }
+    }
+  },
+  {
+    "name": "knowledge assignment with artifact contract",
+    "resultSchema": "assignmentStartResult",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "define-start",
+      "result": {
+        "runId": "run-1",
+        "assignmentId": "assignment-2",
+        "attemptId": "attempt-2",
+        "role": "define.product",
+        "selection": null,
+        "phase": "define",
+        "artifactKind": "definition_contract",
+        "artifactPath": ".xper/artifacts/definition-contract-attempt-2.json",
+        "inputArtifacts": [
+          {
+            "artifact_id": "brief-1",
+            "attempt_id": "attempt-1",
+            "kind": "discovery_brief",
+            "path": ".xper/artifacts/discovery-brief-attempt-1.md",
+            "version": 1
+          }
+        ],
+        "timeoutMs": 120000
+      }
+    }
+  },
+  {
+    "name": "human gate result",
+    "resultSchema": "runAdvanceResult",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "gate-1",
+      "result": {
+        "advanced": false,
+        "phase": "define",
+        "ready": false,
+        "resumed": false,
+        "reason": "explicit human approval is required for this artifact",
+        "humanArtifactId": "definition-1"
+      }
+    }
   }
 ]

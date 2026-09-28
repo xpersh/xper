@@ -12,9 +12,15 @@ pub(super) fn current(
     let id = store
         .session_run(session_id)
         .map_err(ApplicationError::dependency)?;
-    id.map(|id| store.load_run(&id).map_err(ApplicationError::dependency))
-        .transpose()
-        .map(Option::flatten)
+    id.map(|id| {
+        let events = store
+            .load_events(&id)
+            .map_err(ApplicationError::dependency)?;
+        crate::read_models::replay(&events)
+            .map_err(|error| ApplicationError::Dependency(error.into()))
+    })
+    .transpose()
+    .map(Option::flatten)
 }
 
 pub(super) fn active(

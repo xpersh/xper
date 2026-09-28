@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { listAvailableModels, piModelOptions } from "../discovery/models.js";
+import { listAvailableModels, piModelOptions } from "../knowledge/models.js";
 
 test("Pi catalog and execution use the shared Pi provider configuration", async () => {
   const directory = await mkdtemp(join(tmpdir(), "xper-models-"));

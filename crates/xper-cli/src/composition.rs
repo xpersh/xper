@@ -15,6 +15,7 @@ pub(crate) struct WorkflowRuntime {
     pub(crate) ids: UniqueIds,
     pub(crate) metadata: AdapterMetadata,
     pub(crate) routing: Option<RoutingSnapshot>,
+    pub(crate) policy: xper_application::knowledge::WorkflowPolicy,
     pub(crate) session_id: String,
 }
 
@@ -42,6 +43,7 @@ impl WorkflowRuntime {
                 capabilities,
             },
             routing,
+            policy: profile_config::workflow_policy(root)?,
             session_id: session_id.into(),
         })
     }

@@ -54,3 +54,21 @@ pub(crate) fn activate(root: &Path, name: &str) -> io::Result<RoutingSnapshot> {
     fs::rename(temporary, directory.join("active-profile"))?;
     Ok(snapshot)
 }
+
+/// Read neutral knowledge-workflow limits from the normal merged configuration.
+pub(crate) fn workflow_policy(
+    root: &Path,
+) -> io::Result<xper_application::knowledge::WorkflowPolicy> {
+    let config = effective(root)?;
+    let policy: xper_application::knowledge::WorkflowPolicy = config
+        .get("workflow")
+        .and_then(|workflow| workflow.get("knowledge"))
+        .map(|value| {
+            serde_json::from_value(value.clone())
+                .map_err(|_| io::Error::other("invalid workflow.knowledge policy"))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    policy.validate().map_err(io::Error::other)?;
+    Ok(policy)
+}

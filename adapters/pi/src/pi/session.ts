@@ -26,6 +26,7 @@ const manifest = {
     primaryAgent: false,
     lifecycleEvents: true,
     nativeUi: true,
+    humanApproval: true,
     subagents: true,
   },
 };
@@ -81,7 +82,12 @@ export class XperSession {
     if (!run) return "; no run";
     const phase = run.visits.at(-1)?.phase ?? "?";
     const outcomes = Object.values(run.attempts).map((attempt) => attempt.outcome ?? "running");
-    return `; run ${run.run_id}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; briefs ${Object.keys(run.artifacts).length}`;
+    const gate = run.human_input
+      ? `; awaiting approval: /xper approve ${run.human_input[1]}`
+      : run.accepted?.plan
+        ? "; execution plan ready"
+        : "";
+    return `; run ${run.run_id}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}`;
   }
 
   async refreshRun(): Promise<void> {

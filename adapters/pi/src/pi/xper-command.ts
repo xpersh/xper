@@ -1,9 +1,10 @@
 import type { PiExtensionAPI } from "./types.js";
 import { PROTOCOL_VERSION } from "../bridge/protocol.js";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
-import { listAvailableModels } from "../discovery/models.js";
+import { listAvailableModels } from "../knowledge/models.js";
 
-const USAGE = "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance";
+const USAGE =
+  "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance | /xper approve <artifactId>";
 
 export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): void {
   pi.registerCommand("xper", {
@@ -11,7 +12,9 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
     handler: async (args, ctx) => {
       const input = args.trim();
       const [first] = input.split(/\s+/);
-      const action = ["status", "advance", "help"].includes(first ?? "") ? first : "start";
+      const action = ["status", "advance", "approve", "help"].includes(first ?? "")
+        ? first
+        : "start";
       let objective = first === "start" ? input.slice("start".length).trim() : input;
       const connection = session.connection;
       session.observation?.record("command.invoked", {
@@ -26,7 +29,7 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         ctx.ui.notify(USAGE, "info");
         return;
       }
-      if (action === "start" || action === "advance") {
+      if (action === "start" || action === "advance" || action === "approve") {
         if (!connection) {
           ctx.ui.notify(`xper: ${session.error ?? "bridge offline"}`, "warning");
           return;
@@ -60,7 +63,11 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
               message += " Ask Pi to delegate Discovery with xper_delegate.";
             }
           } else {
-            const result = await connection.workflow.advanceRun();
+            const artifactId =
+              action === "approve" ? input.slice("approve".length).trim() : undefined;
+            if (action === "approve" && (!artifactId || /\s/.test(artifactId)))
+              throw new Error("Provide the artifact ID from the pending human gate");
+            const result = await connection.workflow.advanceRun(artifactId);
             message = JSON.stringify(result);
           }
           await session.refreshRun();

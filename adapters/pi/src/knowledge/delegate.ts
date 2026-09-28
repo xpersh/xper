@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import type { KnowledgeExecutionResult } from "../actions/delegate-knowledge.js";
-import type { AttemptOutcome } from "../bridge/xper-client.js";
+import type { AttemptOutcome, ModelUsage } from "../workflow/types.js";
 
 export type DelegateOutcome = AttemptOutcome;
 export type DelegateResult = KnowledgeExecutionResult;
@@ -72,6 +72,7 @@ export function runKnowledge(
     let buffer = "";
     let settled = false;
     let finished = false;
+    const usage: ModelUsage[] = [];
     let forceKill: NodeJS.Timeout | undefined;
     const stop = () => {
       child.kill();
@@ -94,7 +95,7 @@ export function runKnowledge(
       clearTimeout(timer);
       if (forceKill) clearTimeout(forceKill);
       signal?.removeEventListener("abort", abort);
-      resolve(result);
+      resolve(usage.length ? { ...result, usage } : result);
     };
     child.on("error", () => {
       outcome = "failed";
@@ -119,9 +120,41 @@ export function runKnowledge(
                   role?: string;
                   content?: Array<{ type?: string; text?: string }>;
                   errorMessage?: string;
+                  provider?: string;
+                  model?: string;
+                  responseModel?: string;
+                  usage?: {
+                    input?: unknown;
+                    output?: unknown;
+                    cacheRead?: unknown;
+                    cacheWrite?: unknown;
+                    cost?: { total?: unknown };
+                  };
                 }
               | undefined;
             if (message?.role === "assistant") {
+              const count = (value: unknown): number | null =>
+                typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+                  ? value
+                  : null;
+              const total = message.usage?.cost?.total;
+              const reportedModel = message.responseModel ?? message.model;
+              const costMicros =
+                typeof total === "number" && Number.isFinite(total) && total >= 0
+                  ? count(Math.round(total * 1_000_000))
+                  : null;
+              // Pi computes these costs from its model catalog, not a billing receipt.
+              // Missing usage still produces an unknown report, not a zero total.
+              usage.push({
+                inputTokens: count(message.usage?.input),
+                outputTokens: count(message.usage?.output),
+                cacheReadTokens: count(message.usage?.cacheRead),
+                cacheWriteTokens: count(message.usage?.cacheWrite),
+                costMicros,
+                ...(costMicros === null ? {} : { costSource: "pi_estimate" as const }),
+                ...(typeof message.provider === "string" ? { provider: message.provider } : {}),
+                ...(typeof reportedModel === "string" ? { model: reportedModel } : {}),
+              });
               if (message.errorMessage) outcome = "failed";
               const text = message.content
                 ?.filter((item) => item.type === "text")

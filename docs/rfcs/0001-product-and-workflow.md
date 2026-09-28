@@ -4,6 +4,10 @@
 - Date: 2026-09-22
 - Scope: functional and conceptual definition
 
+Workflow ownership is revised by [RFC 0006](0006-configuration-recording-and-adapter-workflows.md).
+The phase and role descriptions below describe the Pi workflow; they are not
+rules enforced by the Rust service.
+
 ## Summary
 
 `xper` is a workflow coordination layer for Pi inspired by Extreme
@@ -12,8 +16,9 @@ verifiable, integrable increments through a workflow with explicit contracts,
 gates, and feedback.
 
 The user starts a workflow through `/xper` in a Pi session. Its extension
-connects commands and agent execution to the independent core, which owns
-workflow state, gates, routing, and evidence. The executable knowledge workflow covers Discovery through Plan;
+owns commands, agent execution, workflow state, and gates. The independent
+Rust service resolves configuration and records reported facts. The executable
+knowledge workflow covers Discovery through Plan;
 [its contracts and limits](../knowledge-workflow.md) describe the current slice.
 The remaining phases below describe the product direction.
 
@@ -201,8 +206,8 @@ Verdicts:
   an external agent-manager package.
 - A TypeScript extension acts as the Pi adapter: commands, tools, hooks,
   dynamic context, and TUI integration.
-- The independent core implements the workflow, gates, routing, durable state,
-  and observability model.
+- The Pi adapter implements the workflow and gates; the independent core
+  resolves configuration and records execution facts for inspection and metrics.
 - Each subagent has its own session; xper adds workspace isolation when the
   plan allows concurrent work.
 - Durable state belongs to xper, not to a transcript.
@@ -210,16 +215,16 @@ Verdicts:
 - The coordinator integrates results according to the DAG defined in Plan.
 
 The adapter communicates with the core through the public protocol. Its
-execution dependency is explicit; execution remains separate from workflow
-state and evidence.
+execution dependencies are explicit, and recording does not decide the next
+workflow action. Workflow checkpoints are opaque to the core.
 
 Normal execution starts with `pi` followed by `/xper <objective>`. Bare `/xper`
 asks for an objective interactively. This starts or resumes the run without
 switching primary agents or automatically executing subsequent phases.
 `xper run` is not part of the planned interface.
 The full decision is documented in [RFC 0004](0004-pi-integration.md).
-The separation of core, protocol, and adapters is documented in
-[RFC 0005](0005-modular-architecture.md).
+The current separation of core, protocol, and adapters is documented in
+[RFC 0006](0006-configuration-recording-and-adapter-workflows.md).
 
 ## Open decisions
 

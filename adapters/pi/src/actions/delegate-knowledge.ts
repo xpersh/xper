@@ -1,4 +1,4 @@
-import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
+import { WorkflowValidationError } from "../workflow/types.js";
 import type {
   AttemptOutcome,
   FinishAttempt,
@@ -7,11 +7,13 @@ import type {
   ArtifactInput,
   RemainingBudget,
   RunAdvanced,
-} from "../bridge/xper-client.js";
+  ModelUsage,
+} from "../workflow/types.js";
 
-export type KnowledgeExecutionResult =
+export type KnowledgeExecutionResult = { usage?: ModelUsage[] } & (
   | { outcome: "succeeded"; brief: string }
-  | { outcome: Exclude<AttemptOutcome, "succeeded"> };
+  | { outcome: Exclude<AttemptOutcome, "succeeded"> }
+);
 
 export interface KnowledgeExecution {
   task: string;
@@ -28,10 +30,14 @@ export interface KnowledgeExecution {
 
 type Observation =
   | { type: "attempt.correlated"; attemptId: string }
+  | { type: "recording.failed"; attemptId: string }
   | { type: "attempt.finished"; attemptId: string; outcome: AttemptOutcome };
 
 export interface KnowledgeDependencies {
-  workflow: Pick<WorkflowClient, "startAssignment" | "finishAttempt" | "advanceRun">;
+  workflow: Pick<
+    WorkflowClient,
+    "startAssignment" | "finishAttempt" | "advanceRun" | "recordUsage"
+  >;
   execute(request: KnowledgeExecution): Promise<KnowledgeExecutionResult>;
   saveBrief(cwd: string, attemptId: string, brief: string, artifactPath?: string): Promise<string>;
   observe?(event: Observation): void;
@@ -56,7 +62,7 @@ export interface DelegateKnowledgeResult {
   reason?: string;
 }
 
-/** Coordinate local execution; the core owns assignments, outcomes and phase gates. */
+/** Coordinate execution using the Pi-owned workflow policy. */
 export async function delegateKnowledge(
   request: DelegateKnowledgeRequest,
   dependencies: KnowledgeDependencies,
@@ -88,6 +94,13 @@ export async function delegateKnowledge(
           ? { model: request.model }
           : {}),
     });
+    for (const usage of result.usage ?? []) {
+      try {
+        await workflow.recordUsage?.(attemptId, usage);
+      } catch {
+        dependencies.observe?.({ type: "recording.failed", attemptId });
+      }
+    }
     if (result.outcome === "succeeded") {
       if (!result.brief.trim()) throw new Error("Phase artifact is empty");
       const artifactPath = await dependencies.saveBrief(
@@ -106,14 +119,9 @@ export async function delegateKnowledge(
 
   let reason: string | undefined;
   const settled = await workflow.finishAttempt(completion).catch(async (error: unknown) => {
-    // Invalid params is an explicit rejection before commit. Close this failed
-    // execution so malformed model output cannot leave the phase running.
-    // Transport/internal failures have unknown durability and must propagate.
-    if (
-      completion.outcome !== "succeeded" ||
-      !(error instanceof ProtocolFailure) ||
-      error.code !== errorCode.invalidParams
-    )
+    // The Pi controller validates before settling. Malformed output becomes a
+    // failed attempt; recorder availability does not affect that decision.
+    if (completion.outcome !== "succeeded" || !(error instanceof WorkflowValidationError))
       throw error;
     reason = error.message;
     return workflow.finishAttempt({ attemptId, outcome: "failed" });

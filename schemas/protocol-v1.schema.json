@@ -2,264 +2,732 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/myugen/xper/schemas/protocol-v1.schema.json",
   "title": "xper bridge protocol v1 message",
-  "description": "One LF-terminated JSON-RPC 2.0 message on stdio. The LF is not part of the JSON value.",
+  "description": "JSON-RPC 2.0 transport v1. eventRecording and configurationResolution capabilities identify the passive recording API. Workflow commands are owned by adapters.",
   "oneOf": [
-    { "$ref": "#/$defs/request" },
-    { "$ref": "#/$defs/success" },
-    { "$ref": "#/$defs/failure" }
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/success"
+    },
+    {
+      "$ref": "#/$defs/failure"
+    }
   ],
   "$defs": {
-    "version": { "const": "1" },
-    "id": { "type": "string", "minLength": 1 },
+    "version": {
+      "const": "1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
     "capabilityMap": {
       "type": "object",
-      "additionalProperties": { "type": "boolean" }
+      "additionalProperties": {
+        "type": "boolean"
+      }
     },
     "request": {
       "type": "object",
-      "required": ["jsonrpc", "protocolVersion", "id", "method", "params"],
+      "required": [
+        "jsonrpc",
+        "protocolVersion",
+        "id",
+        "method",
+        "params"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "protocolVersion": { "$ref": "#/$defs/version" },
-        "id": { "$ref": "#/$defs/id" },
-        "method": { "type": "string", "minLength": 1 },
-        "params": { "type": "object" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "params": {
+          "type": "object"
+        }
       },
-      "not": { "anyOf": [{ "required": ["result"] }, { "required": ["error"] }] },
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "required": [
+              "error"
+            ]
+          }
+        ]
+      },
       "allOf": [
         {
-          "if": { "properties": { "method": { "const": "initialize" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/initializeParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "initialize"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/initializeParams"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "enum": ["capabilities", "ping", "shutdown", "profile.inspect"] } } },
-          "then": { "properties": { "params": { "maxProperties": 0 } } }
+          "if": {
+            "properties": {
+              "method": {
+                "enum": [
+                  "capabilities",
+                  "ping",
+                  "shutdown",
+                  "profile.inspect"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "maxProperties": 0
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "const": "session.attach" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/sessionAttachParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "session.attach"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sessionAttachParams"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "const": "session.detach" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/sessionDetachParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "session.detach"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/sessionDetachParams"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "const": "event.ingest" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/errorEventParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "event.ingest"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/errorEventParams"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "const": "run.start" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/runStartParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "event.append"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/appendEventsParams"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "const": "assignment.start" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/assignmentStartParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "run.status"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/runStatusParams"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "method": { "enum": ["run.status"] } } },
-          "then": { "properties": { "params": { "maxProperties": 0 } } }
-        },
-        {
-          "if": { "properties": { "method": { "const": "run.advance" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/runAdvanceParams" } } }
-        },
-        {
-          "if": { "properties": { "method": { "const": "attempt.finish" } } },
-          "then": { "properties": { "params": { "$ref": "#/$defs/attemptFinishParams" } } }
+          "if": {
+            "properties": {
+              "method": {
+                "const": "configuration.resolve"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/resolveConfigurationParams"
+              }
+            }
+          }
         }
       ]
     },
     "success": {
       "type": "object",
-      "required": ["jsonrpc", "protocolVersion", "id", "result"],
+      "required": [
+        "jsonrpc",
+        "protocolVersion",
+        "id",
+        "result"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "protocolVersion": { "$ref": "#/$defs/version" },
-        "id": { "$ref": "#/$defs/id" },
-        "result": { "type": "object" }
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "result": {
+          "type": "object"
+        }
       },
-      "not": { "anyOf": [{ "required": ["method"] }, { "required": ["error"] }] }
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "method"
+            ]
+          },
+          {
+            "required": [
+              "error"
+            ]
+          }
+        ]
+      }
     },
     "failure": {
       "type": "object",
-      "required": ["jsonrpc", "protocolVersion", "id", "error"],
+      "required": [
+        "jsonrpc",
+        "protocolVersion",
+        "id",
+        "error"
+      ],
       "properties": {
-        "jsonrpc": { "const": "2.0" },
-        "protocolVersion": { "$ref": "#/$defs/version" },
-        "id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "protocolVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "error": {
           "type": "object",
-          "required": ["code", "message"],
+          "required": [
+            "code",
+            "message"
+          ],
           "properties": {
             "code": {
               "type": "integer",
-              "enum": [-32700, -32600, -32601, -32602, -32603, -32001, -32002, -32003, -32004, -32005]
+              "enum": [
+                -32700,
+                -32600,
+                -32601,
+                -32602,
+                -32603,
+                -32001,
+                -32002,
+                -32003,
+                -32004,
+                -32005
+              ]
             },
-            "message": { "type": "string" },
-            "data": { "type": "object" }
+            "message": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            }
           }
         }
       },
-      "not": { "anyOf": [{ "required": ["method"] }, { "required": ["result"] }] }
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "method"
+            ]
+          },
+          {
+            "required": [
+              "result"
+            ]
+          }
+        ]
+      }
     },
     "initializeParams": {
       "type": "object",
-      "required": ["adapter", "adapterVersion", "capabilities"],
+      "required": [
+        "adapter",
+        "adapterVersion",
+        "capabilities"
+      ],
       "properties": {
-        "adapter": { "type": "string", "minLength": 1 },
-        "adapterVersion": { "type": "string", "minLength": 1 },
-        "capabilities": { "$ref": "#/$defs/capabilityMap" }
+        "adapter": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapterVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilities": {
+          "$ref": "#/$defs/capabilityMap"
+        }
       }
     },
     "initializeResult": {
       "type": "object",
-      "required": ["protocolVersion", "bridgeVersion"],
+      "required": [
+        "protocolVersion",
+        "bridgeVersion"
+      ],
       "properties": {
-        "protocolVersion": { "$ref": "#/$defs/version" },
-        "bridgeVersion": { "type": "string", "minLength": 1 }
+        "protocolVersion": {
+          "$ref": "#/$defs/version"
+        },
+        "bridgeVersion": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "capabilitiesResult": {
       "type": "object",
-      "required": ["capabilities"],
+      "required": [
+        "capabilities"
+      ],
       "properties": {
-        "capabilities": { "$ref": "#/$defs/capabilityMap" },
-        "maxFrameBytes": { "type": "integer", "minimum": 1 }
+        "capabilities": {
+          "$ref": "#/$defs/capabilityMap"
+        },
+        "maxFrameBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "pingResult": {
       "type": "object",
-      "required": ["pong"],
-      "properties": { "pong": { "const": true } }
+      "required": [
+        "pong"
+      ],
+      "properties": {
+        "pong": {
+          "const": true
+        }
+      }
     },
     "shutdownResult": {
       "type": "object",
-      "required": ["ok"],
-      "properties": { "ok": { "const": true } }
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      }
     },
     "sessionAttachParams": {
       "type": "object",
-      "required": ["sessionId", "cwd", "mode"],
+      "required": [
+        "sessionId",
+        "cwd",
+        "mode"
+      ],
       "properties": {
-        "sessionId": { "type": "string", "minLength": 1 },
-        "cwd": { "type": "string", "minLength": 1 },
-        "mode": { "type": "string", "minLength": 1 }
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "sessionDetachParams": {
       "type": "object",
-      "required": ["sessionId"],
-      "properties": { "sessionId": { "type": "string", "minLength": 1 } }
-    },
-    "runStartParams": {
-      "type": "object",
-      "required": ["objective"],
+      "required": [
+        "sessionId"
+      ],
       "properties": {
-        "objective": { "type": "string", "minLength": 1 },
-        "models": { "type": "array", "items": { "$ref": "#/$defs/availableModel" } },
-        "policy": { "$ref": "#/$defs/workflowPolicy" }
-      },
-      "additionalProperties": false
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "availableModel": {
       "type": "object",
-      "required": ["provider", "model", "reasoning"],
+      "required": [
+        "provider",
+        "model",
+        "reasoning"
+      ],
       "properties": {
-        "provider": { "type": "string", "minLength": 1 },
-        "model": { "type": "string", "minLength": 1 },
-        "reasoning": { "type": "boolean" }
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "modelSelection": {
       "type": "object",
-      "required": ["context", "provider", "model", "thinking"],
+      "required": [
+        "context",
+        "provider",
+        "model",
+        "thinking"
+      ],
       "properties": {
-        "context": { "type": "string", "minLength": 1 },
-        "provider": { "type": "string", "minLength": 1 },
-        "model": { "type": "string", "minLength": 1 },
-        "thinking": { "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"] }
+        "context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "thinking": {
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "routingSnapshot": {
       "type": "object",
-      "required": ["profile", "context", "routes"],
+      "required": [
+        "profile",
+        "context",
+        "routes"
+      ],
       "properties": {
-        "profile": { "type": "string", "minLength": 1 },
-        "context": { "type": "string", "minLength": 1 },
-        "routes": { "type": "object", "additionalProperties": {
-          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/modelSelection" }
-        } }
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "routes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/modelSelection"
+            }
+          }
+        }
       }
     },
     "profileInspectResult": {
       "type": "object",
-      "required": ["routing"],
-      "properties": { "routing": { "oneOf": [
-        { "$ref": "#/$defs/routingSnapshot" }, { "type": "null" }
-      ] } },
-      "additionalProperties": false
-    },
-    "assignmentStartResult": {
-      "type": "object",
-      "required": ["runId", "assignmentId", "attemptId", "role", "selection"],
+      "required": [
+        "routing"
+      ],
       "properties": {
-        "runId": { "type": "string", "minLength": 1 },
-        "assignmentId": { "type": "string", "minLength": 1 },
-        "attemptId": { "type": "string", "minLength": 1 },
-        "role": { "type": "string", "minLength": 1 },
-        "phase": {"enum": ["discovery", "define", "design", "breakdown", "plan"]},
-        "artifactKind": {"enum": ["discovery_brief", "definition_contract", "design_decisions", "story_map", "execution_plan"]},
-        "artifactPath": {"type": "string", "minLength": 1},
-        "inputArtifacts": {"type": "array", "items": {"$ref": "#/$defs/artifactInput"}},
-        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-        "budget": {"type": "object", "required": ["attempts", "timeMs", "costMicros", "concurrency"], "properties": {"attempts": {"type": "integer", "minimum": 0}, "timeMs": {"type": "integer", "minimum": 1}, "costMicros": {"type": ["integer", "null"], "minimum": 0}, "concurrency": {"type": "integer", "minimum": 1}}, "additionalProperties": false},
-        "selection": { "oneOf": [
-          { "$ref": "#/$defs/modelSelection" }, { "type": "null" }
-        ] }
+        "routing": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/routingSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       },
       "additionalProperties": false
     },
-    "assignmentStartParams": {
+    "errorEventParams": {
       "type": "object",
-      "properties": { "assignmentId": { "type": "string", "minLength": 1 } },
-      "additionalProperties": false
-    },
-    "attemptFinishParams": {
-      "type": "object",
-      "required": ["attemptId", "outcome"],
+      "required": [
+        "sessionId",
+        "kind",
+        "source"
+      ],
       "properties": {
-        "attemptId": { "type": "string", "minLength": 1 },
-        "outcome": { "enum": ["succeeded", "failed", "cancelled", "timed_out"] },
-        "artifactPath": { "type": "string", "minLength": 1 }
+        "sessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "error"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "toolCallId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "recordedEvent": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "eventId",
+        "runId",
+        "occurredAt",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "eventId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "maxLength": 256
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "maxLength": 256
+        },
+        "occurredAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "maxLength": 256
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Envelope names and IDs are limited to 256 UTF-8 bytes; payload remains opaque."
+    },
+    "appendEventsParams": {
+      "type": "object",
+      "required": [
+        "events"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/recordedEvent"
+          }
+        }
       },
       "additionalProperties": false
     },
-    "workflowPolicy": {
+    "appendEventsResult": {
+      "type": "object",
+      "required": [
+        "accepted",
+        "durability"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "durability": {
+          "enum": [
+            "persistent",
+            "volatile"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "runStatusParams": {
       "type": "object",
       "properties": {
-        "maxAttempts": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "after": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 9007199254740991
+          "maximum": 1000
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolveConfigurationParams": {
+      "type": "object",
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/availableModel"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolveConfigurationResult": {
+      "type": "object",
+      "required": [
+        "routing",
+        "adapterConfig"
+      ],
+      "properties": {
+        "routing": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/routingSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "maxTimeMs": {
+        "adapterConfig": {}
+      },
+      "additionalProperties": false
+    },
+    "runMetrics": {
+      "type": "object",
+      "required": [
+        "formulaVersion",
+        "eventCount",
+        "attemptsStarted",
+        "attemptsFinished",
+        "outcomes",
+        "inputTokens",
+        "outputTokens",
+        "costMicros",
+        "usageReports"
+      ],
+      "properties": {
+        "formulaVersion": {
+          "const": 1
+        },
+        "eventCount": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 9007199254740991
         },
-        "attemptTimeMs": {
+        "attemptsStarted": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 9007199254740991
         },
-        "maxConcurrency": {
+        "attemptsFinished": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 9007199254740991
         },
-        "maxCostMicros": {
+        "outcomes": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "inputTokens": {
           "oneOf": [
             {
               "type": "integer",
@@ -271,117 +739,129 @@
             }
           ]
         },
-        "attemptCostMicros": {
+        "outputTokens": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costMicros": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usageReports": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "recordedRun": {
+      "type": "object",
+      "required": [
+        "runId",
+        "sessionId",
+        "status",
+        "phase",
+        "startedAt",
+        "lastEventAt",
+        "metrics"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
         },
-        "humanGates": {
-          "type": "array",
-          "items": {
-            "enum": [
-              "discovery",
-              "define",
-              "design",
-              "breakdown",
-              "plan"
-            ]
-          },
-          "uniqueItems": true
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    },
-    "artifactInput": {
-      "type": "object",
-      "properties": {
-        "artifact_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "attempt_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "kind": {
-          "type": "string",
-          "minLength": 1
-        },
-        "path": {
-          "type": "string",
-          "minLength": 1
-        },
-        "version": {
+        "lastEventAt": {
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "artifact_id",
-        "attempt_id",
-        "kind",
-        "path",
-        "version"
-      ],
-      "additionalProperties": false
-    },
-    "runAdvanceParams": {
-      "type": "object",
-      "properties": {
-        "approvedArtifactId": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    },
-    "runAdvanceResult": {
-      "type": "object",
-      "properties": {
-        "advanced": {
-          "type": "boolean"
         },
-        "phase": {
-          "enum": [
-            "discovery",
-            "define",
-            "design",
-            "breakdown",
-            "plan"
+        "metrics": {
+          "$ref": "#/$defs/runMetrics"
+        }
+      }
+    },
+    "runStatusResult": {
+      "type": "object",
+      "required": [
+        "run",
+        "timeline",
+        "durability",
+        "nextCursor"
+      ],
+      "properties": {
+        "run": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/recordedRun"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
-        "reason": {
-          "type": "string",
-          "minLength": 1
+        "timeline": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recordedEvent"
+          }
         },
-        "ready": {
-          "type": "boolean"
+        "durability": {
+          "enum": [
+            "persistent",
+            "volatile"
+          ]
         },
-        "resumed": {
-          "type": "boolean"
+        "degradedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "humanArtifactId": {
-          "type": "string",
-          "minLength": 1
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      },
-      "required": [
-        "advanced",
-        "phase"
-      ],
-      "additionalProperties": false
-    },
-    "errorEventParams": {
-      "type": "object",
-      "required": ["sessionId", "kind", "source"],
-      "properties": {
-        "sessionId": { "type": "string", "minLength": 1 },
-        "kind": { "const": "error" },
-        "source": { "type": "string", "minLength": 1 },
-        "toolCallId": { "type": "string", "minLength": 1 }
       }
     }
   }

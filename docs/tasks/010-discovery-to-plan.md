@@ -31,7 +31,22 @@ without turning them into a rigid pipeline.
 - Writing code, integrating worktrees, or issuing the final verdict.
 
 
-## Implementation and evidence
+## Ownership revision
+
+[RFC 0006](../rfcs/0006-configuration-recording-and-adapter-workflows.md)
+moves this task's workflow rules into the Pi adapter. The phase contracts,
+feedback, gates, approvals, and plan validation remain Pi behavior. Rust now
+resolves configuration and records adapter-reported facts without deciding
+transitions or validating knowledge artifacts. Current organization and
+recovery limitations are documented in the
+[Pi architecture](../../adapters/pi/docs/architecture.md).
+
+The original validation below records the first delivery. Its references to
+domain/application workflow tests describe that delivery's ownership, not the
+current Rust structure. The refactored workflow is verified in the adapter;
+the Rust tests cover generic recording and configuration.
+
+## Original implementation and evidence
 
 - [Knowledge workflow guide](../knowledge-workflow.md) specifies phase inputs,
   outputs, feedback, approval configuration, compatibility, and budget semantics.

@@ -3,6 +3,11 @@
 This directory turns the RFCs into an ordered backlog. Tasks describe planned
 work; their existence does not imply that implementation has started.
 
+[RFC 0006](../rfcs/0006-configuration-recording-and-adapter-workflows.md)
+defines current ownership: Pi implements the workflow, while Rust resolves
+configuration and records reported facts. Earlier task evidence may describe
+the original core-owned implementation; it does not override this boundary.
+
 ## First milestone goal
 
 Validate a complete vertical slice:

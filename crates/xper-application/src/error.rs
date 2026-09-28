@@ -5,7 +5,7 @@ use std::{error::Error, fmt};
 /// A rejected request or a failure in a dependency.
 #[derive(Debug)]
 pub enum ApplicationError {
-    /// The requested operation cannot be applied to the current workflow.
+    /// The request violates the recording envelope or query contract.
     InvalidInput(&'static str),
     /// A dependency failed; the original error remains available as its source.
     Dependency(Box<dyn Error + Send + Sync>),

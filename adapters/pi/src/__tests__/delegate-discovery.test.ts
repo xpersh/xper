@@ -1,4 +1,4 @@
-import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
+import { WorkflowValidationError } from "../workflow/types.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -8,7 +8,7 @@ import {
   type KnowledgeExecution,
   type KnowledgeExecutionResult,
 } from "../actions/delegate-knowledge.js";
-import type { FinishAttempt, ModelSelection, RunAdvanced } from "../bridge/xper-client.js";
+import type { FinishAttempt, ModelSelection, RunAdvanced } from "../workflow/types.js";
 
 function fixture() {
   const calls: string[] = [];
@@ -91,7 +91,7 @@ function fixture() {
   };
 }
 
-test("delegation saves evidence before settling and returns the phase decided by the core", async () => {
+test("delegation saves evidence before settling and returns the phase decided by Pi", async () => {
   const f = fixture();
   f.request.model = "provider/model";
   f.request.timeoutSeconds = 30;
@@ -131,7 +131,7 @@ test("delegation saves evidence before settling and returns the phase decided by
   ]);
 });
 
-test("successful execution still respects a blocked core gate", async () => {
+test("successful execution still respects a blocked Pi gate", async () => {
   const f = fixture();
   f.state.advance = { advanced: false, phase: "discovery", reason: "other assignments pending" };
   assert.equal((await delegateKnowledge(f.request, f.dependencies)).phase, "discovery");
@@ -155,7 +155,7 @@ for (const outcome of ["failed", "cancelled", "timed_out"] as const) {
   });
 }
 
-test("retry passes the pending assignment identity through to the core", async () => {
+test("retry passes the pending assignment identity through to Pi", async () => {
   const f = fixture();
   f.request.assignmentId = "interrupted-assignment";
   await delegateKnowledge(f.request, f.dependencies);
@@ -265,7 +265,7 @@ test("a failed routed execution settles after one attempt", async () => {
   assert.equal(result.outcome, "failed");
 });
 
-test("delegation obeys core artifact inputs and timeout and preserves a human gate", async () => {
+test("delegation obeys Pi artifact inputs and timeout and preserves a human gate", async () => {
   const f = fixture();
   f.dependencies.workflow.startAssignment = async () => ({
     runId: "r",
@@ -303,7 +303,7 @@ test("delegation obeys core artifact inputs and timeout and preserves a human ga
   assert.equal(result.artifactPath, ".xper/artifacts/definition-contract-t.json");
 });
 
-test("a core deadline normalizes late success to timeout without advancing", async () => {
+test("a Pi deadline normalizes late success to timeout without advancing", async () => {
   const f = fixture();
   f.dependencies.workflow.finishAttempt = async (request) => ({
     attemptId: request.attemptId,
@@ -316,12 +316,12 @@ test("a core deadline normalizes late success to timeout without advancing", asy
   assert(!f.calls.includes("advance"));
 });
 
-test("explicit core rejection settles malformed output as failed, while uncertain failures propagate", async () => {
+test("explicit artifact rejection settles malformed output as failed, while uncertain failures propagate", async () => {
   const f = fixture();
   f.dependencies.workflow.finishAttempt = async (request) => {
     f.completions.push(request);
     if (request.outcome === "succeeded")
-      throw new ProtocolFailure(errorCode.invalidParams, "artifact input references do not match");
+      throw new WorkflowValidationError("artifact input references do not match");
     return { attemptId: request.attemptId, outcome: request.outcome, artifactId: null };
   };
   const result = await delegateKnowledge(f.request, f.dependencies);

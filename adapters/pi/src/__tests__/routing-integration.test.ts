@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { connectBridge } from "../bridge/client.js";
+import { PiWorkflow } from "../workflow/controller.js";
 import { XperClient } from "../bridge/xper-client.js";
 
 const workspace = fileURLToPath(new URL("../../../..", import.meta.url));
@@ -52,7 +53,7 @@ test("bridge records one routed attempt and its selection", async () => {
       cwd: root,
       mode: "rpc",
     });
-    const workflow = new XperClient(client);
+    const workflow = new PiWorkflow(new XperClient(client), root, "routing-session");
     const routing = await workflow.inspectProfile();
     assert.equal(routing?.routes["discovery.explorer"]?.[0]?.model, "m1");
     await assert.rejects(workflow.startRun("Investigate", []));
@@ -64,8 +65,8 @@ test("bridge records one routed attempt and its selection", async () => {
     assert.equal(first.selection?.model, "m1");
     await workflow.finishAttempt({ attemptId: first.attemptId, outcome: "failed" });
     await assert.rejects(workflow.startAssignment(first.assignmentId));
-    const status = await client.request("run.status");
-    const run = status.run as Record<string, unknown>;
+    const status = await workflow.getRunStatus();
+    const run = status.run as unknown as Record<string, unknown>;
     assert.equal(run.run_id, started.runId);
     const savedRouting = run.routing as Record<string, unknown>;
     assert.equal(savedRouting.profile, "work");
@@ -83,8 +84,12 @@ test("bridge records one routed attempt and its selection", async () => {
       cwd: root,
       mode: "rpc",
     });
-    const reopened = await client.request("run.status");
-    const history = (reopened.run as Record<string, unknown>).attempts as Record<
+    const reopened = await new PiWorkflow(
+      new XperClient(client),
+      root,
+      "routing-session",
+    ).getRunStatus();
+    const history = (reopened.run as unknown as Record<string, unknown>).attempts as Record<
       string,
       { selection: unknown }
     >;

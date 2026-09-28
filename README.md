@@ -1,12 +1,15 @@
 # xper
 
 `xper` is a multi-agent development harness based on Extreme Programming
-practices. Its Pi extension coordinates the workflow, assigns models by role,
-and retains local evidence of quality, time, cost, and rework.
+practices. Its Pi extension owns the workflow and agent execution. The Rust
+service resolves configuration and model profiles, records reported events,
+and makes the execution history available for inspection and metrics.
 
 > Status: Discovery, Define, Design, Breakdown, and Plan are executable from
 > Pi with artifact contracts, feedback, gates, and persisted evidence.
 > Implementation, verification, and final judgment are still under development.
+> Basic event and usage summaries are available; full metric comparison and a
+> dashboard remain future work.
 
 ## Goal
 
@@ -15,7 +18,7 @@ Turn development intent into small, verifiable, integrable increments through:
 - An XP workflow with explicit feedback and backward transitions.
 - Multi-agent roles with defined responsibilities and permissions.
 - Reproducible multimodel routing by context, role, and phase.
-- Strict separation of personal, corporate, and client identities.
+- Explicit configuration contexts and provider selection policies.
 - Local observability to compare runs, models, and strategies.
 
 The main unit of work is a **vertical increment of value** that can be defined,
@@ -25,6 +28,7 @@ implemented, verified, and accepted independently, rather than an entire project
 
 - [xper core architecture and use cases](docs/architecture.md)
 - [Pi adapter architecture](adapters/pi/docs/architecture.md)
+- [RFC 0006: Configuration, recording, and adapter-owned workflows](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
 - [RFC 0001: Product and workflow](docs/rfcs/0001-product-and-workflow.md)
 - [RFC 0002: Multimodel configuration and routing](docs/rfcs/0002-multimodel-configuration.md)
 - [Knowledge workflow and phase contracts](docs/knowledge-workflow.md)
@@ -36,9 +40,9 @@ implemented, verified, and accepted independently, rather than an entire project
 ## Implementation path
 
 The technical backlog is organized as a sequence of small, verifiable tasks in
-[docs/tasks/README.md](docs/tasks/README.md). The first goal is to validate a
-complete vertical slice from Pi through the core to SQLite before implementing
-the entire workflow.
+[docs/tasks/README.md](docs/tasks/README.md). The implemented vertical slice
+covers Pi's knowledge workflow through Plan, with configuration and recording
+provided by the Rust service.
 
 ## Short definition
 
@@ -66,10 +70,12 @@ Pi provides the runtime, interactive session, models, credentials, and tools.
 The xper extension owns its commands, workflow integration, observations, and
 knowledge-phase execution. It does not require an external agent-manager package.
 
-Pi is the first adapter, not a domain dependency. The Rust core communicates
-through a versioned protocol with external adapters. The Pi TypeScript
-extension translates its API, hooks, and TUI into that contract without
-introducing Pi types or concepts into the XP state machine.
+Pi is the first adapter, not a Rust dependency. Through a versioned protocol it
+requests resolved configuration and reports events to the Rust service. Pi
+owns phases, gates, retries, approvals, artifact validation, and budgets. Rust
+checks recording integrity and serves the history; it does not decide which
+step may run next. A future adapter can use a different workflow with the
+same configuration and recording service.
 
 In this checkout, prepare the bridge and extension before the first launch:
 
@@ -88,7 +94,7 @@ Start a workflow in the Pi session:
 
 Bare `/xper` asks for the objective in an interactive session. The explicit
 `/xper start <objective>` form also works. `/xper status` shows versions,
-connection, phase, and attempt outcomes; `/xper advance` asks the core to
+connection, phase, and attempt outcomes; `/xper advance` asks the Pi workflow to
 evaluate the current gate. Starting a run displays its phase and next action;
 it does not automatically call a model or execute every phase. No `/agent xper`
 activation is needed.
@@ -98,15 +104,18 @@ allows selecting another binary with `XPER_BRIDGE_COMMAND`. It starts and
 stops the bridge with the Pi session. Starting a workflow creates or resumes
 the run associated with that session. The custom `xper_delegate` tool executes
 the current knowledge role in a child Pi process,
-saves its artifact, and asks the core to evaluate the gate. Discovery keeps its
+saves its artifact, and evaluates the gate in the adapter. Discovery keeps its
 Markdown Brief; later phases use structured JSON contracts. Feedback returns to
 the responsible phase, configured human gates use `/xper approve <artifactId>`,
 and Plan stops with a validated execution DAG. The
 [knowledge workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection
-and timeline from SQLite. A bridge crash leaves Pi usable and is shown as
-`offline`. The [XP-008 demo](docs/tasks/008-vertical-slice.md#manual-demo)
-details this flow.
+and timeline from SQLite. Recording failures leave execution outcomes intact;
+the adapter retains pending events for retry and shows degraded recording.
+Only a persistent acknowledgement confirms durable shared history. Old
+core-owned runs remain inspectable, but lack the Pi checkpoint needed to
+resume under this architecture. See the
+[boundary decision](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md).
 
 To retain local observations across sessions:
 
@@ -120,10 +129,10 @@ at most five files (the current file and four previous ones). It records
 session start and end, bridge state, `/xper` invocations without arguments,
 generic tool lifecycle, and correlation between `xper_delegate` and the
 Attempt. It does not store tasks, prompts, or outputs. Tool counters are
-observations; workflow outcomes come from xper's own execution and persisted
-evidence.
+observations; workflow outcomes come from the Pi workflow's explicit execution
+and persisted evidence.
 
-The `xper` CLI configures, validates, diagnoses, and exports information;
+The `xper` CLI configures, diagnoses, and queries recorded information;
 interactive workflow execution stays inside Pi.
 
 `xper doctor` inspects Pi, Pi settings, the adapter, and configuration without
@@ -223,13 +232,13 @@ schemas/                 # public JSON Schema boundary
 fixtures/                # neutral messages for contract tests
 ```
 
-The layout matches RFC 0005, so no additional ADR is needed. Future crates
-(`xper-workspaces`, `xper-observability`, and `xper-tui`) will be added when a
-task needs real behavior in those layers.
+The layout retains the ports and adapters structure; RFC 0006 defines the
+current responsibilities. Add another crate only when concrete behavior needs
+a separate module boundary.
 
 `scripts/check-core-boundaries.mjs` validates crate architecture: the domain
-cannot have dependencies or use I/O APIs, the application depends only on the
-domain, and infrastructure and the CLI point inward. Each adapter maintains
+cannot have dependencies or use I/O APIs, application dependencies point
+inward, and infrastructure implements the core ports. Each adapter maintains
 its own checks: Pi's live in `adapters/pi/scripts/check-boundaries.mjs` and
 protect both its internal structure and access to the core exclusively through
 the public protocol.
@@ -260,6 +269,11 @@ After the handshake, both peers can initiate requests. `ping` checks the
 connection, and `shutdown` responds before terminating the process. Each new
 process negotiates from scratch, with no resident protocol state.
 
-The minimal adapter adds `session.attach`, `session.detach`, and `event.ingest`
-for tool or compaction errors. The bridge validates the session and acknowledges
-these messages; persistence and workflow decisions belong to later tasks.
+`session.attach` and `session.detach` bind the recording conversation to the
+adapter session. The `eventRecording` and `configurationResolution`
+capabilities identify the new service boundary. `configuration.resolve` returns
+routing and opaque adapter configuration; `event.append` records events with
+stable IDs; `run.status` returns a paginated timeline and generic projection.
+The old workflow mutation methods are removed and return method-not-found.
+`event.ingest` remains a compatibility acknowledgement for generic Pi errors;
+it is not the durable recording API. See the [public protocol](schemas/README.md).

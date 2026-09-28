@@ -4,7 +4,9 @@ import {
   type BridgeHandshake,
   type BridgeOptions,
 } from "../bridge/client.js";
-import { XperClient, type RunStatus } from "../bridge/xper-client.js";
+import type { RunStatus } from "../workflow/types.js";
+import { XperClient } from "../bridge/xper-client.js";
+import { PiWorkflow } from "../workflow/controller.js";
 import { PiObservations } from "./observations.js";
 import type { PiContext } from "./types.js";
 import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
@@ -14,7 +16,7 @@ const STATUS_KEY = "xper";
 
 export interface ActiveBridge {
   client: BridgeClient;
-  workflow: XperClient;
+  workflow: PiWorkflow;
   handshake: BridgeHandshake;
   sessionId: string;
 }
@@ -80,6 +82,9 @@ export class XperSession {
   phaseSummary(): string {
     const run = this.lastRun?.run;
     if (!run) return "; no run";
+    const telemetry = this.lastRun?.degradedReason
+      ? `; telemetry: ${this.lastRun.degradedReason}`
+      : "";
     const phase = run.visits.at(-1)?.phase ?? "?";
     const outcomes = Object.values(run.attempts).map((attempt) => attempt.outcome ?? "running");
     const gate = run.human_input
@@ -87,7 +92,7 @@ export class XperSession {
       : run.accepted?.plan
         ? "; execution plan ready"
         : "";
-    return `; run ${run.run_id}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}`;
+    return `; run ${run.run_id}; phase ${phase}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}${telemetry}`;
   }
 
   async refreshRun(): Promise<void> {
@@ -98,7 +103,7 @@ export class XperSession {
     if (ctx.mode !== "tui") return;
     ctx.ui.setStatus(
       STATUS_KEY,
-      this.active ? "xper connected" : this.lastError ? "xper offline" : undefined,
+      this.lastError ? "xper recorder offline" : this.active ? "xper connected" : undefined,
     );
   }
 
@@ -109,13 +114,12 @@ export class XperSession {
     });
     this.lastError = actionableError(error);
     this.active?.client.close();
-    this.active = undefined;
     this.showStatus(ctx);
     ctx.ui.notify(`xper: ${this.lastError}`, "warning");
   }
 
   async start(ctx: PiContext, reason: string): Promise<void> {
-    if (this.active || this.starting) return this.starting;
+    if ((this.active && !this.lastError) || this.starting) return this.starting;
     this.stopping = false;
     this.lastError = undefined;
     this.observations = new PiObservations(this.observationsFile, () => {
@@ -141,6 +145,14 @@ export class XperSession {
           await client.shutdown();
           return;
         }
+        if (
+          !connected.handshake.capabilities.eventRecording ||
+          !connected.handshake.capabilities.configurationResolution
+        ) {
+          throw new Error(
+            "bridge lacks passive recording/configuration capabilities; rebuild or upgrade xper",
+          );
+        }
         const sessionId = ctx.sessionManager.getSessionId();
         await client.request("session.attach", { sessionId, cwd: ctx.cwd, mode: ctx.mode });
         if (this.stopping) {
@@ -149,7 +161,7 @@ export class XperSession {
         }
         this.active = {
           client,
-          workflow: new XperClient(client),
+          workflow: new PiWorkflow(new XperClient(client), ctx.cwd, sessionId),
           handshake: connected.handshake,
           sessionId,
         };

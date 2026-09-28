@@ -1,63 +1,41 @@
-//! Dependencies required by workflow use cases, implemented by outer layers.
+//! Dependencies required by configuration and passive recording use cases.
 
-use crate::{events::Event, installation::Check, read_models::RunProjection};
+use crate::{events::RecordedEvent, installation::Check, read_models::RunProjection};
 
-pub use xper_domain::{Clock, IdGenerator};
-
-/// Read access to persisted workflow state. Inspection needs no write access.
+/// Read access to reported execution facts. Inspection requires no write access.
 pub trait RunReader {
     /// Failure reported by the implementation.
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Reads the current projected state of one run.
+    /// Reads the observed projection of one run.
     fn load_run(&self, run_id: &str) -> Result<Option<RunProjection>, Self::Error>;
 
-    /// Reads events in their authoritative append order.
-    fn load_events(&self, run_id: &str) -> Result<Vec<Event>, Self::Error>;
+    /// Reads unchanged events in their authoritative append order.
+    fn load_events(&self, run_id: &str) -> Result<Vec<RecordedEvent>, Self::Error>;
 
-    /// Reads the most recently started run in this workspace.
+    /// Reads the most recently created recording in this workspace.
     fn latest_run(&self) -> Result<Option<RunProjection>, Self::Error>;
 
-    /// Resolves the run bound to a harness-neutral session key.
+    /// Resolves the most recently created run belonging to a session.
     fn session_run(&self, session_id: &str) -> Result<Option<String>, Self::Error>;
 }
 
-/// Transactional writes required by workflow commands.
+/// Transactional append access; implementations enforce identity and ownership.
 pub trait RunRepository: RunReader {
-    /// Commits a complete boundary and its projections atomically.
-    fn append_boundary(&mut self, events: &[Event]) -> Result<usize, Self::Error>;
+    /// Classifies integrity rejections separately from storage failures.
+    fn invalid_input_message(_error: &Self::Error) -> Option<&'static str> {
+        None
+    }
 
-    /// Commits a run's initial events and session binding in one transaction.
-    /// Failure must leave neither a partial run nor a session binding behind.
-    fn append_boundary_and_bind_session(
+    /// Atomically records a nonempty batch for one run and binds new runs to
+    /// the supplied session. Exact duplicate events are ignored; conflicting
+    /// IDs, foreign sessions, or invalid envelopes reject the complete batch.
+    /// Returns the number of new events. Implementations never create outcomes.
+    fn append_events(
         &mut self,
-        events: &[Event],
         session_id: &str,
-        run_id: &str,
+        events: &[RecordedEvent],
     ) -> Result<usize, Self::Error>;
-}
-
-/// Evidence availability without exposing filesystem APIs to use cases.
-pub trait ArtifactReader {
-    /// Failure reported by the implementation.
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Whether a workspace-relative artifact is a nonempty file.
-    fn is_available(&self, path: &str) -> Result<bool, Self::Error>;
-
-    /// Read a bounded structured artifact and its SHA-256 digest. Unsupported
-    /// readers cannot satisfy knowledge gates beyond legacy Discovery.
-    fn read_contract(
-        &self,
-        _path: &str,
-    ) -> Result<Option<(crate::knowledge::KnowledgeArtifact, String)>, Self::Error> {
-        Ok(None)
-    }
-
-    /// Fingerprint evidence so later mutations cannot satisfy an approved gate.
-    fn digest(&self, _path: &str) -> Result<Option<String>, Self::Error> {
-        Ok(None)
-    }
 }
 
 /// Installation inspection and preparation for one selected workspace scope.
@@ -69,7 +47,6 @@ pub trait Installation {
     fn inspect(&self) -> Vec<Check>;
 
     /// Applies idempotent configuration preparation after preflight passes.
-    /// Preserve valid existing configuration.
-    /// Returns descriptions of the changes actually made.
+    /// Preserves valid existing configuration and reports actual changes.
     fn prepare(&mut self) -> Result<Vec<String>, Self::Error>;
 }

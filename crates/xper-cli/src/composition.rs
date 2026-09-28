@@ -1,49 +1,28 @@
-//! Composition root: opens resources and wires concrete port implementations.
+//! Composition root for passive recording and configuration resources.
 
-use std::{collections::BTreeMap, fs, io, path::Path};
-
-use xper_application::events::{AdapterMetadata, RoutingSnapshot};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 use xper_store_sqlite::SqliteEventStore;
 
-use crate::infrastructure::{UniqueIds, WallClock, WorkspaceArtifacts, profile_config};
-
-/// Resources owned by one bridge session; workflow decisions live in use cases.
-pub(crate) struct WorkflowRuntime {
+pub(crate) struct RecordingRuntime {
     pub(crate) store: SqliteEventStore,
-    pub(crate) artifacts: WorkspaceArtifacts,
-    pub(crate) clock: WallClock,
-    pub(crate) ids: UniqueIds,
-    pub(crate) metadata: AdapterMetadata,
-    pub(crate) routing: Option<RoutingSnapshot>,
-    pub(crate) policy: xper_application::knowledge::WorkflowPolicy,
+    pub(crate) root: PathBuf,
     pub(crate) session_id: String,
 }
 
-impl WorkflowRuntime {
-    pub(crate) fn attach(
-        root: &Path,
-        adapter: &str,
-        version: &str,
-        capabilities: BTreeMap<String, bool>,
-        session_id: &str,
-    ) -> io::Result<Self> {
+impl RecordingRuntime {
+    pub(crate) fn attach(root: &Path, session_id: &str) -> io::Result<Self> {
         let directory = root.join(".xper");
-        fs::create_dir_all(&directory)?;
+        // Read-only projects may still inspect configuration and record in memory.
+        // The store decides whether an open failure qualifies for volatile fallback.
+        let _ = fs::create_dir_all(&directory);
         let store = SqliteEventStore::open_or_volatile(directory.join("events.sqlite"))
             .map_err(io::Error::other)?;
-        let routing = profile_config::resolved_active(root)?;
         Ok(Self {
             store,
-            artifacts: WorkspaceArtifacts(root.to_path_buf()),
-            clock: WallClock,
-            ids: UniqueIds,
-            metadata: AdapterMetadata {
-                adapter: adapter.into(),
-                version: version.into(),
-                capabilities,
-            },
-            routing,
-            policy: profile_config::workflow_policy(root)?,
+            root: root.to_path_buf(),
             session_id: session_id.into(),
         })
     }

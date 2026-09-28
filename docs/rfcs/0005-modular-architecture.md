@@ -1,5 +1,13 @@
 # RFC 0005: Modular architecture and harness adapters
 
+> The workflow ownership in this RFC is superseded by
+> [RFC 0006](0006-configuration-recording-and-adapter-workflows.md), accepted
+> 2026-09-28. Rust now owns configuration and passive recording; adapters own
+> phases, gates, artifacts, budgets, and execution decisions. The earlier
+> design below is retained as decision history, not implementation guidance.
+> Ports, adapters, independent packages, and the public protocol remain useful
+> boundaries. See the [current core guide](../architecture.md) for the code map.
+
 - Status: accepted as the architectural direction
 - Date: 2026-09-22
 - Depends on: [RFC 0001](0001-product-and-workflow.md), [RFC 0002](0002-multimodel-configuration.md), [RFC 0003](0003-observability-and-metrics.md), and [RFC 0004](0004-pi-integration.md)

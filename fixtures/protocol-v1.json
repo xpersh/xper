@@ -1,146 +1,275 @@
 [
   {
     "name": "initialize request",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-1","method":"initialize","params":{"adapter":"pi","adapterVersion":"0.1.0","capabilities":{"subagents":true}}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-1",
+      "method": "initialize",
+      "params": {
+        "adapter": "pi",
+        "adapterVersion": "0.1.0",
+        "capabilities": {
+          "subagents": true
+        }
+      }
+    }
   },
   {
     "name": "bridge capabilities request",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"bridge-1","method":"capabilities","params":{}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "bridge-1",
+      "method": "capabilities",
+      "params": {}
+    }
   },
   {
     "name": "adapter capabilities response",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"bridge-1","result":{"capabilities":{"subagents":true}}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "bridge-1",
+      "result": {
+        "capabilities": {
+          "subagents": true
+        }
+      }
+    }
   },
   {
     "name": "ping request",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-2","method":"ping","params":{}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-2",
+      "method": "ping",
+      "params": {}
+    }
   },
   {
     "name": "profile inspection request",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-profile","method":"profile.inspect","params":{}}
-  },
-  {
-    "name": "run start with adapter model catalog",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-run","method":"run.start","params":{"objective":"Investigate","models":[{"provider":"corp","model":"m1","reasoning":true}]}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-profile",
+      "method": "profile.inspect",
+      "params": {}
+    }
   },
   {
     "name": "profile inspection result",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-profile","result":{"routing":{"profile":"work","context":"company","routes":{"discovery.explorer":[{"context":"company","provider":"corp","model":"m1","thinking":"low"}]}}}}
-  },
-  {
-    "name": "routed assignment result",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-assignment","result":{"runId":"run-1","assignmentId":"assignment-1","attemptId":"attempt-1","role":"discovery.explorer","selection":{"context":"company","provider":"corp","model":"m1","thinking":"low"}}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-profile",
+      "result": {
+        "routing": {
+          "profile": "work",
+          "context": "company",
+          "routes": {
+            "discovery.explorer": [
+              {
+                "context": "company",
+                "provider": "corp",
+                "model": "m1",
+                "thinking": "low"
+              }
+            ]
+          }
+        }
+      }
+    }
   },
   {
     "name": "shutdown response",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-3","result":{"ok":true}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-3",
+      "result": {
+        "ok": true
+      }
+    }
   },
   {
     "name": "method not found error",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-4","error":{"code":-32601,"message":"method not found","data":{"method":"unknown"}}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-4",
+      "error": {
+        "code": -32601,
+        "message": "method not found",
+        "data": {
+          "method": "unknown"
+        }
+      }
+    }
   },
   {
     "name": "unidentified parse error",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":null,"error":{"code":-32700,"message":"invalid JSON"}}
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": null,
+      "error": {
+        "code": -32700,
+        "message": "invalid JSON"
+      }
+    }
   },
   {
     "name": "incompatible version",
-    "message": {"jsonrpc":"2.0","protocolVersion":"2","id":"adapter-5","method":"ping","params":{}},
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "2",
+      "id": "adapter-5",
+      "method": "ping",
+      "params": {}
+    },
     "errorCode": -32001
   },
   {
     "name": "missing version",
-    "message": {"jsonrpc":"2.0","id":"adapter-6","method":"ping","params":{}},
+    "message": {
+      "jsonrpc": "2.0",
+      "id": "adapter-6",
+      "method": "ping",
+      "params": {}
+    },
     "errorCode": -32600
   },
   {
     "name": "missing params",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-7","method":"ping"},
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-7",
+      "method": "ping"
+    },
     "errorCode": -32600
   },
   {
     "name": "mixed request and response",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-8","method":"ping","params":{},"result":{}},
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "adapter-8",
+      "method": "ping",
+      "params": {},
+      "result": {}
+    },
     "errorCode": -32600
   },
   {
     "name": "invalid response result",
-    "message": {"jsonrpc":"2.0","protocolVersion":"1","id":"adapter-9","result":null},
-    "errorCode": -32600
-  },
-  {
-    "name": "run start with knowledge policy",
     "message": {
       "jsonrpc": "2.0",
       "protocolVersion": "1",
-      "id": "run-start-with-knowledge-policy",
-      "method": "run.start",
+      "id": "adapter-9",
+      "result": null
+    },
+    "errorCode": -32600
+  },
+  {
+    "name": "adapter reports an unfamiliar workflow phase",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "recording-1",
+      "method": "event.append",
       "params": {
-        "objective": "Synthetic knowledge workflow",
-        "policy": {
-          "maxAttempts": 20,
-          "humanGates": [
-            "define"
+        "events": [
+          {
+            "schemaVersion": 1,
+            "eventId": "event-1",
+            "runId": "run-1",
+            "occurredAt": 100,
+            "type": "phase.entered",
+            "data": {
+              "phase": "experiment.custom"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "configuration resolution with adapter model catalog",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "recording-1",
+      "method": "configuration.resolve",
+      "params": {
+        "models": [
+          {
+            "provider": "local",
+            "model": "small",
+            "reasoning": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "recorded run query",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "recording-1",
+      "method": "run.status",
+      "params": {
+        "runId": "run-1"
+      }
+    }
+  },
+  {
+    "name": "recording acknowledges duplicate replay",
+    "resultSchema": "appendEventsResult",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "recording-1",
+      "result": {
+        "accepted": 0,
+        "durability": "persistent"
+      }
+    }
+  },
+  {
+    "name": "configuration is opaque to recording core",
+    "resultSchema": "resolveConfigurationResult",
+    "message": {
+      "jsonrpc": "2.0",
+      "protocolVersion": "1",
+      "id": "recording-1",
+      "result": {
+        "routing": null,
+        "adapterConfig": {
+          "customSteps": [
+            "research",
+            "experiment"
           ]
         }
       }
     }
   },
   {
-    "name": "human approval of current artifact",
+    "name": "empty recorded session",
+    "resultSchema": "runStatusResult",
     "message": {
       "jsonrpc": "2.0",
       "protocolVersion": "1",
-      "id": "human-approval-of-current-artifact",
-      "method": "run.advance",
-      "params": {
-        "approvedArtifactId": "definition-1"
-      }
-    }
-  },
-  {
-    "name": "knowledge assignment with artifact contract",
-    "resultSchema": "assignmentStartResult",
-    "message": {
-      "jsonrpc": "2.0",
-      "protocolVersion": "1",
-      "id": "define-start",
+      "id": "recording-1",
       "result": {
-        "runId": "run-1",
-        "assignmentId": "assignment-2",
-        "attemptId": "attempt-2",
-        "role": "define.product",
-        "selection": null,
-        "phase": "define",
-        "artifactKind": "definition_contract",
-        "artifactPath": ".xper/artifacts/definition-contract-attempt-2.json",
-        "inputArtifacts": [
-          {
-            "artifact_id": "brief-1",
-            "attempt_id": "attempt-1",
-            "kind": "discovery_brief",
-            "path": ".xper/artifacts/discovery-brief-attempt-1.md",
-            "version": 1
-          }
-        ],
-        "timeoutMs": 120000
-      }
-    }
-  },
-  {
-    "name": "human gate result",
-    "resultSchema": "runAdvanceResult",
-    "message": {
-      "jsonrpc": "2.0",
-      "protocolVersion": "1",
-      "id": "gate-1",
-      "result": {
-        "advanced": false,
-        "phase": "define",
-        "ready": false,
-        "resumed": false,
-        "reason": "explicit human approval is required for this artifact",
-        "humanArtifactId": "definition-1"
+        "run": null,
+        "timeline": [],
+        "durability": "persistent",
+        "degradedReason": null,
+        "nextCursor": null
       }
     }
   }

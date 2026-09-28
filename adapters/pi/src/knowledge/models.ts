@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { AvailableModel, ModelSelection } from "../bridge/xper-client.js";
+import type { AvailableModel, ModelSelection } from "../workflow/types.js";
 
 const execFileAsync = promisify(execFile);
 

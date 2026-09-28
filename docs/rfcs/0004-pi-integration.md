@@ -1,16 +1,22 @@
 # RFC 0004: Pi integration and workflow activation
 
-- Status: accepted, revised for direct workflow activation on 2026-09-27
+- Status: accepted; workflow ownership superseded by RFC 0006 on 2026-09-28
 - Date: 2026-09-22
 - Depends on: [RFC 0001](0001-product-and-workflow.md), [RFC 0002](0002-multimodel-configuration.md), and [RFC 0003](0003-observability-and-metrics.md)
 - Related to: [RFC 0005](0005-modular-architecture.md)
 - Current implementation: [Pi adapter architecture](../../adapters/pi/docs/architecture.md)
 
+[RFC 0006](0006-configuration-recording-and-adapter-workflows.md) moves
+workflow decisions into the Pi adapter. Earlier dated revisions below remain
+historical evidence; references there to core-owned attempts or gates no
+longer describe the current implementation.
+
 ## Summary
 
 xper runs inside Pi through its own extension. `/xper` starts the workflow,
-and `xper_delegate` executes Discovery through a child Pi process. The Rust
-core owns workflow state, gates, routing, and evidence. No external
+and `xper_delegate` executes knowledge roles through child Pi processes. The
+adapter owns workflow state and gates; Rust resolves configuration and stores
+reported execution events and opaque checkpoints. No external
 agent-manager package is required.
 
 The [direct activation revision](#direct-workflow-activation-revision-2026-09-27)
@@ -19,7 +25,8 @@ compatibility decisions below remain as historical evidence; they do not
 require installing that package in the current integration.
 
 The xper CLI remains responsible for initialization, configuration,
-diagnostics, queries, and export. Pi owns the interactive session.
+diagnostics, and queries; structured export remains planned work. Pi owns
+the interactive session.
 
 ## Decision for prototype 0.0.1 (2026-09-24)
 
@@ -118,13 +125,14 @@ execute subsequent phases on its own. Its manifest advertises
 Pi session
 └── xper extension
     ├── /xper: start or resume, inspect, request advancement
-    ├── xper bridge --stdio: Rust use cases, gates, and persistence
-    └── xper_delegate: Discovery assignment and durable Attempt
-        └── child Pi RPC process: discovery.explorer
+    ├── workflow: phases, gates, assignments, approvals, and budgets
+    ├── xper bridge --stdio: Rust configuration, recording, and inspection
+    └── xper_delegate: current knowledge assignment and attempt
+        └── child Pi RPC process: selected role
 ```
 
-Only Discovery through Define is implemented. Further specialist roles and
-workflow phases remain in the backlog.
+Discovery through Plan is implemented. Implementation, verification, and final
+judgment remain in the backlog.
 
 ## Responsibilities
 
@@ -138,19 +146,20 @@ workflow phases remain in the backlog.
 
 - Register `/xper`, `xper_delegate`, hooks, and status presentation.
 - Translate Pi sessions, models, and events into the public xper protocol.
-- Execute Discovery in a child Pi process, with explicit errors,
-  cancellation, timeout, and correlation to the core's Attempt.
-- Save the Brief before returning its path and reporting success.
+- Decide phases, gates, feedback, approvals, retries, and execution budgets.
+- Execute knowledge roles in child Pi processes, with explicit errors,
+  cancellation, timeout, and correlation to the adapter's attempt.
+- Validate and save artifacts before returning paths and reporting success.
+- Maintain its checkpoint and pending recording events for recovery.
 - Record xper observations and forward generic Pi errors without treating
   another extension's tool events as workflow outcomes.
 
 ### xper core
 
-- Govern the implemented workflow and transitions.
-- Resolve and freeze configured model routing for a run.
-- Create assignments and attempts and record their outcomes.
-- Evaluate the Discovery gate from persisted evidence.
-- Retain artifacts' references, events, projections, and recovery state.
+- Resolve configured profiles and model routing.
+- Validate recording envelopes, session ownership, and duplicate consistency.
+- Retain reported events, generic projections, and opaque adapter checkpoints.
+- Serve inspection and metrics without deciding the workflow's next action.
 
 A conversation or child session can disappear without invalidating artifacts,
 events, and states already persisted by xper. The architecture and current
@@ -204,13 +213,12 @@ Generic Pi tool and compaction errors still pass through the adapter's hooks.
 ## Consequences
 
 The normal workflow needs Pi and the xper adapter, with no additional
-agent-manager installation. xper owns workflow activation through its command,
-while the existing child-process
-executor preserves Discovery's lifecycle and isolation boundary.
+agent-manager installation. The Pi extension owns workflow activation and the
+child-process executor for its knowledge roles.
 
 Maintaining the Pi extension and RPC executor remains xper's responsibility.
 A child process is not a filesystem sandbox, and this revision does not add
-worktree isolation or phases beyond Define. Integration tests must preserve
+worktree isolation or phases beyond Plan. Integration tests must preserve
 success, failure, cancellation, timeout, recovery, and session isolation, and
 cover startup without an external primary-agent package.
 

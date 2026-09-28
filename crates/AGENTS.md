@@ -6,35 +6,37 @@ especially its module map and port guarantees.
 
 ## Where changes belong
 
-- `xper-domain`: pure entities, invariants, and transitions. Do not add external
-  dependencies, I/O, or harness-specific concepts.
+- `xper-domain`: pure, generic recording primitives. Do not add external
+  dependencies, I/O, phase lists, gate rules, or harness-specific concepts.
 - `xper-application/src/use_cases/`: one system operation per module, with
   `execute` and explicit inputs and results. Coordinate ports; do not accept
-  JSON, terminal arguments, or concrete SQLite connections.
+  RPC envelopes, terminal arguments, or concrete SQLite connections. An event's
+  JSON data is an opaque application value, not a workflow command.
 - `xper-application/src/ports.rs`: application needs and dependency guarantees.
   The clock and IDs are also injected.
-- `events.rs`, `read_models/`, and `policies/`: durable facts, replay, and
-  evidence policies, respectively. Keep these responsibilities separate from
-  use-case coordination.
+- `events.rs` and `read_models/`: reported facts and rebuildable generic
+  projections. Accept extensible phase names and event kinds; do not validate
+  a workflow's allowed transitions, artifacts, or budget admission.
 - `xper-store-sqlite` and `xper-config`: persistence and configuration
-  implementations. Preserve atomic workflow boundaries and compatibility with
+  implementations. Preserve atomic recording batches and compatibility with
   persisted data; add migrations where needed.
 - `xper-cli`: translate inputs and present results. Commands and the bridge
-  invoke use cases; they do not construct events or persist transitions.
+  invoke use cases; they do not invent workflow events or outcomes.
   `composition.rs` wires concrete implementations, and `infrastructure/`
   contains local port adapters.
 - `xper-protocol`: a neutral transport contract. Keep changes aligned with
   [schemas and consumers](../schemas/README.md). Bridge `stdout` accepts only
   JSONL frames; diagnostics go to `stderr`.
 
-To extend a vertical slice, express the domain rule, coordinate it in a use case,
-test it with port doubles, and then connect the CLI or RPC method. Check which
-pieces the operation actually needs before creating modules.
+Recording validates envelope version, identity, session ownership, and duplicate
+consistency. Repeated identical events are safe; conflicting identities are
+errors. Rebuilding a projection must not make execution decisions or fabricate
+completion after a crash. Missing tokens, cost, or outcomes remain unknown.
 
-Durable transitions use projections and events with the domain
-`is_allowed_transition` policy shared by live entities and replay. Preserve
-that single rule source. Artifact provenance and cross-artifact evidence checks
-belong to the knowledge policy; JSON parsing and hashing stay in infrastructure.
+Configuration resolves model selections and passes adapter configuration
+through. It does not select the next role or interpret the adapter's workflow
+policy. Artifact provenance, gate checks, and execution budgets belong to the
+adapter. See the [boundary decision](../docs/rfcs/0006-configuration-recording-and-adapter-workflows.md).
 
 ## Verification
 

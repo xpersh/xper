@@ -17,6 +17,21 @@ for (const fixture of read("fixtures/protocol-v1.json")) {
   }
 }
 const validateArtifact = ajv.compile(read("schemas/knowledge-v1.schema.json"));
+const validateEvent = ajv.compile({ $ref: `${protocol.$id}#/$defs/recordedEvent` });
+const recordedEvent = read("fixtures/protocol-v1.json").find(
+  (fixture) => fixture.message.method === "event.append",
+).message.params.events[0];
+assert(validateEvent(recordedEvent), "accept extensible phase labels");
+for (const invalid of [
+  { ...recordedEvent, schemaVersion: 2 },
+  { ...recordedEvent, eventId: " " },
+  { ...recordedEvent, occurredAt: -1 },
+  { ...recordedEvent, occurredAt: Number.MAX_SAFE_INTEGER + 1 },
+  { ...recordedEvent, data: [] },
+  { ...recordedEvent, extraEnvelopeField: true },
+]) {
+  assert(!validateEvent(invalid), "reject malformed recording envelope");
+}
 for (const fixture of read("fixtures/knowledge-v1.json")) {
   assert(
     validateArtifact(fixture.artifact),

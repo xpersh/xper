@@ -1,14 +1,13 @@
 //! JSONL transport, handshake and adapter session lifecycle.
 
-mod workflow;
+mod recording;
 
-use std::collections::BTreeMap;
 use std::io::{self, BufReader, Write};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use crate::composition::WorkflowRuntime;
+use crate::composition::RecordingRuntime;
 use serde_json::{Value, json};
 use xper_protocol::{FrameRead, Message, RpcError, code};
 
@@ -33,7 +32,20 @@ fn reader_channel() -> Receiver<Incoming> {
 }
 
 fn send(writer: &mut impl Write, message: Message) -> io::Result<()> {
-    writer.write_all(&message.to_frame())?;
+    let frame = message.to_frame();
+    if frame.len() > xper_protocol::MAX_FRAME_BYTES + 1 {
+        let id = match message {
+            Message::Response { id, .. } | Message::Request { id, .. } => Some(id),
+            Message::Error { id, .. } => id,
+        }
+        .filter(|id| id.len() <= 256);
+        writer.write_all(&Message::Error {
+            id,
+            error: RpcError::new(code::FRAME_TOO_LARGE, "response exceeds the frame limit; reduce configuration size or inspect history with the CLI"),
+        }.to_frame())?;
+    } else {
+        writer.write_all(&frame)?;
+    }
     writer.flush()
 }
 
@@ -70,7 +82,7 @@ struct BridgeState {
     session_id: Option<String>,
     adapter_name: Option<String>,
     adapter_version: Option<String>,
-    workflow: Option<WorkflowRuntime>,
+    recording: Option<RecordingRuntime>,
 }
 
 impl BridgeState {
@@ -82,7 +94,7 @@ impl BridgeState {
             session_id: None,
             adapter_name: None,
             adapter_version: None,
-            workflow: None,
+            recording: None,
         }
     }
 
@@ -216,7 +228,7 @@ impl BridgeState {
                     writer,
                     id,
                     json!({
-                        "capabilities": { "bidirectionalRequests": true },
+                        "capabilities": { "bidirectionalRequests": true, "eventRecording": true, "configurationResolution": true },
                         "maxFrameBytes": xper_protocol::MAX_FRAME_BYTES
                     }),
                 )?;
@@ -236,24 +248,8 @@ impl BridgeState {
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty());
                 if let (Some(session_id), Some(cwd), Some(_)) = (session_id, cwd, mode) {
-                    let capabilities = self
-                        .declared_capabilities
-                        .as_ref()
-                        .and_then(Value::as_object)
-                        .map(|map| {
-                            map.iter()
-                                .filter_map(|(key, value)| Some((key.clone(), value.as_bool()?)))
-                                .collect::<BTreeMap<_, _>>()
-                        })
-                        .unwrap_or_default();
-                    match WorkflowRuntime::attach(
-                        Path::new(cwd),
-                        self.adapter_name.as_deref().unwrap_or("unknown"),
-                        self.adapter_version.as_deref().unwrap_or("unknown"),
-                        capabilities,
-                        session_id,
-                    ) {
-                        Ok(workflow) => self.workflow = Some(workflow),
+                    match RecordingRuntime::attach(Path::new(cwd), session_id) {
+                        Ok(recording) => self.recording = Some(recording),
                         Err(error) => {
                             reject(
                                 writer,
@@ -276,7 +272,7 @@ impl BridgeState {
                     .filter(|s| !s.is_empty());
                 if session_id.is_some_and(|value| self.session_id.as_deref() == Some(value)) {
                     self.session_id = None;
-                    self.workflow = None;
+                    self.recording = None;
                     respond(writer, id, json!({ "detached": true }))?;
                 } else {
                     invalid_params(writer, id)?;
@@ -304,13 +300,12 @@ impl BridgeState {
                     invalid_params(writer, id)?;
                 }
             }
-            "run.start" | "run.status" | "assignment.start" | "attempt.finish" | "run.advance"
-            | "profile.inspect" => {
-                let Some(workflow) = self.workflow.as_mut() else {
+            "event.append" | "run.status" | "profile.inspect" | "configuration.resolve" => {
+                let Some(recording) = self.recording.as_mut() else {
                     invalid_params(writer, id)?;
                     return Ok(true);
                 };
-                let result = workflow::handle(workflow, method, params);
+                let result = recording::handle(recording, method, params, &id);
                 match result {
                     Ok(value) => respond(writer, id, value)?,
                     Err(error) => reject(
@@ -360,9 +355,6 @@ pub(crate) fn run() -> io::Result<()> {
                         "adapter capabilities request timed out",
                     ));
                 }
-                if let Some(workflow) = state.workflow.as_mut() {
-                    workflow.store.heartbeat().map_err(io::Error::other)?;
-                }
                 continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -372,9 +364,6 @@ pub(crate) fn run() -> io::Result<()> {
                 ));
             }
         };
-        if let Some(workflow) = state.workflow.as_mut() {
-            workflow.store.heartbeat().map_err(io::Error::other)?;
-        }
         match incoming {
             FrameRead::Eof => return Ok(()),
             FrameRead::TooLarge => reject(

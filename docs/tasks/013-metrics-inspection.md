@@ -4,6 +4,12 @@
 - Milestone: M4
 - Dependencies: XP-007 and XP-012
 
+The [recording boundary](../rfcs/0006-configuration-recording-and-adapter-workflows.md)
+provides generic status, timelines, event/attempt counts, and aggregates of
+reported model usage. These foundations do not complete this task's comparison,
+export, semantic formulas, or richer inspection work. Metrics are a core
+responsibility; their inputs come from adapter-reported facts.
+
 ## Goal
 
 Turn persisted events into useful information for understanding and comparing
@@ -25,6 +31,10 @@ runs without exposing sensitive content.
 - Missing cost or token information is represented as unknown, not zero.
 - Output excludes prompts, code, secrets, and tool content by default.
 - Failure to project metrics does not alter the run's outcome.
+- Semantic metrics use explicit adapter-reported acceptance, rework, and
+  dependency facts; Rust does not infer a gate or phase policy.
+- Pending or incomplete recording is visible; budget reservations are never
+  presented as observed provider cost.
 
 ## Out of scope
 

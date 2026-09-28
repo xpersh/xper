@@ -17,7 +17,7 @@ export type {
   RunAdvanced,
   RunSummary,
   RunStatus,
-} from "./bridge/xper-client.js";
+} from "./workflow/types.js";
 export { createXperExtension } from "./extension.js";
 export type { AdapterManifest, BridgeHandshake, BridgeOptions } from "./bridge/client.js";
 export {
@@ -36,3 +36,6 @@ export type {
   RpcRequest,
   RpcSuccess,
 } from "./bridge/protocol.js";
+
+export { PiWorkflow } from "./workflow/controller.js";
+export type { RecorderClient, RecordedEvent, RecordedStatus } from "./bridge/xper-client.js";

@@ -7,6 +7,38 @@ use xper_application::events::{ModelSelection, RoutingSnapshot};
 
 use crate::ConfigError;
 
+/// Model capabilities reported by the configured harness.
+#[derive(Clone, Debug)]
+pub struct AvailableModel {
+    /// Provider identifier reported by the harness.
+    pub provider: String,
+    /// Exact model identifier reported by the harness.
+    pub model: String,
+    /// Whether the model supports a non-off thinking setting.
+    pub reasoning: bool,
+}
+
+/// Validate resolved selections against a catalog without assigning work.
+pub fn validate_catalog(
+    routing: &RoutingSnapshot,
+    models: &[AvailableModel],
+) -> Result<(), ConfigError> {
+    for selection in routing.routes.values().flatten() {
+        let model = models
+            .iter()
+            .find(|model| model.provider == selection.provider && model.model == selection.model)
+            .ok_or_else(|| {
+                ConfigError("configured model is not available in the adapter".into())
+            })?;
+        if selection.thinking != "off" && !model.reasoning {
+            return Err(ConfigError(
+                "configured thinking requires a reasoning model".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn field<'a>(value: &'a Value, key: &str, owner: &str) -> Result<&'a str, ConfigError> {
     value
         .get(key)
@@ -84,7 +116,7 @@ pub fn resolve_profile(config: &Value, profile_name: &str) -> Result<RoutingSnap
         .ok_or_else(|| ConfigError("profile.roles must be a nonempty mapping".into()))?;
     let mut routes = BTreeMap::new();
     for (role, route) in roles {
-        if !role.contains('.') || !route.is_object() {
+        if role.trim().is_empty() || !route.is_object() {
             return Err(ConfigError(format!("invalid profile role {role}")));
         }
         routes.insert(

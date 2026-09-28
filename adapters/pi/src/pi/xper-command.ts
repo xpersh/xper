@@ -80,9 +80,10 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         }
         return;
       }
-      const state = connection
-        ? `connected (pid ${connection.client.process.pid ?? "?"}, bridge ${connection.handshake.bridgeVersion})`
-        : `offline${session.error ? `: ${session.error}` : ""}`;
+      const state =
+        connection && !session.error
+          ? `connected (pid ${connection.client.process.pid ?? "?"}, bridge ${connection.handshake.bridgeVersion})`
+          : `offline${session.error ? `: ${session.error}` : ""}`;
       const counts = session.observation?.summary();
       const observed = counts
         ? `; tools observed: started ${counts.started}, completed ${counts.completed}, failed ${counts.failed}, in flight ${counts.inFlight}, unpaired ${counts.unpaired}`

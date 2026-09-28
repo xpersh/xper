@@ -1,0 +1,553 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import type {
+  RecordedEvent,
+  RecordedStatus,
+  RecorderClient,
+  RoutingSnapshot,
+} from "../bridge/xper-client.js";
+import { PiWorkflow } from "../workflow/controller.js";
+import {
+  parseDocument,
+  validateDag,
+  validateLinks,
+  type Document,
+  type Output,
+  type PlannedAssignment,
+} from "../workflow/contracts.js";
+import { WorkflowJournal } from "../workflow/journal.js";
+import { policyFrom } from "../workflow/policy.js";
+import type { WorkflowPolicy } from "../workflow/types.js";
+
+const fixtures = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../../../../fixtures/knowledge-v1.json", import.meta.url)),
+    "utf8",
+  ),
+) as Array<{ phase: string; artifact: Document }>;
+class Recorder implements RecorderClient {
+  events: RecordedEvent[] = [];
+  offline = false;
+  volatile = false;
+  routing: RoutingSnapshot | null = null;
+  config: WorkflowPolicy = {};
+  async appendEvents(events: RecordedEvent[]) {
+    if (this.offline) throw new Error("offline");
+    let accepted = 0;
+    for (const event of events) {
+      const existing = this.events.find((e) => e.eventId === event.eventId);
+      if (existing) {
+        assert.deepEqual(existing, event);
+        continue;
+      }
+      this.events.push(structuredClone(event));
+      accepted++;
+    }
+    return {
+      accepted,
+      durability: this.volatile ? ("volatile" as const) : ("persistent" as const),
+    };
+  }
+  async getRunStatus(): Promise<RecordedStatus> {
+    if (this.offline) throw new Error("offline");
+    return {
+      run: this.events.length ? { runId: this.events[0]?.runId } : null,
+      timeline: structuredClone(this.events),
+      durability: "persistent",
+    };
+  }
+  async inspectProfile() {
+    return this.routing;
+  }
+  async resolveConfiguration() {
+    return { routing: this.routing, adapterConfig: { ...this.config } };
+  }
+}
+async function setup(policy: WorkflowPolicy = {}) {
+  const cwd = await mkdtemp(join(tmpdir(), "xper-pi-policy-"));
+  const recorder = new Recorder();
+  recorder.config = policy;
+  const artifacts = new Map<string, { content: string; digest: string }>();
+  let now = 1000;
+  const options = {
+    now: () => now,
+    readArtifact: async (path: string) => {
+      const result = artifacts.get(path);
+      if (!result) throw new Error("artifact unavailable");
+      return result;
+    },
+  };
+  const controller = new PiWorkflow(recorder, cwd, "session", options);
+  const produce = async (output?: Output) => {
+    const assignment = await controller.startAssignment();
+    assert(assignment.artifactPath);
+    const content =
+      assignment.phase === "discovery"
+        ? "# Brief\nEvidence"
+        : JSON.stringify({
+            schemaVersion: 1,
+            inputs: assignment.inputArtifacts?.map((a) => a.artifact_id),
+            output: output ?? fixtures.find((f) => f.phase === assignment.phase)?.artifact.output,
+          });
+    artifacts.set(assignment.artifactPath, { content, digest: content });
+    const result = await controller.finishAttempt({
+      attemptId: assignment.attemptId,
+      outcome: "succeeded",
+      artifactPath: assignment.artifactPath,
+    });
+    return { assignment, result };
+  };
+  await controller.startRun("Synthetic objective");
+  return {
+    cwd,
+    recorder,
+    controller,
+    artifacts,
+    options,
+    produce,
+    advanceTime: (ms: number) => {
+      now += ms;
+    },
+    cleanup: () => rm(cwd, { recursive: true, force: true }),
+  };
+}
+test("Pi owns the knowledge path and ready Plan without a workflow RPC", async () => {
+  const h = await setup();
+  try {
+    for (const phase of ["discovery", "define", "design", "breakdown", "plan"]) {
+      const { assignment } = await h.produce();
+      assert.equal(assignment.phase, phase);
+      const gate = await h.controller.advanceRun();
+      assert(gate.advanced);
+      if (phase === "plan") assert.equal(gate.ready, true);
+    }
+    assert.equal((await h.controller.advanceRun()).ready, true);
+    await assert.rejects(h.controller.startAssignment(), /implementation is not available/);
+    assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 5);
+    assert(!JSON.stringify(h.recorder.events).includes("Synthetic objective"));
+  } finally {
+    await h.cleanup();
+  }
+});
+test("feedback invalidates target and later acceptances while preserving evidence", async () => {
+  const h = await setup();
+  try {
+    await h.produce();
+    await h.controller.advanceRun();
+    await h.produce();
+    await h.controller.advanceRun();
+    const previous = await h.controller.getRunStatus();
+    await h.produce({
+      kind: "feedback",
+      reason: "ambiguous_criteria",
+      evidence: "Conflicting acceptance examples",
+    });
+    assert.deepEqual(await h.controller.advanceRun(), { advanced: true, phase: "define" });
+    const current = await h.controller.getRunStatus();
+    assert.equal(current.run?.accepted?.define, undefined);
+    assert.equal(current.run?.accepted?.discovery, previous.run?.accepted?.discovery);
+    assert.equal(Object.keys(current.run?.artifacts ?? {}).length, 3);
+    const next = await h.controller.startAssignment();
+    assert.equal(next.inputArtifacts?.length, 2);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("human approval is bound to the pending artifact and persists across reload", async () => {
+  const h = await setup({ humanGates: ["define"] });
+  try {
+    await h.produce();
+    await h.controller.advanceRun();
+    const { result } = await h.produce();
+    const gate = await h.controller.advanceRun();
+    assert.equal(gate.advanced, false);
+    assert.equal(gate.humanArtifactId, result.replayed ? undefined : result.artifactId);
+    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    await assert.rejects(restored.advanceRun("other"), /approval does not match/);
+    assert.equal((await restored.advanceRun(gate.humanArtifactId)).phase, "design");
+    assert.equal(h.recorder.events.filter((e) => e.type === "human.approved").length, 1);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("artifact provenance, seal, and strict contracts protect Pi gates", async () => {
+  const h = await setup();
+  try {
+    const discovery = await h.produce();
+    assert(discovery.assignment.artifactPath);
+    h.artifacts.set(discovery.assignment.artifactPath, { content: "edited", digest: "changed" });
+    const gate = await h.controller.advanceRun();
+    assert.equal(gate.advanced, false);
+    if (!gate.advanced) assert.match(gate.reason, /changed/);
+    h.artifacts.set(discovery.assignment.artifactPath, {
+      content: "# Brief\nEvidence",
+      digest: "# Brief\nEvidence",
+    });
+    await h.controller.advanceRun();
+    const assignment = await h.controller.startAssignment();
+    assert(assignment.artifactPath);
+    h.artifacts.set(assignment.artifactPath, {
+      content: JSON.stringify({
+        schemaVersion: 1,
+        inputs: [],
+        output: fixtures[0]?.artifact.output,
+      }),
+      digest: "bad",
+    });
+    await assert.rejects(
+      h.controller.finishAttempt({
+        attemptId: assignment.attemptId,
+        outcome: "succeeded",
+        artifactPath: assignment.artifactPath,
+      }),
+      /input references/,
+    );
+    await h.controller.finishAttempt({ attemptId: assignment.attemptId, outcome: "failed" });
+    assert.equal(
+      (await h.controller.getRunStatus()).run?.attempts[assignment.attemptId]?.outcome,
+      "failed",
+    );
+  } finally {
+    await h.cleanup();
+  }
+});
+test("timeout normalization, repeated results, cancellation, and retry stay distinct", async () => {
+  const h = await setup({ attemptTimeMs: 10 });
+  try {
+    const first = await h.controller.startAssignment();
+    assert(first.artifactPath);
+    h.advanceTime(11);
+    const late = await h.controller.finishAttempt({
+      attemptId: first.attemptId,
+      outcome: "succeeded",
+      artifactPath: first.artifactPath,
+    });
+    assert.equal(late.outcome, "timed_out");
+    assert.equal(
+      (
+        await h.controller.finishAttempt({
+          attemptId: first.attemptId,
+          outcome: "succeeded",
+          artifactPath: first.artifactPath,
+        })
+      ).replayed,
+      true,
+    );
+    await assert.rejects(
+      h.controller.finishAttempt({ attemptId: first.attemptId, outcome: "failed" }),
+      /different outcome/,
+    );
+    await assert.rejects(h.controller.startAssignment(first.assignmentId), /only an interrupted/);
+    const cancelled = await h.controller.startAssignment();
+    await h.controller.finishAttempt({ attemptId: cancelled.attemptId, outcome: "cancelled" });
+    const lost = await h.controller.startAssignment();
+    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    assert.equal(
+      (await restored.getRunStatus()).run?.attempts[lost.attemptId]?.outcome,
+      "interrupted",
+    );
+    const retry = await restored.startAssignment(lost.assignmentId);
+    assert.notEqual(retry.attemptId, lost.attemptId);
+    assert.equal(retry.assignmentId, lost.assignmentId);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("Pi applies attempt, wall-time, cost reservation and concurrency limits", async () => {
+  const cases: Array<{
+    policy: WorkflowPolicy;
+    finish: boolean;
+    advance?: number;
+    reason: RegExp;
+  }> = [
+    { policy: { maxAttempts: 1 }, finish: true, reason: /attempt budget/ },
+    {
+      policy: { maxTimeMs: 10, attemptTimeMs: 10 },
+      finish: true,
+      advance: 11,
+      reason: /time budget/,
+    },
+    { policy: { maxCostMicros: 5, attemptCostMicros: 5 }, finish: true, reason: /cost budget/ },
+    { policy: { maxConcurrency: 1 }, finish: false, reason: /concurrency budget/ },
+  ];
+  for (const item of cases) {
+    const h = await setup(item.policy);
+    try {
+      const first = await h.controller.startAssignment();
+      if (item.finish)
+        await h.controller.finishAttempt({ attemptId: first.attemptId, outcome: "failed" });
+      if (item.advance) h.advanceTime(item.advance);
+      await assert.rejects(h.controller.startAssignment(), item.reason);
+    } finally {
+      await h.cleanup();
+    }
+  }
+  for (const policy of [
+    { maxAttempts: 0 },
+    { attemptTimeMs: 4000000 },
+    { maxCostMicros: 10 },
+    { humanGates: ["future"] },
+  ])
+    assert.throws(() => policyFrom(policy));
+});
+test("recorder loss cannot stop Pi; pending facts replay idempotently after reload", async () => {
+  const h = await setup();
+  try {
+    h.recorder.offline = true;
+    await h.produce();
+    assert.equal((await h.controller.advanceRun()).phase, "define");
+    assert.match((await h.controller.getRunStatus()).degradedReason ?? "", /pending/);
+    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    assert.equal((await restored.getRunStatus()).run?.visits.at(-1)?.phase, "define");
+    h.recorder.offline = false;
+    assert.equal((await restored.getRunStatus()).degradedReason, undefined);
+    const count = h.recorder.events.length;
+    await restored.getRunStatus();
+    assert.equal(h.recorder.events.length, count);
+    assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 1);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("volatile ACKs and local disk failure never manufacture persistent telemetry", async () => {
+  const h = await setup();
+  try {
+    h.recorder.volatile = true;
+    await h.produce();
+    assert.match((await h.controller.getRunStatus()).degradedReason ?? "", /volatile/);
+    h.recorder.volatile = false;
+    await h.controller.getRunStatus();
+    const blocked = join(h.cwd, "not-a-directory");
+    await writeFile(blocked, "file");
+    const journal = new WorkflowJournal(blocked, "session", h.recorder);
+    h.recorder.offline = true;
+    await journal.commit({ state: true }, [
+      { schemaVersion: 1, eventId: "pending", runId: "r", occurredAt: 1, type: "custom", data: {} },
+    ]);
+    assert.equal(journal.pending.length, 1);
+    assert.match(journal.problem ?? "", /held in memory/);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("lost ACK keeps exact event identities and deduplicates after reconnect", async () => {
+  const h = await setup();
+  try {
+    const original = h.recorder.appendEvents.bind(h.recorder);
+    let lose = true;
+    h.recorder.appendEvents = async (events) => {
+      const result = await original(events);
+      if (lose) throw new Error("ACK lost");
+      return result;
+    };
+    await h.produce();
+    const count = h.recorder.events.length;
+    lose = false;
+    await h.controller.getRunStatus();
+    assert.equal(h.recorder.events.length, count);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("legacy observations cannot silently turn into a new workflow", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "xper-legacy-pi-"));
+  const recorder = new Recorder();
+  recorder.events = [
+    {
+      schemaVersion: 1,
+      eventId: "old",
+      runId: "legacy",
+      occurredAt: 1,
+      type: "legacy.run_started",
+      data: {},
+    },
+  ];
+  try {
+    const controller = new PiWorkflow(recorder, cwd, "session");
+    assert.match((await controller.getRunStatus()).degradedReason ?? "", /legacy/);
+    await assert.rejects(controller.startRun("do not overwrite"), /cannot resume/);
+    assert.equal(recorder.events.length, 1);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+test("large checkpoints are chunked below frame limits and reconstruct from recording alone", async () => {
+  const h = await setup({ maxAttempts: 150 });
+  try {
+    for (let i = 0; i < 55; i++) {
+      const attempt = await h.controller.startAssignment();
+      await h.controller.finishAttempt({ attemptId: attempt.attemptId, outcome: "failed" });
+    }
+    assert(h.recorder.events.some((e) => e.type === "adapter.state.chunk"));
+    assert(h.recorder.events.every((e) => Buffer.byteLength(JSON.stringify(e)) < 40000));
+    await rm(join(h.cwd, ".xper", "pi"), { recursive: true, force: true });
+    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    assert.equal(Object.keys((await restored.getRunStatus()).run?.attempts ?? {}).length, 55);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("DAG validation rejects references, cycles and unordered workspace or resource conflicts", () => {
+  for (const nodes of [
+    [],
+    [{ id: "a", dependencies: ["missing"] }],
+    [
+      { id: "a", dependencies: ["b"] },
+      { id: "b", dependencies: ["a"] },
+    ],
+    [
+      { id: "a", dependencies: [] },
+      { id: "a", dependencies: [] },
+    ],
+    [
+      { id: "a", dependencies: [], workspace: "same" },
+      { id: "b", dependencies: [], workspace: "same" },
+    ],
+    [
+      { id: "a", dependencies: [], resources: ["integration"] },
+      { id: "b", dependencies: [], resources: ["integration"] },
+    ],
+  ])
+    assert.throws(() => validateDag(nodes));
+  assert.deepEqual(
+    [
+      ...validateDag([
+        { id: "a", dependencies: [], workspace: "same" },
+        { id: "b", dependencies: ["a"], workspace: "same" },
+      ]).keys(),
+    ],
+    ["a", "b"],
+  );
+});
+test("story coverage, verifier ordering, dependent increments and Plan budgets are enforced", () => {
+  const definition = fixtures.find((f) => f.phase === "define")?.artifact;
+  const breakdown = fixtures.find((f) => f.phase === "breakdown")?.artifact;
+  const plan = fixtures.find((f) => f.phase === "plan")?.artifact;
+  assert(definition && breakdown && plan);
+  assert.equal(plan.output.kind, "execution_plan");
+  const budget = { attempts: 32, timeMs: 3600000, costMicros: null, concurrency: 4 };
+  const upstream = { define: definition, breakdown };
+  validateLinks(breakdown.output, upstream, budget);
+  validateLinks(plan.output, upstream, budget);
+  if (breakdown.output.kind !== "story_map" || plan.output.kind !== "execution_plan") assert.fail();
+  const uncovered = structuredClone(breakdown.output);
+  uncovered.stories[0]?.criteria.push("unknown");
+  assert.throws(() => validateLinks(uncovered, upstream, budget), /cover every/);
+  const invalidOrder = structuredClone(plan.output);
+  const verifier = invalidOrder.assignments.find((a) => a.role === "verify.verifier");
+  assert(verifier);
+  verifier.dependencies = [];
+  // Give independent workspaces so the verifier-specific order check is reached.
+  for (const a of invalidOrder.assignments) a.workspace = a.id;
+  assert.throws(() => validateLinks(invalidOrder, upstream, budget), /verification must depend/);
+  assert.throws(() => validateLinks(plan.output, upstream, { ...budget, attempts: 1 }), /exceeds/);
+  const missing = structuredClone(plan.output);
+  missing.assignments = missing.assignments.filter((a) => a.role !== "verify.verifier");
+  assert.throws(() => validateLinks(missing, upstream, budget), /one driver/);
+  const stories = structuredClone(breakdown);
+  assert(stories.output.kind === "story_map");
+  const first = stories.output.stories[0];
+  assert(first);
+  stories.output.stories.push({ ...first, id: "dependent", dependencies: [first.id] });
+  const dependent = structuredClone(plan.output);
+  dependent.assignments.push(
+    ...plan.output.assignments.map(
+      (a): PlannedAssignment => ({
+        ...a,
+        id: `dep-${a.id}`,
+        incrementId: "dependent",
+        dependencies: a.dependencies.map((d) => `dep-${d}`),
+        workspace: `dep-${a.workspace}`,
+      }),
+    ),
+  );
+  assert.throws(
+    () => validateLinks(dependent, { ...upstream, breakdown: stories }, budget),
+    /increment dependency/,
+  );
+  assert.throws(
+    () => parseDocument(JSON.stringify({ ...definition, extra: true }), definition.inputs),
+    /structured/,
+  );
+});
+
+test("a ready Plan is revalidated against sealed evidence and remaining time", async () => {
+  const h = await setup();
+  try {
+    let planPath = "";
+    for (let i = 0; i < 5; i++) {
+      const result = await h.produce();
+      planPath = result.assignment.artifactPath ?? "";
+      await h.controller.advanceRun();
+    }
+    const original = h.artifacts.get(planPath);
+    assert(original);
+    h.artifacts.set(planPath, { content: "changed", digest: "changed" });
+    const changed = await h.controller.advanceRun();
+    assert.equal(changed.advanced, false);
+    if (!changed.advanced) assert.match(changed.reason, /changed/);
+    h.artifacts.set(planPath, original);
+    h.advanceTime(3600000);
+    const expired = await h.controller.advanceRun();
+    assert.equal(expired.advanced, false);
+    if (!expired.advanced) assert.match(expired.reason, /time budget/);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("rejected input validation leaves no orphan assignment in subsequent checkpoints", async () => {
+  const h = await setup();
+  try {
+    const first = await h.produce();
+    await h.controller.advanceRun();
+    assert(first.assignment.artifactPath);
+    const original = h.artifacts.get(first.assignment.artifactPath);
+    assert(original);
+    h.artifacts.delete(first.assignment.artifactPath);
+    await assert.rejects(h.controller.startAssignment(), /unavailable/);
+    h.artifacts.set(first.assignment.artifactPath, original);
+    await h.produce();
+    const state = (await h.controller.getRunStatus()).run as unknown as {
+      assignments: Record<string, unknown>;
+    };
+    assert.equal(Object.keys(state.assignments).length, 2);
+    assert.equal(h.recorder.events.filter((e) => e.type === "assignment.created").length, 2);
+  } finally {
+    await h.cleanup();
+  }
+});
+test("a pending human gate can replace broken evidence without reusing old approval", async () => {
+  const h = await setup({ humanGates: ["define"] });
+  try {
+    await h.produce();
+    await h.controller.advanceRun();
+    const first = await h.produce();
+    const oldGate = await h.controller.advanceRun();
+    assert(first.assignment.artifactPath);
+    h.artifacts.delete(first.assignment.artifactPath);
+    const blocked = await h.controller.advanceRun();
+    assert.equal(blocked.advanced, false);
+    await h.produce();
+    const gate = await h.controller.advanceRun();
+    assert.notEqual(gate.humanArtifactId, oldGate.humanArtifactId);
+    await assert.rejects(
+      h.controller.advanceRun(oldGate.humanArtifactId),
+      /approval does not match/,
+    );
+    assert.equal((await h.controller.advanceRun(gate.humanArtifactId)).phase, "design");
+    await h.produce({
+      kind: "feedback",
+      reason: "ambiguous_criteria",
+      evidence: "Need clarification",
+    });
+    await assert.rejects(h.controller.advanceRun("unrelated-approval"), /approval does not match/);
+    assert.equal((await h.controller.getRunStatus()).run?.visits.at(-1)?.phase, "design");
+  } finally {
+    await h.cleanup();
+  }
+});

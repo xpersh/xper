@@ -1,672 +1,439 @@
-//! Acceptance tests for atomic replay, recovery, privacy, and fallback.
+//! Atomic passive delivery, concurrent sessions, and read-only legacy history.
 
 use std::{
-    collections::BTreeMap,
     fs,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Barrier,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
-use rusqlite::Connection;
-use xper_application::events::{AdapterMetadata, Event, EventKind, WorkOutcome};
-use xper_application::read_models::RunStatus;
-use xper_domain::{
-    Clock, GateEvaluation, GateResult, IdGenerator, Identifier, Phase, Run, Timestamp,
-    TransitionRequest,
-};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
+use xper_application::{ApplicationError, events::RecordedEvent, use_cases::append_events};
 use xper_store_sqlite::{Durability, SqliteEventStore, StoreError};
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
-struct ClockAt(u64);
-impl Clock for ClockAt {
-    fn now(&mut self) -> Timestamp {
-        Timestamp::from_millis(self.0)
+struct Directory(PathBuf);
+
+impl Directory {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "xper-recording-test-{}-{}",
+            std::process::id(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    fn database(&self) -> PathBuf {
+        self.0.join("events.sqlite")
     }
 }
-struct Ids(u64);
-impl IdGenerator for Ids {
-    fn next_id(&mut self) -> Identifier {
-        self.0 += 1;
-        Identifier::new(format!("id-{}", self.0)).unwrap()
+
+impl Drop for Directory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
     }
 }
-fn metadata() -> AdapterMetadata {
-    AdapterMetadata {
-        adapter: "test-adapter".into(),
-        version: "1.2.3".into(),
-        capabilities: BTreeMap::from([("subagents".into(), true)]),
-    }
-}
-fn event(id: &str, run: &str, at: u64, kind: EventKind) -> Event {
-    Event {
+
+fn event(id: &str, kind: &str, data: Value) -> RecordedEvent {
+    RecordedEvent {
+        schema_version: 1,
         event_id: id.into(),
-        run_id: run.into(),
-        occurred_at_ms: at,
-        kind,
+        run_id: "run".into(),
+        occurred_at: 100,
+        event_type: kind.into(),
+        data: data.as_object().unwrap().clone(),
     }
-}
-fn started() -> Vec<Event> {
-    vec![
-        event(
-            "e1",
-            "r1",
-            100,
-            EventKind::RunStarted {
-                metadata: metadata(),
-                routing: None,
-            },
-        ),
-        event(
-            "e2",
-            "r1",
-            100,
-            EventKind::PhaseEntered {
-                visit_id: "v1".into(),
-                phase: "intake".into(),
-                visit_number: 1,
-            },
-        ),
-    ]
-}
-fn temp_db() -> (PathBuf, PathBuf) {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "xper-store-{}-{stamp}-{}",
-        std::process::id(),
-        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir(&dir).unwrap();
-    let db = dir.join("events.sqlite");
-    (dir, db)
 }
 
 #[test]
-fn domain_events_replay_to_the_same_run_phase_and_visits() {
+fn accepts_arbitrary_transitions_and_checkpoints_without_creating_workflow_facts() {
     let mut store = SqliteEventStore::in_memory().unwrap();
-    let mut clock = ClockAt(100);
-    let mut ids = Ids(0);
-    let (mut run, start_events) =
-        Run::start("PRIVATE PROMPT: do not persist", &mut clock, &mut ids).into_parts();
-    let durable_start: Vec<_> = start_events
-        .iter()
-        .map(|e| Event::from_domain(e, &metadata(), None))
-        .collect();
-    assert_eq!(store.append_boundary(&durable_start).unwrap(), 2);
-    assert!(
-        !serde_json::to_string(&durable_start)
-            .unwrap()
-            .contains("PRIVATE PROMPT")
-    );
+    let events = [
+        event("1", "run.started", json!({})),
+        event("2", "phase.entered", json!({"phase":"future-stage"})),
+        event("3", "phase.entered", json!({"phase":"initial-stage"})),
+        event(
+            "4",
+            "attempt.finished",
+            json!({"attemptId":"unknown-attempt","outcome":"custom verdict"}),
+        ),
+        event(
+            "5",
+            "adapter.state",
+            json!({"state":{"phase":"private","arbitrary":[3,true]}}),
+        ),
+    ];
+    assert_eq!(store.append_events("session", &events).unwrap(), 5);
+    assert_eq!(store.load_events("run").unwrap(), events);
+    let run = store.load_run("run").unwrap().unwrap();
+    assert_eq!(run.phase.as_deref(), Some("initial-stage"));
+    assert_eq!(run.metrics.attempts_started, 0);
+    assert_eq!(run.metrics.attempts_finished, 1);
+    assert_eq!(run.metrics.cost_micros, None);
+}
 
-    for (request, phase) in [
-        ("to-discovery", Phase::Discovery),
-        ("to-define", Phase::Define),
-        ("revisit", Phase::Discovery),
-    ] {
-        clock.0 += 10;
-        let transition = TransitionRequest::new(
-            Identifier::new(request).unwrap().into(),
-            phase,
-            GateEvaluation::new("gate", GateResult::Passed, Vec::new()),
-        );
-        let receipt = run.transition(transition, &mut clock, &mut ids).unwrap();
-        let events: Vec<_> = receipt
-            .events()
-            .iter()
-            .map(|e| Event::from_domain(e, &metadata(), None))
-            .collect();
-        assert_eq!(store.append_boundary(&events).unwrap(), 4);
-        assert_eq!(store.append_boundary(&events).unwrap(), 0);
-    }
-    let projected = store.load_run(run.id().as_str()).unwrap().unwrap();
+#[test]
+fn exact_duplicate_deliveries_are_idempotent_including_duplicates_inside_a_batch() {
+    let mut store = SqliteEventStore::in_memory().unwrap();
+    let first = event("1", "custom.fact", json!({"unchanged":true}));
     assert_eq!(
-        projected,
-        store.replay_run(run.id().as_str()).unwrap().unwrap()
-    );
-    assert_eq!(projected.status, RunStatus::Active);
-    assert_eq!(projected.metadata, metadata());
-    assert_eq!(projected.visits.len(), run.phase_visits().len());
-    assert_eq!(projected.gates.len(), run.gates().len());
-    for gate in run.gates() {
-        let restored = &projected.gates[gate.id().as_str()];
-        assert_eq!(restored.visit_id, gate.phase_visit_id().as_str());
-        assert_eq!(restored.evaluated_at_ms, gate.evaluated_at().as_millis());
-        assert!(restored.passed);
-    }
-    for (actual, expected) in projected.visits.iter().zip(run.phase_visits()) {
-        assert_eq!(actual.visit_id, expected.id().as_str());
-        assert_eq!(actual.visit_number, expected.visit_number());
-        assert_eq!(actual.entered_at_ms, expected.entered_at().as_millis());
-    }
-    assert_eq!(projected.visits.last().unwrap().phase, "discovery");
-    store.rebuild_all().unwrap();
-    assert_eq!(store.load_run(run.id().as_str()).unwrap(), Some(projected));
-    let run_id = run.id().as_str();
-    let visit_id = run.current_visit().id().as_str();
-    store
-        .append_boundary(&[
-            event(
-                "artifact-test-1",
-                run_id,
-                200,
-                EventKind::AssignmentCreated {
-                    assignment_id: "a-brief".into(),
-                    visit_id: visit_id.into(),
-                    role: "discovery.explorer".into(),
-                },
-            ),
-            event(
-                "artifact-test-2",
-                run_id,
-                201,
-                EventKind::AttemptStarted {
-                    attempt_id: "t-brief".into(),
-                    assignment_id: "a-brief".into(),
-                    selection: None,
-                },
-            ),
-            event(
-                "artifact-test-3",
-                run_id,
-                202,
-                EventKind::AttemptFinished {
-                    attempt_id: "t-brief".into(),
-                    outcome: WorkOutcome::Succeeded,
-                },
-            ),
-            event(
-                "artifact-test-4",
-                run_id,
-                202,
-                EventKind::ArtifactRegistered {
-                    artifact_id: "brief-1".into(),
-                    attempt_id: "t-brief".into(),
-                    kind: "discovery_brief".into(),
-                    path: ".xper/artifacts/brief.md".into(),
-                    version: 1,
-                },
-            ),
-            event(
-                "artifact-test-5",
-                run_id,
-                202,
-                EventKind::AssignmentCompleted {
-                    assignment_id: "a-brief".into(),
-                    outcome: WorkOutcome::Succeeded,
-                },
-            ),
-        ])
-        .unwrap();
-    let with_brief = store.load_run(run_id).unwrap().unwrap();
-    assert_eq!(with_brief.artifacts["brief-1"].attempt_id, "t-brief");
-    assert_eq!(store.replay_run(run_id).unwrap(), Some(with_brief.clone()));
-    store.rebuild_all().unwrap();
-    assert_eq!(store.load_run(run_id).unwrap(), Some(with_brief));
-}
-
-#[test]
-fn boundary_rolls_back_and_reopen_interrupts_unfinished_attempts() {
-    let (dir, path) = temp_db();
-    {
-        let mut store = SqliteEventStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 3);
-        assert_eq!(store.append_boundary(&started()).unwrap(), 2);
-        let work = [
-            event(
-                "e3",
-                "r1",
-                110,
-                EventKind::AssignmentCreated {
-                    assignment_id: "a1".into(),
-                    visit_id: "v1".into(),
-                    role: "implementation.driver".into(),
-                },
-            ),
-            event(
-                "e4",
-                "r1",
-                120,
-                EventKind::AttemptStarted {
-                    attempt_id: "t1".into(),
-                    assignment_id: "a1".into(),
-                    selection: None,
-                },
-            ),
-        ];
-        assert_eq!(store.append_boundary(&work).unwrap(), 2);
-        let invalid_boundary = [
-            event(
-                "e5",
-                "r1",
-                130,
-                EventKind::AttemptFinished {
-                    attempt_id: "t1".into(),
-                    outcome: WorkOutcome::Succeeded,
-                },
-            ),
-            event(
-                "e6",
-                "r1",
-                130,
-                EventKind::PhaseEntered {
-                    visit_id: "v2".into(),
-                    phase: "define".into(),
-                    visit_number: 1,
-                },
-            ),
-        ];
-        assert!(matches!(
-            store.append_boundary(&invalid_boundary),
-            Err(StoreError::InvalidHistory(_))
-        ));
-        assert_eq!(
-            store.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
-            None
-        );
         store
-            .append_boundary(&[
-                event(
-                    "e9",
-                    "r1",
-                    125,
-                    EventKind::AssignmentCreated {
-                        assignment_id: "a2".into(),
-                        visit_id: "v1".into(),
-                        role: "implementation.driver".into(),
-                    },
-                ),
-                event(
-                    "e7",
-                    "r1",
-                    125,
-                    EventKind::AttemptStarted {
-                        attempt_id: "t2".into(),
-                        assignment_id: "a2".into(),
-                        selection: None,
-                    },
-                ),
-                event(
-                    "e8",
-                    "r1",
-                    135,
-                    EventKind::AttemptFinished {
-                        attempt_id: "t2".into(),
-                        outcome: WorkOutcome::Succeeded,
-                    },
-                ),
-            ])
-            .unwrap();
-    }
-    {
-        let mut store = SqliteEventStore::open(&path).unwrap();
-        let run = store.load_run("r1").unwrap().unwrap();
-        assert_eq!(run.attempts["t1"].outcome, Some(WorkOutcome::Interrupted));
-        assert_eq!(run.attempts["t2"].outcome, Some(WorkOutcome::Succeeded));
-        assert_eq!(run, store.replay_run("r1").unwrap().unwrap());
-        assert_eq!(store.recover_interrupted().unwrap(), 0);
-        assert!(matches!(
-            store.append_boundary(&[event(
-                "e5",
-                "r1",
-                130,
-                EventKind::AttemptFinished {
-                    attempt_id: "t1".into(),
-                    outcome: WorkOutcome::Succeeded
-                }
-            )]),
-            Err(StoreError::InvalidHistory(_))
-        ));
-    }
-    let connection = Connection::open(&path).unwrap();
-    let count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(count, 8);
-    let pi_tables: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE '%pi%'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(pi_tables, 0);
-    drop(connection);
-    fs::remove_dir_all(dir).unwrap();
+            .append_events("session", &[first.clone(), first.clone()])
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        store
+            .append_events("session", std::slice::from_ref(&first))
+            .unwrap(),
+        0
+    );
+    assert_eq!(store.load_events("run").unwrap(), [first]);
+    assert_eq!(
+        store.load_run("run").unwrap().unwrap().metrics.event_count,
+        1
+    );
 }
 
 #[test]
-fn conflicting_event_identity_does_not_change_state() {
+fn conflicting_event_ids_rollback_every_new_event_and_binding_in_the_batch() {
     let mut store = SqliteEventStore::in_memory().unwrap();
-    store.append_boundary(&started()).unwrap();
-    let original = store.load_run("r1").unwrap();
-    let conflict = event(
-        "e2",
-        "r1",
-        100,
-        EventKind::PhaseEntered {
-            visit_id: "different".into(),
-            phase: "intake".into(),
-            visit_number: 1,
-        },
-    );
+    let first = event("1", "custom.fact", json!({"value":1}));
+    store
+        .append_events("session", std::slice::from_ref(&first))
+        .unwrap();
+    let second = event("2", "custom.fact", json!({"value":2}));
+    let conflict = event("1", "custom.fact", json!({"value":3}));
     assert!(matches!(
-        store.append_boundary(&[conflict]),
+        store.append_events("session", &[second, conflict]),
         Err(StoreError::EventIdConflict(_))
     ));
-    assert_eq!(store.load_run("r1").unwrap(), original);
-}
+    assert_eq!(store.load_events("run").unwrap(), [first]);
 
-#[test]
-fn a_second_live_connection_does_not_interrupt_the_first_connections_attempt() {
-    let (dir, path) = temp_db();
-    let mut first = SqliteEventStore::open(&path).unwrap();
-    first.append_boundary(&started()).unwrap();
-    first
-        .append_boundary(&[
-            event(
-                "e3",
-                "r1",
-                110,
-                EventKind::AssignmentCreated {
-                    assignment_id: "a1".into(),
-                    visit_id: "v1".into(),
-                    role: "discovery.explorer".into(),
-                },
-            ),
-            event(
-                "e4",
-                "r1",
-                120,
-                EventKind::AttemptStarted {
-                    attempt_id: "t1".into(),
-                    assignment_id: "a1".into(),
-                    selection: None,
-                },
-            ),
-        ])
-        .unwrap();
-    let mut second = SqliteEventStore::open(&path).unwrap();
-    assert_eq!(
-        first.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
-        None
-    );
-    assert_eq!(
-        second.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
-        None
-    );
-    assert!(matches!(
-        second.append_boundary(&[event(
-            "foreign-finish",
-            "r1",
-            130,
-            EventKind::AttemptFinished {
-                attempt_id: "t1".into(),
-                outcome: WorkOutcome::Succeeded
-            }
-        )]),
-        Err(StoreError::InvalidHistory(_))
-    ));
-    assert_eq!(
-        first.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
-        None
-    );
-    first
-        .append_boundary(&[event(
-            "owner-finish",
-            "r1",
-            130,
-            EventKind::AttemptFinished {
-                attempt_id: "t1".into(),
-                outcome: WorkOutcome::Succeeded,
-            },
-        )])
-        .unwrap();
-    assert_eq!(
-        second.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
-        Some(WorkOutcome::Succeeded)
-    );
-    drop(second);
-    drop(first);
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn version_one_database_migrates_and_recovers_legacy_attempts() {
-    let (dir, path) = temp_db();
-    let connection = Connection::open(&path).unwrap();
-    connection.execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO schema_migrations(version) VALUES (1);").unwrap();
-    connection
-        .execute_batch(include_str!("../migrations/0001_initial.sql"))
-        .unwrap();
-    let mut history = started();
-    history.push(event(
-        "e3",
-        "r1",
-        110,
-        EventKind::AssignmentCreated {
-            assignment_id: "a1".into(),
-            visit_id: "v1".into(),
-            role: "discovery.explorer".into(),
-        },
-    ));
-    history.push(event(
-        "e4",
-        "r1",
-        120,
-        EventKind::AttemptStarted {
-            attempt_id: "t1".into(),
-            assignment_id: "a1".into(),
-            selection: None,
-        },
-    ));
-    for item in history {
-        connection.execute(
-            "INSERT INTO events(event_id, run_id, event_type, schema_version, occurred_at_ms, event_json) VALUES (?1, ?2, ?3, 1, ?4, ?5)",
-            rusqlite::params![item.event_id, item.run_id, item.kind.name(), i64::try_from(item.occurred_at_ms).unwrap(), serde_json::to_string(&item).unwrap()],
-        ).unwrap();
-    }
-    drop(connection);
-    let store = SqliteEventStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 3);
-    assert_eq!(
-        store.load_run("r1").unwrap().unwrap().attempts["t1"].outcome,
-        Some(WorkOutcome::Interrupted)
-    );
-    drop(store);
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn version_two_joined_sessions_keep_only_the_original_binding() {
-    let (dir, path) = temp_db();
-    let connection = Connection::open(&path).unwrap();
-    connection.execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP); INSERT INTO schema_migrations(version) VALUES (1), (2);").unwrap();
-    connection
-        .execute_batch(include_str!("../migrations/0001_initial.sql"))
-        .unwrap();
-    connection
-        .execute_batch(include_str!("../migrations/0002_concurrency.sql"))
-        .unwrap();
-    connection.execute("INSERT INTO session_runs(session_key, run_id) VALUES ('original', 'run-1'), ('joined', 'run-1')", []).unwrap();
-    drop(connection);
-
-    let store = SqliteEventStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 3);
-    assert_eq!(
-        store.session_run("original").unwrap().as_deref(),
-        Some("run-1")
-    );
-    assert_eq!(store.session_run("joined").unwrap(), None);
-    drop(store);
-
-    let connection = Connection::open(&path).unwrap();
-    assert!(
-        connection
-            .execute(
-                "INSERT INTO session_runs(session_key, run_id) VALUES ('another', 'run-1')",
-                []
-            )
-            .is_err()
-    );
-    drop(connection);
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn failed_disk_open_uses_an_explicit_volatile_store() {
-    let (dir, _) = temp_db();
-    let path = dir.join("missing").join("events.sqlite");
-    let mut store = SqliteEventStore::open_or_volatile(path).unwrap();
-    assert_eq!(store.durability(), Durability::Volatile);
-    assert!(store.degraded_reason().is_some());
-    store.append_boundary(&started()).unwrap();
-    assert_eq!(store.load_run("r1").unwrap().unwrap().visits.len(), 1);
-    fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
-fn knowledge_plan_and_human_decisions_survive_reopen_and_projection_rebuild() {
-    use xper_application::{
-        knowledge::{KnowledgeArtifact, WorkflowPolicy},
-        ports::ArtifactReader,
-        use_cases::{advance_run, finish_attempt, start_assignment, start_run},
-    };
-    #[derive(Default)]
-    struct Evidence(BTreeMap<String, KnowledgeArtifact>);
-    impl ArtifactReader for Evidence {
-        type Error = std::io::Error;
-        fn is_available(&self, _: &str) -> Result<bool, Self::Error> {
-            Ok(true)
-        }
-        fn digest(&self, _: &str) -> Result<Option<String>, Self::Error> {
-            Ok(Some("a".repeat(64)))
-        }
-        fn read_contract(
-            &self,
-            path: &str,
-        ) -> Result<Option<(KnowledgeArtifact, String)>, Self::Error> {
-            Ok(self.0.get(path).map(|doc| (doc.clone(), "a".repeat(64))))
-        }
-    }
-    let (directory, path) = temp_db();
-    let fixtures: serde_json::Value =
-        serde_json::from_str(include_str!("../../../fixtures/knowledge-v1.json")).unwrap();
-    let mut clock = ClockAt(100);
-    let mut ids = Ids(0);
-    let mut evidence = Evidence::default();
-    let expected = {
-        let mut store = SqliteEventStore::open(&path).unwrap();
-        let mut adapter = metadata();
-        adapter.capabilities.insert("humanApproval".into(), true);
-        let started = start_run::execute(
-            &mut store,
-            &mut clock,
-            &mut ids,
-            start_run::Request {
-                session_id: "knowledge",
-                objective: "Synthetic plan",
-                metadata: &adapter,
-                routing: None,
-                available_models: None,
-                policy: Some(&WorkflowPolicy {
-                    human_gates: vec!["define".into()],
-                    ..Default::default()
-                }),
-            },
-        )
-        .unwrap();
-        for phase in ["discovery", "define", "design", "breakdown", "plan"] {
-            let assignment = start_assignment::execute(
-                &mut store,
-                &evidence,
-                &mut clock,
-                &mut ids,
-                start_assignment::Request {
-                    session_id: "knowledge",
-                    retry_assignment_id: None,
-                },
-            )
-            .unwrap();
-            if phase != "discovery" {
-                let fixture = fixtures
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|f| f["phase"] == phase)
-                    .unwrap();
-                let mut document: KnowledgeArtifact =
-                    serde_json::from_value(fixture["artifact"].clone()).unwrap();
-                document.inputs = assignment
-                    .input_artifacts
-                    .iter()
-                    .map(|a| a.artifact_id.clone())
-                    .collect();
-                evidence
-                    .0
-                    .insert(assignment.artifact_path.clone(), document);
-            }
-            finish_attempt::execute(
-                &mut store,
-                &evidence,
-                &mut clock,
-                &mut ids,
-                finish_attempt::Request {
-                    session_id: "knowledge",
-                    attempt_id: &assignment.attempt_id,
-                    outcome: WorkOutcome::Succeeded,
-                    artifact_path: Some(&assignment.artifact_path),
-                },
-            )
-            .unwrap();
-            let gate = advance_run::execute(
-                &mut store,
-                &evidence,
-                &mut clock,
-                &mut ids,
-                advance_run::Request {
-                    session_id: "knowledge",
-                    approved_artifact_id: None,
-                },
-            )
-            .unwrap();
-            if phase == "define" {
-                advance_run::execute(
-                    &mut store,
-                    &evidence,
-                    &mut clock,
-                    &mut ids,
-                    advance_run::Request {
-                        session_id: "knowledge",
-                        approved_artifact_id: gate.human_artifact_id.as_deref(),
-                    },
-                )
-                .unwrap();
-            } else {
-                assert!(gate.advanced);
-            }
-        }
-        let state = store.load_run(&started.run_id).unwrap().unwrap();
-        assert!(state.accepted.contains_key("plan"));
-        assert_eq!(state.seals.len(), 5);
-        assert_eq!(state.inputs.len(), 5);
-        assert_eq!(state.charges.len(), 5);
-        state
-    };
-    let mut store = SqliteEventStore::open(&path).unwrap();
-    store.rebuild_all().unwrap();
-    assert_eq!(store.load_run(&expected.run_id).unwrap().unwrap(), expected);
+    let mut new = event("fresh", "new.fact", json!({}));
+    new.run_id = "new-run".into();
+    let mut conflict = event("1", "custom.fact", json!({"value":1}));
+    conflict.run_id = "new-run".into();
     assert!(
         store
-            .load_events(&expected.run_id)
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e.kind, EventKind::HumanApproved { .. }))
+            .append_events("new-session", &[new, conflict])
+            .is_err()
     );
-    drop(store);
-    fs::remove_dir_all(directory).unwrap();
+    assert!(store.load_run("new-run").unwrap().is_none());
+    assert!(store.session_run("new-session").unwrap().is_none());
+}
+
+#[test]
+fn session_ownership_is_enforced_even_for_identical_event_redelivery() {
+    let mut store = SqliteEventStore::in_memory().unwrap();
+    let events = [event("e", "run.started", json!({}))];
+    store.append_events("owner", &events).unwrap();
+    let result = append_events::execute(
+        &mut store,
+        append_events::Request {
+            session_id: "foreign",
+            events: &events,
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(ApplicationError::InvalidInput(
+            "run belongs to another session"
+        ))
+    ));
+    assert_eq!(store.session_run("owner").unwrap().as_deref(), Some("run"));
+    assert_eq!(store.session_run("foreign").unwrap(), None);
+    assert_eq!(store.load_events("run").unwrap(), events);
+}
+
+#[test]
+fn one_session_can_record_multiple_runs_without_changing_prior_ownership() {
+    let mut store = SqliteEventStore::in_memory().unwrap();
+    store
+        .append_events("owner", &[event("a", "custom", json!({}))])
+        .unwrap();
+    let mut next = event("b", "custom", json!({}));
+    next.run_id = "next".into();
+    store.append_events("owner", &[next]).unwrap();
+    assert_eq!(store.session_run("owner").unwrap().as_deref(), Some("next"));
+    assert_eq!(
+        store
+            .load_run("run")
+            .unwrap()
+            .unwrap()
+            .session_id
+            .as_deref(),
+        Some("owner")
+    );
+    assert_eq!(store.latest_run().unwrap().unwrap().run_id, "next");
+}
+
+#[test]
+fn invalid_batch_shape_is_rejected_even_when_calling_the_store_directly() {
+    let mut store = SqliteEventStore::in_memory().unwrap();
+    let mut invalid = event("e", "anything", json!({}));
+    invalid.schema_version = 2;
+    assert!(matches!(
+        store.append_events("s", &[invalid]),
+        Err(StoreError::InvalidInput(_))
+    ));
+    let first = event("first", "anything", json!({}));
+    let mut other = event("second", "anything", json!({}));
+    other.run_id = "other".into();
+    assert!(store.append_events("s", &[first, other]).is_err());
+    assert!(store.append_events("s", &[]).is_err());
+    assert!(store.latest_run().unwrap().is_none());
+}
+
+#[test]
+fn reopen_and_rebuild_preserve_the_same_projection_and_never_finish_open_attempts() {
+    let directory = Directory::new();
+    let path = directory.database();
+    let events = [
+        event("1", "run.started", json!({})),
+        event("2", "attempt.started", json!({"attemptId":"open-attempt"})),
+        event(
+            "3",
+            "model.usage",
+            json!({"inputTokens":19,"outputTokens":4,"costMicros":23}),
+        ),
+        event(
+            "4",
+            "adapter.state",
+            json!({"state":{"pending":"owned by adapter"}}),
+        ),
+    ];
+    let projection = {
+        let mut store = SqliteEventStore::open(&path).unwrap();
+        assert_eq!(store.durability(), Durability::Persistent);
+        store.append_events("session", &events).unwrap();
+        store.load_run("run").unwrap()
+    };
+    let mut reopened = SqliteEventStore::open(&path).unwrap();
+    reopened.rebuild_all().unwrap();
+    assert_eq!(reopened.load_run("run").unwrap(), projection);
+    assert_eq!(reopened.replay_run("run").unwrap(), projection);
+    assert_eq!(reopened.load_events("run").unwrap(), events);
+    let read_only = SqliteEventStore::inspect(&path).unwrap();
+    assert_eq!(read_only.load_run("run").unwrap(), projection);
+    assert_eq!(projection.unwrap().metrics.attempts_finished, 0);
+}
+
+#[test]
+fn sqlite_failure_rolls_back_events_projection_and_new_session_binding() {
+    let directory = Directory::new();
+    let path = directory.database();
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_test_event BEFORE INSERT ON recorded_events WHEN NEW.event_type = 'reject' BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+    let events = [
+        event("1", "accepted", json!({})),
+        event("2", "reject", json!({})),
+    ];
+    assert!(matches!(
+        store.append_events("owner", &events),
+        Err(StoreError::Sqlite(_))
+    ));
+    assert!(store.load_events("run").unwrap().is_empty());
+    assert!(store.load_run("run").unwrap().is_none());
+    assert!(store.session_run("owner").unwrap().is_none());
+}
+
+#[test]
+fn simultaneous_fresh_open_and_ownership_claims_keep_one_atomic_winner() {
+    let directory = Directory::new();
+    let path = directory.database();
+    let barrier = Arc::new(Barrier::new(2));
+    let workers = ["first", "second"].map(|session| {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        std::thread::spawn(move || {
+            barrier.wait();
+            let mut store = SqliteEventStore::open(path).unwrap();
+            store.append_events(session, &[event(session, "run.started", json!({}))])
+        })
+    });
+    let results = workers.map(|worker| worker.join().unwrap());
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(StoreError::SessionConflict(_))))
+            .count(),
+        1
+    );
+    assert_eq!(
+        SqliteEventStore::inspect(path)
+            .unwrap()
+            .load_events("run")
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+fn create_legacy_database(path: &Path) -> Vec<String> {
+    let connection = Connection::open(path).unwrap();
+    for migration in [
+        include_str!("../migrations/0001_initial.sql"),
+        include_str!("../migrations/0002_concurrency.sql"),
+        include_str!("../migrations/0003_session_isolation.sql"),
+    ] {
+        connection.execute_batch(migration).unwrap();
+    }
+    connection.execute_batch("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY); INSERT INTO schema_migrations VALUES(1), (2), (3); INSERT INTO session_runs(session_key,run_id) VALUES('legacy-session','legacy-run');").unwrap();
+    let facts = [
+        (
+            "start",
+            "run.started",
+            json!({"type":"run_started","metadata":{"adapter":"test","version":"old","capabilities":{}}}),
+        ),
+        (
+            "phase",
+            "phase.entered",
+            json!({"type":"phase_entered","phase":"unrecognized by old replay","visit_id":"visit","visit_number":1}),
+        ),
+        (
+            "attempt",
+            "attempt.started",
+            json!({"type":"attempt_started","attempt_id":"unfinished","assignment_id":"missing"}),
+        ),
+    ];
+    facts.into_iter().map(|(id, kind, data)| {
+        let original = json!({"event_id":id,"run_id":"legacy-run","occurred_at_ms":50,"kind":data}).to_string();
+        connection.execute("INSERT INTO events(event_id,run_id,event_type,schema_version,occurred_at_ms,event_json) VALUES(?1,'legacy-run',?2,1,50,?3)", params![id,kind,original]).unwrap();
+        original
+    }).collect()
+}
+
+#[test]
+fn legacy_history_is_inspectable_without_old_workflow_validation_or_mutation() {
+    let directory = Directory::new();
+    let path = directory.database();
+    let originals = create_legacy_database(&path);
+    let before_migration = SqliteEventStore::inspect(&path).unwrap();
+    let projection = before_migration.latest_run().unwrap().unwrap();
+    assert_eq!(projection.status, "legacy");
+    assert_eq!(projection.phase, None);
+    assert_eq!(projection.session_id.as_deref(), Some("legacy-session"));
+    let timeline = before_migration.load_events("legacy-run").unwrap();
+    assert_eq!(timeline[0].event_type, "legacy.run.started");
+    assert_eq!(
+        timeline[0].data,
+        serde_json::from_str::<Value>(&originals[0])
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .clone()
+    );
+    drop(before_migration);
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    store.rebuild_all().unwrap();
+    assert_eq!(store.load_events("legacy-run").unwrap(), timeline);
+    let mut attempted = event("new", "custom", json!({}));
+    attempted.run_id = "legacy-run".into();
+    assert!(matches!(
+        store.append_events("legacy-session", &[attempted]),
+        Err(StoreError::LegacyReadOnly(_))
+    ));
+    let connection = Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT event_json FROM events ORDER BY sequence")
+        .unwrap();
+    let after = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(after, originals);
+    assert_eq!(store.load_run("legacy-run").unwrap().unwrap(), projection);
+}
+
+#[test]
+fn newer_schema_is_rejected_without_using_volatile_fallback() {
+    let directory = Directory::new();
+    let path = directory.database();
+    create_legacy_database(&path);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute("INSERT INTO schema_migrations VALUES(99)", [])
+        .unwrap();
+    assert!(matches!(
+        SqliteEventStore::open_or_volatile(&path),
+        Err(StoreError::UnsupportedSchema(99))
+    ));
+    assert!(matches!(
+        SqliteEventStore::inspect(&path),
+        Err(StoreError::UnsupportedSchema(99))
+    ));
+}
+
+#[test]
+fn unavailable_path_uses_explicit_volatile_storage_without_fabricating_outcomes() {
+    let directory = Directory::new();
+    let mut store =
+        SqliteEventStore::open_or_volatile(directory.0.join("missing").join("events.sqlite"))
+            .unwrap();
+    assert_eq!(store.durability(), Durability::Volatile);
+    assert!(store.degraded_reason().is_some());
+    let events = [event(
+        "e",
+        "attempt.started",
+        json!({"attemptId":"still running"}),
+    )];
+    store.append_events("s", &events).unwrap();
+    assert_eq!(store.load_events("run").unwrap(), events);
+    assert_eq!(
+        store
+            .load_run("run")
+            .unwrap()
+            .unwrap()
+            .metrics
+            .attempts_finished,
+        0
+    );
+}
+
+#[test]
+fn incompatible_recorded_envelopes_are_reported_instead_of_silently_replayed() {
+    let directory = Directory::new();
+    let path = directory.database();
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    store
+        .append_events("session", &[event("e", "vendor.fact", json!({}))])
+        .unwrap();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "UPDATE recorded_events SET event_json = json_set(event_json, '$.schemaVersion', 2)",
+            [],
+        )
+        .unwrap();
+    assert!(matches!(
+        store.load_run("run"),
+        Err(StoreError::InvalidHistory(_))
+    ));
+    assert!(matches!(
+        SqliteEventStore::open_or_volatile(&path),
+        Err(StoreError::InvalidHistory(_))
+    ));
+}
+
+#[test]
+fn unbound_legacy_history_reports_unknown_session_as_null() {
+    let directory = Directory::new();
+    let path = directory.database();
+    create_legacy_database(&path);
+    let connection = Connection::open(&path).unwrap();
+    connection.execute("DELETE FROM session_runs", []).unwrap();
+    let store = SqliteEventStore::inspect(&path).unwrap();
+    let run = store.load_run("legacy-run").unwrap().unwrap();
+    assert_eq!(run.session_id, None);
+    assert_eq!(serde_json::to_value(run).unwrap()["sessionId"], Value::Null);
 }

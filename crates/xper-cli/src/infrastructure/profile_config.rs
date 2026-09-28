@@ -4,6 +4,7 @@ use std::{fs, io, path::Path};
 
 use serde_json::Value;
 use xper_application::events::RoutingSnapshot;
+pub(crate) use xper_config::{AvailableModel, validate_catalog};
 use xper_config::{ScopePaths, load_effective, resolve_profile};
 
 fn effective(root: &Path) -> io::Result<Value> {
@@ -55,20 +56,16 @@ pub(crate) fn activate(root: &Path, name: &str) -> io::Result<RoutingSnapshot> {
     Ok(snapshot)
 }
 
-/// Read neutral knowledge-workflow limits from the normal merged configuration.
-pub(crate) fn workflow_policy(
-    root: &Path,
-) -> io::Result<xper_application::knowledge::WorkflowPolicy> {
+/// Resolve routing and opaque adapter settings from one effective snapshot.
+pub(crate) fn configuration(root: &Path) -> io::Result<(Option<RoutingSnapshot>, Value)> {
     let config = effective(root)?;
-    let policy: xper_application::knowledge::WorkflowPolicy = config
+    let routing = active_name(root, &config)?
+        .map(|name| resolve_profile(&config, &name).map_err(io::Error::other))
+        .transpose()?;
+    let adapter = config
         .get("workflow")
-        .and_then(|workflow| workflow.get("knowledge"))
-        .map(|value| {
-            serde_json::from_value(value.clone())
-                .map_err(|_| io::Error::other("invalid workflow.knowledge policy"))
-        })
-        .transpose()?
-        .unwrap_or_default();
-    policy.validate().map_err(io::Error::other)?;
-    Ok(policy)
+        .and_then(|value| value.get("knowledge"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    Ok((routing, adapter))
 }

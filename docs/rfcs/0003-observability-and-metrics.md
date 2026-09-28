@@ -4,6 +4,13 @@
 - Date: 2026-09-22
 - Depends on: [RFC 0001](0001-product-and-workflow.md) and [RFC 0002](0002-multimodel-configuration.md)
 
+[RFC 0006](0006-configuration-recording-and-adapter-workflows.md) accepts the
+passive recording boundary: adapters own workflow meaning; Rust records and
+projects their reported facts. The hierarchy, richer event catalog, formulas,
+and UI below remain design targets except where the
+[core guide](../architecture.md) describes implemented behavior. The actual
+event envelope and negotiated capabilities are in the [public protocol](../../schemas/README.md).
+
 ## Summary
 
 `Xper Observability` is the local subsystem that records workflow, agent,
@@ -70,7 +77,7 @@ References:
 
 ## Event sources
 
-### xper domain events
+### Adapter workflow events
 
 ```text
 run.started
@@ -117,12 +124,12 @@ increment.accepted
 - Model or reasoning-level changes.
 - Message and queue state when relevant.
 
-xper emits workflow meaning; Pi supplies runtime detail. The adapter creates
-an Attempt through the core before executing Discovery and reports its explicit
-result. The child process is correlated with its Assignment, phase, model, and
-effective profile. Generic Pi tool observations do not settle Attempts or pass
-gates. The database does not depend on an agent-manager package's internal
-format.
+The Pi adapter emits workflow meaning and runtime detail. It creates an
+attempt locally and reports its start and explicit result to Rust. The child
+process is correlated with its assignment, phase, model, and effective
+profile. Generic Pi tool observations do not settle attempts or pass gates.
+Rust records the decisions; it does not make them. The database does not depend
+on an agent-manager package's internal format.
 
 ## Common envelope
 
@@ -168,15 +175,17 @@ Pi telemetry ----------+                         +-- projections
                                                  +-- aggregates
 ```
 
-The current integration records generic Pi tool observations and xper
-execution correlation. The
+The integration records generic Pi tool observations and xper execution
+correlation. The
 [direct activation revision](0004-pi-integration.md#direct-workflow-activation-revision-2026-09-27)
 retires the earlier plugin-specific telemetry. Runtime observations remain
-separate from the core's persisted workflow events and outcomes.
+separate from the adapter-reported execution events stored by the core.
 
 The Event Collector is passive. Observability errors are isolated and do not
-change the workflow outcome. Persistence must support batching, flushing at
-important boundaries, and recovery of starts without an end after a crash.
+change the workflow outcome. Persistence supports batching and idempotent
+retries. A start without an end is incomplete evidence; the adapter owns any
+execution recovery and reports its outcome. A collector must not create a
+failure or advance a phase merely because its connection closed.
 
 ## Conceptual data model
 
@@ -375,7 +384,8 @@ must include redaction, retention, and deletion.
 
 - Observability cannot stop or modify a run.
 - Persistence failures produce a warning and a recoverable diagnostic.
-- An attempt started without a final event is marked `interrupted`, not `failed`.
+- An attempt without a final event is incomplete; the adapter may explicitly
+  report interruption after recovery. Rust does not infer a workflow outcome.
 - Events are idempotent by `event_id`.
 - The database includes a schema version and migrations.
 - Versions of xper, Pi, the workflow, and the configuration snapshot are recorded.

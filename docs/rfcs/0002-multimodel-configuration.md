@@ -11,6 +11,11 @@ and contexts enforce provider allowlists. Pi's current provider selection
 cannot distinguish two subscriptions under one provider identifier, so the
 credential isolation proposed below is not implemented.
 
+[RFC 0006](0006-configuration-recording-and-adapter-workflows.md) establishes
+the current ownership: Rust resolves configuration; the adapter chooses when
+and how to execute roles and reports their effective model selections. Live
+profile switching and automatic fallback below remain proposals.
+
 ## Summary
 
 xper must allow each role and phase to use a different provider and model.

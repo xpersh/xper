@@ -14,12 +14,10 @@ path = "src/main.rs"
 [dependencies]
 xper-application.workspace = true
 xper-config.workspace = true
-xper-domain.workspace = true
 xper-protocol.workspace = true
 xper-store-sqlite.workspace = true
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
-sha2 = "0.10"
 
 [lints]
 workspace = true

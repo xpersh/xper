@@ -34,8 +34,12 @@ Otherwise, use `rg`; do not generate an index as part of another task.
   user-facing messages, test descriptions, and new descriptive filenames.
   Preserve public identifiers and data whose exact content matters to a test.
   Conversation with the user can follow their preferred language.
-- The core governs the workflow. Adapters access it through the public protocol
-  and keep harness-specific details inside their own packages.
+- The core resolves configuration and records reported execution facts. Each
+  adapter owns its workflow, including phases, gates, retries, approvals,
+  artifacts, and execution budgets. Access the core through the public protocol;
+  do not add workflow decisions to Rust or its replay logic. Read the
+  [boundary decision](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
+  before changing these responsibilities.
 - Add behavior to the block responsible for it and use explicit dependencies.
   Do not introduce global containers, command buses, or empty modules to
   anticipate future needs.

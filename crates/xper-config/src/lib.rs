@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 mod routing;
-pub use routing::resolve_profile;
+pub use routing::{AvailableModel, resolve_profile, validate_catalog};
 
 /// Stable package identity used by scaffold-level dependency smoke tests.
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
@@ -280,14 +280,6 @@ pub fn validate(value: &Value) -> Result<(), ConfigError> {
             return Err(ConfigError(format!("{key} entries must be mappings")));
         }
     }
-    if value
-        .pointer("/workflow/implementation/max_attempts")
-        .is_some_and(|v| v.as_u64().is_none_or(|count| count == 0))
-    {
-        return Err(ConfigError(
-            "workflow.implementation.max_attempts must be a positive integer".into(),
-        ));
-    }
     Ok(())
 }
 
@@ -361,8 +353,12 @@ mod tests {
     fn known_fields_reject_invalid_types() {
         let invalid = parse("adapters:\n  pi: invalid\n").unwrap();
         assert!(validate(&invalid).is_err());
-        let invalid = parse("workflow:\n  implementation:\n    max_attempts: 0\n").unwrap();
-        assert!(validate(&invalid).is_err());
+    }
+
+    #[test]
+    fn adapter_workflow_configuration_is_opaque_to_the_core() {
+        let adapter_policy = parse("workflow:\n  implementation:\n    max_attempts: 0\n").unwrap();
+        assert!(validate(&adapter_policy).is_ok());
     }
 
     #[test]

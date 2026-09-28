@@ -4,7 +4,9 @@ import { once } from "node:events";
 import { createInterface } from "node:readline";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { connectBridge } from "../bridge/client.js";
 import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
@@ -24,17 +26,20 @@ function buildBridge(): void {
 test("TypeScript and Rust complete a bidirectional handshake and restart", async () => {
   buildBridge();
   for (let attempt = 0; attempt < 2; attempt++) {
+    const directory = mkdtempSync(join(tmpdir(), "xper-bridge-"));
     const { client, handshake } = await connectBridge(manifest, { command: binary });
     try {
       assert.equal(handshake.protocolVersion, "1");
       assert.equal(handshake.bridgeVersion, "0.1.0");
-      assert.deepEqual(handshake.capabilities, { bidirectionalRequests: true });
+      assert.equal(handshake.capabilities.bidirectionalRequests, true);
+      assert.equal(handshake.capabilities.eventRecording, true);
+      assert.equal(handshake.capabilities.configurationResolution, true);
       assert.equal(handshake.maxFrameBytes, 65_536);
       assert.deepEqual(await client.request("ping"), { pong: true });
       assert.deepEqual(
         await client.request("session.attach", {
           sessionId: "pi-session",
-          cwd: workspace,
+          cwd: directory,
           mode: "rpc",
         }),
         { attached: true },
@@ -70,6 +75,7 @@ test("TypeScript and Rust complete a bidirectional handshake and restart", async
       await client.shutdown();
     } finally {
       client.close();
+      rmSync(directory, { recursive: true, force: true });
     }
   }
 });

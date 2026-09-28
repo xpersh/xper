@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { delegateKnowledge } from "../actions/delegate-knowledge.js";
 import { connectBridge, type BridgeClient } from "../bridge/client.js";
+import { PiWorkflow } from "../workflow/controller.js";
 import { XperClient } from "../bridge/xper-client.js";
 import { saveArtifact } from "../knowledge/artifacts.js";
 import { resolveAgent } from "../knowledge/delegate.js";
@@ -39,7 +40,7 @@ test("all phases run through the public bridge with fake execution, durable appr
       command: resolve(workspace, "target/debug/xper"),
     }));
     await bridge.request("session.attach", { sessionId: "knowledge-test", cwd: root, mode: "rpc" });
-    return new XperClient(bridge);
+    return new PiWorkflow(new XperClient(bridge), root, "knowledge-test");
   };
   try {
     let client = await connect();

@@ -30,13 +30,24 @@ for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   if (
     !adapterPath.startsWith("__tests__/") &&
     adapterPath !== "bridge/xper-client.ts" &&
-    /\.request\s*\(\s*["'](?:run\.(?:start|status|advance)|assignment\.start|attempt\.finish)["']/.test(
+    /\.request\s*\(\s*["'](?:run\.status|event\.append|configuration\.resolve|profile\.inspect)["']/.test(
       source,
     )
   ) {
-    failures.push(`${adapterPath} must call workflow operations through the typed xper client`);
+    failures.push(
+      `${adapterPath} must call configuration and recording operations through the typed xper client`,
+    );
+  }
+  if (
+    !adapterPath.startsWith("__tests__/") &&
+    /["'](?:run\.start|run\.advance|assignment\.start|attempt\.finish)["']/.test(source)
+  ) {
+    failures.push(`${adapterPath} must keep workflow commands inside Pi, not in RPC messages`);
   }
   for (const match of source.matchAll(importPattern)) {
+    if (adapterPath.startsWith("bridge/") && /(?:^|\/)workflow\//.test(match[1] ?? "")) {
+      failures.push(`${adapterPath} must not depend on Pi workflow policy`);
+    }
     const specifier = match[1];
     if (
       adapterPath.startsWith("actions/") &&

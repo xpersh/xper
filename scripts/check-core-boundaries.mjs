@@ -39,11 +39,10 @@ requireExactDependencies("xper-domain", []);
 requireExactDependencies("xper-application", ["xper-domain"]);
 requireExactDependencies("xper-protocol", []);
 requireExactDependencies("xper-config", ["xper-application"]);
-requireExactDependencies("xper-store-sqlite", ["xper-application", "xper-domain"]);
+requireExactDependencies("xper-store-sqlite", ["xper-application"]);
 requireExactDependencies("xper-cli", [
   "xper-application",
   "xper-config",
-  "xper-domain",
   "xper-protocol",
   "xper-store-sqlite",
 ]);
@@ -97,19 +96,39 @@ for (const sourceFile of filesWithExtension(
   if (directIo || groupedIo || /\b(?:SystemTime|Instant)::now\s*\(/.test(source)) {
     failures.push(`${relative(workspaceRoot, sourceFile)} must access I/O and time through ports`);
   }
-  if (/\b(?:serde_json|xper_protocol)\s*::/.test(source)) {
+  // JSON values carry opaque adapter metadata. Parsing and RPC translation
+  // remain infrastructure responsibilities; retaining a payload is not policy.
+  if (
+    /\bserde_json\s*::\s*(?:from_|to_|json\s*!)/.test(source) ||
+    /\bxper_protocol\s*::/.test(source)
+  ) {
     failures.push(`${relative(workspaceRoot, sourceFile)} must not handle JSON/RPC transport`);
   }
 }
 
-// CLI interfaces translate requests and present results. Composition and local
-// port implementations may depend on concrete adapters, but no CLI file may
-// construct workflow events or commit a workflow boundary itself.
+// The recording core must remain independent of adapter workflow semantics.
+// These guards catch a reintroduction of the removed knowledge policy. This
+// supplements, rather than replaces, responsibility review for new rules.
+for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates"), ".rs").filter((path) =>
+  path.includes("/src/"),
+)) {
+  const source = readFileSync(sourceFile, "utf8");
+  if (
+    /\b(?:WorkflowPolicy|KnowledgeArtifact|ArtifactReader|is_allowed_transition|DefinitionContract|ExecutionPlan)\b|\bPhase::/.test(
+      source,
+    )
+  ) {
+    failures.push(`${relative(workspaceRoot, sourceFile)} contains adapter-owned workflow policy`);
+  }
+}
+
+// CLI interfaces translate requests and present results. Only application
+// operations may invoke the recording repository's append operation.
 for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates/xper-cli/src"), ".rs")) {
   const source = readFileSync(sourceFile, "utf8");
   const path = relative(workspaceRoot, sourceFile).replaceAll("\\", "/");
-  if (/\bEventKind\b|\.append_boundary(?:_and_bind_session)?\s*\(|\bRun::start\s*\(/.test(source)) {
-    failures.push(`${path} must delegate workflow mutations to application use cases`);
+  if (/\.append_events\s*\(|\.append_boundary(?:_and_bind_session)?\s*\(/.test(source)) {
+    failures.push(`${path} must delegate recording mutations to application use cases`);
   }
   if (path.includes("/infrastructure/") || path.endsWith("/composition.rs")) continue;
   if (/\bxper_(?:domain|store_sqlite|config)\s*::/.test(source)) {

@@ -144,9 +144,9 @@ Judge should receive the intent, criteria, diff, decisions, and evidence but
 does not need to inherit the entire conversation. This reduces confirmation bias.
 
 Delivery uses Implementer -> Verifier, with explicit delegation for each role.
-It does not require a Navigator or role rotation. The Implementer retains the
-public identifier `implementation.driver`; the existing three-role Plan contract
-will be updated in [XP-011.1](../tasks/011-implementation-verify.md#xp-0111--execute-one-implementer-assignment).
+The Plan contract uses `implementation.driver` and `verify.verifier` for these
+roles. Their execution remains future work in
+[XP-011](../tasks/011-implementation-verify.md).
 
 ## Domain concepts
 

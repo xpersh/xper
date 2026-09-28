@@ -208,9 +208,7 @@ export function parseDocument(content: string, expectedInputs: string[]): Docume
             ]) &&
             text(a.id) &&
             text(a.incrementId) &&
-            ["implementation.driver", "implementation.navigator", "verify.verifier"].includes(
-              String(a.role),
-            ) &&
+            ["implementation.driver", "verify.verifier"].includes(String(a.role)) &&
             texts(a.dependencies) &&
             text(a.workspace) &&
             /^[a-zA-Z0-9_-]+$/.test(a.workspace) &&
@@ -266,10 +264,10 @@ export function validateLinks(
   const ancestors = validateDag(assignments);
   for (const story of map.stories) {
     const group = assignments.filter((a) => a.incrementId === story.id);
-    for (const role of ["implementation.driver", "implementation.navigator", "verify.verifier"])
+    for (const role of ["implementation.driver", "verify.verifier"])
       demand(
         group.filter((a) => a.role === role).length === 1,
-        "each increment needs one driver, navigator, and independent verifier",
+        "each increment needs one implementer and one independent verifier",
       );
     for (const assignment of group) {
       for (const dependency of story.dependencies) {
@@ -286,7 +284,7 @@ export function validateLinks(
           group
             .filter((a) => a.role !== "verify.verifier")
             .every((a) => ancestors.get(assignment.id)?.has(a.id)),
-          "verification must depend on its driver and navigator",
+          "verification must depend on its implementer",
         );
     }
   }

@@ -94,23 +94,21 @@ Breakdown rejects stories without independent verification, missing value or
 examples, unknown criterion references, uncovered criteria, duplicate IDs,
 unknown dependencies, self-dependencies, or cycles.
 
-Plan requires exactly one `implementation.driver`, `implementation.navigator`,
-and `verify.verifier` per increment. Verification must follow both delivery
-assignments, and every assignment of a dependent increment must follow its
+Plan requires exactly one Implementer (`implementation.driver`) and one Verifier
+(`verify.verifier`) per increment. Verification must follow implementation,
+and every assignment of a dependent increment must follow its
 prerequisites' verification. Both DAGs have deterministic topological validation.
 Unordered assignments cannot share a workspace or an exclusive resource, even
 when the current concurrency limit would happen to serialize them. Workspaces
 are logical IDs made of ASCII letters, digits, `_`, and `-`; no filesystem paths
-or worktrees are allocated by Plan. Pair roles sharing a workspace must have an
-explicit order. Future implementation scheduling must honor these edges and the
-run concurrency limit.
+or worktrees are allocated by Plan. Future implementation scheduling must honor
+these edges and the run concurrency limit.
 
-The three-role requirement above describes the currently implemented contract.
-The planned [XP-011.1](tasks/011-implementation-verify.md#xp-0111--execute-one-implementer-assignment)
-simplifies new Plans to one Implementer (`implementation.driver`) and one
-dependent Verifier (`verify.verifier`). That slice must update the prompt,
-validation, schema, and fixtures together; this design decision alone does not
-change existing artifacts or make delivery executable.
+This narrows Plan's semantic rules within `knowledge-v1`; its structure and
+`schemaVersion: 1` remain unchanged. Existing artifacts and history are not
+rewritten. Rust can still inspect their recorded facts, but current Pi validation
+does not readmit Plans containing extra roles. Delivery execution remains future
+work in [XP-011](tasks/011-implementation-verify.md).
 
 ## Limits and human gates
 

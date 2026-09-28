@@ -493,6 +493,19 @@ test("story coverage, verifier ordering, dependent increments and Plan budgets a
   validateLinks(breakdown.output, upstream, budget);
   validateLinks(plan.output, upstream, budget);
   if (breakdown.output.kind !== "story_map" || plan.output.kind !== "execution_plan") assert.fail();
+  assert.deepEqual(
+    plan.output.assignments.map((assignment) => assignment.role),
+    ["implementation.driver", "verify.verifier"],
+  );
+  const unsupported = structuredClone(plan);
+  assert(unsupported.output.kind === "execution_plan");
+  const implementer = unsupported.output.assignments[0];
+  assert(implementer);
+  implementer.role = "implementation.reviewer";
+  assert.throws(
+    () => parseDocument(JSON.stringify(unsupported), unsupported.inputs),
+    /delivery role/,
+  );
   const uncovered = structuredClone(breakdown.output);
   uncovered.stories[0]?.criteria.push("unknown");
   assert.throws(() => validateLinks(uncovered, upstream, budget), /cover every/);
@@ -506,7 +519,7 @@ test("story coverage, verifier ordering, dependent increments and Plan budgets a
   assert.throws(() => validateLinks(plan.output, upstream, { ...budget, attempts: 1 }), /exceeds/);
   const missing = structuredClone(plan.output);
   missing.assignments = missing.assignments.filter((a) => a.role !== "verify.verifier");
-  assert.throws(() => validateLinks(missing, upstream, budget), /one driver/);
+  assert.throws(() => validateLinks(missing, upstream, budget), /one implementer/);
   const stories = structuredClone(breakdown);
   assert(stories.output.kind === "story_map");
   const first = stories.output.stories[0];

@@ -45,5 +45,10 @@ for (const fixture of read("fixtures/knowledge-v1.json")) {
     !validateArtifact({ ...fixture.artifact, inputs: ["same", "same"] }),
     "reject duplicate inputs",
   );
+  if (fixture.artifact.output.kind === "execution_plan") {
+    const invalid = structuredClone(fixture.artifact);
+    invalid.output.assignments[0].role = "implementation.reviewer";
+    assert(!validateArtifact(invalid), "reject unsupported delivery roles");
+  }
 }
 console.log("Shared protocol and knowledge artifact schemas match their fixtures.");

@@ -267,7 +267,6 @@
         "role": {
           "enum": [
             "implementation.driver",
-            "implementation.navigator",
             "verify.verifier"
           ]
         },

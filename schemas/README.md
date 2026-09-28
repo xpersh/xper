@@ -97,6 +97,13 @@ Define-through-Plan artifacts; Discovery is Markdown. It is an adapter contract,
 not a Rust protocol dependency. Pi validates its semantic rules. Shared schema
 checks exercise the synthetic examples without requiring a model.
 
+Plan requires one `implementation.driver` and one dependent `verify.verifier`
+per increment. This is a semantic restriction within `knowledge-v1`; the artifact
+structure and `schemaVersion: 1` are unchanged. Existing artifacts and recorded
+history are not rewritten. Rust preserves them for inspection, while current Pi
+validation rejects Plans containing extra roles. This change does not add
+delivery execution.
+
 The stable error catalog remains in
 [the Rust protocol crate](../crates/xper-protocol/src/lib.rs) and
 [the TypeScript transport](../adapters/pi/src/bridge/protocol.ts).

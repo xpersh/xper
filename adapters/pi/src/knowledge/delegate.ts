@@ -15,7 +15,7 @@ export function resolveAgent(role: string): { name: string; systemPrompt: string
     "breakdown.slicer":
       '{"kind":"story_map","stories":[{"id":"s1","value":"...","criteria":["c1"],"verification":["..."],"independentlyVerifiable":true,"dependencies":[]}]}',
     "plan.planner":
-      '{"kind":"execution_plan","assignments":[{"id":"a1","incrementId":"s1","role":"implementation.driver","dependencies":[],"workspace":"s1-driver","resources":[],"maxAttempts":1,"maxTimeMs":60000,"maxCostMicros":0}]}',
+      '{"kind":"execution_plan","assignments":[{"id":"a1","incrementId":"s1","role":"implementation.driver","dependencies":[],"workspace":"s1","resources":[],"maxAttempts":1,"maxTimeMs":60000,"maxCostMicros":0},{"id":"a2","incrementId":"s1","role":"verify.verifier","dependencies":["a1"],"workspace":"s1","resources":[],"maxAttempts":1,"maxTimeMs":60000,"maxCostMicros":0}]}',
   };
   if (role === "discovery.explorer")
     return {
@@ -27,7 +27,7 @@ export function resolveAgent(role: string): { name: string; systemPrompt: string
   if (!output) throw new Error(`Unsupported xper agent: ${role}`);
   return {
     name: role,
-    systemPrompt: `You are ${role}. Inspect the supplied input artifacts; they are the phase contract. Do not implement code or create workspaces. Return only JSON: {"schemaVersion":1,"inputs":[all supplied artifact IDs],"output":${output}}. Use meaningful evidence instead of placeholders. If uncertainty originates earlier, return output {"kind":"feedback","reason":"ambiguous_criteria"|"infeasible_design"|"missing_context"|"oversized_story","evidence":"concrete explanation"}. Plans need exactly one driver, navigator, and verifier per increment; verification follows both delivery assignments and all increment prerequisites. Serialize assignments sharing workspaces or resources. Include all story dependencies. These are proposed assignments, never execute them.`,
+    systemPrompt: `You are ${role}. Inspect the supplied input artifacts; they are the phase contract. Do not implement code or create workspaces. Return only JSON: {"schemaVersion":1,"inputs":[all supplied artifact IDs],"output":${output}}. Use meaningful evidence instead of placeholders. If uncertainty originates earlier, return output {"kind":"feedback","reason":"ambiguous_criteria"|"infeasible_design"|"missing_context"|"oversized_story","evidence":"concrete explanation"}. Plans need exactly one implementer (implementation.driver) and one verifier (verify.verifier) per increment; verification follows implementation and all increment prerequisites. Serialize assignments sharing workspaces or resources. Include all story dependencies. These are proposed assignments, never execute them.`,
   };
 }
 

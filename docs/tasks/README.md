@@ -128,9 +128,9 @@ The RFCs describe product direction; they do not expand a selected slice's scope
 - Keep flow-specific pure decisions, but reuse existing execution, checkpoint,
   artifact, budget, and recording mechanisms. Extract only proven duplication;
   do not replace them with a generic workflow engine.
-- Delivery uses one Implementer followed by one independent Verifier, with no
-  Navigator or pair rotation. Concurrency, fan-out/fan-in, and richer reconciliation
-  remain future work in the deferred sections.
+- Delivery uses one Implementer followed by one independent Verifier.
+  Concurrency, fan-out/fan-in, and richer reconciliation remain future work in
+  the deferred sections.
 - Rust remains configuration and telemetry. No recording response, inspection
   query, metric, or visualization may become an execution or recovery guard.
 

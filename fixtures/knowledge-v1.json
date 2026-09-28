@@ -100,24 +100,11 @@
             "maxCostMicros": 0
           },
           {
-            "id": "navigator",
-            "incrementId": "s1",
-            "role": "implementation.navigator",
-            "dependencies": [
-              "driver"
-            ],
-            "workspace": "s1",
-            "resources": [],
-            "maxAttempts": 1,
-            "maxTimeMs": 1000,
-            "maxCostMicros": 0
-          },
-          {
             "id": "verifier",
             "incrementId": "s1",
             "role": "verify.verifier",
             "dependencies": [
-              "navigator"
+              "driver"
             ],
             "workspace": "s1",
             "resources": [],

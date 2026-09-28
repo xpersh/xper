@@ -21,9 +21,8 @@ Do not add `xper_deliver` or a separate activation command for each flow.
 The delivery loop is **Implementer -> Verifier**. The Implementer changes code
 and supplies tests/evidence; the Verifier independently checks behavior,
 regressions, scope, and unnecessary complexity without repairing the result.
-There is no Navigator assignment, approval gate, pair rotation, or extra review
-session between them. Keep `implementation.driver` as the Implementer's public
-role ID and `verify.verifier` for the Verifier; no identifier rename is needed.
+Use `implementation.driver` as the Implementer's public role ID and
+`verify.verifier` for the Verifier.
 
 Reuse the existing attempt lifecycle, frozen routing, budgets, artifacts, local
 journal, and background recorder. Implementation and Verification retain their
@@ -54,11 +53,9 @@ unrelated files or push changes.
 Acceptance:
 
 - Knowledge continues through the same tool; no second public tool is needed.
-- Change Plan generation and admission together to require one Implementer and
-  one dependent Verifier per increment. Update the prompt, validators, schema,
-  fixtures, and contract tests consistently. Historical three-role Plans remain
-  inspectable and require replanning for execution; never rewrite sealed evidence
-  or fabricate a Navigator approval to make them executable.
+- Reuse the existing Plan contract: one Implementer and one dependent Verifier
+  per increment. Plans outside that contract remain inspectable and require
+  replanning for execution; do not rewrite sealed evidence.
 - Validate the supported handoff before sealing a new Plan so an unsupported
   plan remains correctable in Knowledge. A historical unsupported Plan produces
   a local diagnostic without pretending delivery has started.

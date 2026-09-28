@@ -99,10 +99,10 @@ acceptance and run closure remain [XP-012](../tasks/012-judgment-day.md).
 
 [XP-011](../tasks/011-implementation-verify.md) implements this boundary in
 separately reviewed slices: one Implementer, independent Verifier, subsequent
-increments, and then Knowledge feedback. Use one supplied checkout and no
-Navigator or pair rotation. Keep delegation through `xper_delegate`; the main
-Pi agent still decides when to invoke it. Separate flow definitions do not require separate
-public tools or duplicate execution, persistence, and telemetry runtimes.
+increments, and then Knowledge feedback. Use one supplied checkout and keep
+delegation through `xper_delegate`; the main Pi agent still decides when to
+invoke it. Separate flow definitions do not require separate public tools or
+duplicate execution, persistence, and telemetry runtimes.
 
 Concurrent instances, managed workspace isolation, and selective
 Plan reconciliation remain future capabilities. Do not implement them merely to

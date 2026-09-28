@@ -46,6 +46,11 @@ Otherwise, use `rg`; do not generate an index as part of another task.
   local start, delegation, gates, approval, recovery, and status usable. Freeze
   the last prepared configuration or visible Pi defaults when starting a run;
   retain pending/rejected observations without changing execution outcomes.
+- Keep adapter transitions explicit and pure, with a versioned definition used
+  by execution and future inspection. Distinguish workflow instance completion
+  from run closure; future flows must compose by identity and evidence rather
+  than extending one global phase enum. Follow
+  [RFC 0007](docs/rfcs/0007-explicit-adapter-state-machines.md).
 - Add behavior to the block responsible for it and use explicit dependencies.
   Do not introduce global containers, command buses, or empty modules to
   anticipate future needs.

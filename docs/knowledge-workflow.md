@@ -3,8 +3,9 @@
 The Pi adapter implements the five knowledge phases introduced in XP-010.
 Each explicit delegation executes one assignment, saves its output, evaluates
 its gate locally, and reports the outcome to Rust. A ready Execution Plan
-remains in `plan`. It does not create worktrees, execute delivery assignments,
-or issue a final verdict.
+completes the knowledge instance; compatibility status still names its phase
+`plan`. It does not create worktrees, execute delivery assignments, close the
+overall run, or issue a final verdict.
 
 These are Pi workflow rules, not core recording rules. Rust resolves
 configuration and preserves the reported events and opaque Pi checkpoint.
@@ -17,6 +18,22 @@ do not wait for Rust. Configuration is prepared separately and events are
 delivered in the background. Missing, slow, or rejected telemetry remains visible
 without changing workflow outcomes. Local evidence and checkpoint integrity
 checks still apply.
+
+## State and composition
+
+The adapter uses an explicit pure state machine and the versioned `pi.knowledge`
+graph. Declared edges describe forward progress, feedback, and completion;
+artifact and budget guards determine whether a command may take an edge.
+Knowledge phase, approval lifecycle, and each attempt's outcome are separate
+state. Models work within assignment contracts without owning the transition
+protocol. [RFC 0007](rfcs/0007-explicit-adapter-state-machines.md) defines this
+boundary and the future read-only visualization contract.
+
+The completed instance hands off a sealed Plan by artifact identity and digest.
+Future Implementation and Verification flows will have their own definitions
+and per-increment instances under the same run; they can coexist according to
+the Plan DAG. They are not extra knowledge phases, and this refactor does not
+execute them. Run closure remains a later product responsibility.
 
 ## Phase contracts
 
@@ -158,8 +175,12 @@ replaying Discovery's result. Repeated calls on an unchanged accepted Plan retur
 Profiles must include the five roles in the table to execute the entire flow.
 Existing Discovery-only profiles remain usable for Discovery; dispatch explains
 when the current role has no route. New runs resume from Pi's versioned
-checkpoint. Core-owned legacy runs remain available for historical inspection,
-but cannot resume under the new architecture because they lack that checkpoint.
+checkpoint. Checkpoint format 2 gives the instance an explicit definition
+reference and lifecycle; valid format-1 checkpoints migrate locally without
+changing existing run, visit, assignment, attempt, or event identities. Restoring
+a checkpoint does not repeat an agent invocation. Core-owned legacy runs remain
+available for historical inspection, but cannot resume under the new architecture
+because they lack that checkpoint.
 
 ## Verification
 

@@ -7,6 +7,8 @@ work; their existence does not imply that implementation has started.
 defines current ownership: Pi implements the workflow, while Rust resolves
 configuration and records reported facts. Earlier task evidence may describe
 the original core-owned implementation; it does not override this boundary.
+[RFC 0007](../rfcs/0007-explicit-adapter-state-machines.md) defines explicit Pi
+state machines, future flow composition, and the read-only visualization boundary.
 
 ## First milestone goal
 
@@ -47,6 +49,7 @@ this slice is complete.
 | XP-012 | [Judgment Day and closure](012-judgment-day.md) | XP-011 | Verdict, rework, and learning |
 | XP-013 | [Metrics and inspection](013-metrics-inspection.md) | XP-007, XP-012 | Run comparison through CLI/TUI |
 | XP-014 | [Packaging and compatibility](014-packaging-compatibility.md) | XP-006, XP-012, XP-013 | Cross-platform distribution |
+| XP-015 | [Workflow visualization](015-workflow-visualization.md) | XP-010, RFC 0007 contract | Read-only topology and reported execution |
 
 XP-003 and XP-004 can proceed in parallel after XP-002. XP-006 and XP-007 can
 also overlap once their contracts are stable.
@@ -72,6 +75,8 @@ also overlap once their contracts are stable.
 ### M4 — Distributable product
 
 - XP-013 and XP-014
+- XP-015 can proceed independently of the remaining delivery phases once its
+  definition and observation contract is available.
 
 ## Rules for executing a task
 

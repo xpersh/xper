@@ -29,6 +29,7 @@ implemented, verified, and accepted independently, rather than an entire project
 - [xper core architecture and use cases](docs/architecture.md)
 - [Pi adapter architecture](adapters/pi/docs/architecture.md)
 - [RFC 0006: Configuration, recording, and adapter-owned workflows](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
+- [RFC 0007: Explicit adapter state machines](docs/rfcs/0007-explicit-adapter-state-machines.md)
 - [RFC 0001: Product and workflow](docs/rfcs/0001-product-and-workflow.md)
 - [RFC 0002: Multimodel configuration and routing](docs/rfcs/0002-multimodel-configuration.md)
 - [Knowledge workflow and phase contracts](docs/knowledge-workflow.md)
@@ -78,6 +79,13 @@ checks recording integrity and serves the history; it does not decide which
 step may run next. A future adapter can use a different workflow with the
 same configuration and recording service.
 
+Pi expresses the knowledge workflow as a pure typed state machine, with a
+versioned graph shared by execution and future inspection. Its runtime performs
+artifact and process effects outside the transition function. The knowledge
+instance completes with a sealed Plan; future Implementation and Verification
+flows will compose per increment under the same run. Their execution and a
+read-only graph UI remain backlog work.
+
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
 advancing, approving, inspecting local status, and resuming a local checkpoint
@@ -118,7 +126,8 @@ the current knowledge role in a child Pi process,
 saves its artifact, and evaluates the gate in the adapter. Discovery keeps its
 Markdown Brief; later phases use structured JSON contracts. Feedback returns to
 the responsible phase, configured human gates use `/xper approve <artifactId>`,
-and Plan stops with a validated execution DAG. The
+and Plan completes the knowledge instance with a validated execution DAG. This
+does not close the run or execute the planned delivery work. The
 [knowledge workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection
 and timeline from SQLite. This shared history can lag the live Pi workflow.

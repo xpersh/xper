@@ -7,7 +7,9 @@
 ## Goal
 
 Close a run with an adversarial, reproducible evaluation separate from the
-implementation context.
+implementation context. Completing the knowledge workflow with a ready Plan
+does not close the run; this task owns final acceptance and closure after the
+composed delivery and verification work.
 
 ## Scope
 

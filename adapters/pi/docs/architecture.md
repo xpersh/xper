@@ -5,6 +5,8 @@ assignments, gates, feedback, approvals, and budgets; executes agents; and
 validates their artifacts. Rust resolves configuration and stores the facts Pi
 reports. [RFC 0006](../../../docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
 explains this ownership boundary.
+[RFC 0007](../../../docs/rfcs/0007-explicit-adapter-state-machines.md) explains
+the explicit state machine and future composition and visualization boundaries.
 
 Rust is never an execution prerequisite. The local workflow becomes available
 before bridge startup, and every workflow operation completes independently of
@@ -18,7 +20,10 @@ flowchart LR
     Action --> Workflow
     Action --> Executor[Child Pi execution]
     Action --> Writer[Artifact writer]
-    Workflow --> Policy[Contracts, gates and budgets]
+    Workflow --> Machine[Pure knowledge transition]
+    Machine --> Definition[Versioned definition and edges]
+    Machine --> Policy[Contracts, gates and budgets]
+    Workflow --> Evidence[Local artifact evidence]
     Workflow --> Journal[Local checkpoint and outbox]
     Journal -. Background delivery .-> Client[Typed configuration and recording client]
     Session[Session background preparation] --> Client
@@ -36,7 +41,10 @@ flowchart LR
 | Commands, tools, session hooks, and presentation | `src/pi/` |
 | Background configuration preparation and last available snapshot | `src/pi/configuration.ts` |
 | Coordinate delegation with injected execution and writing dependencies | `src/actions/delegate-knowledge.ts` |
-| Own start, assignment, completion, advancement, and recovery decisions | `src/workflow/controller.ts` |
+| Prepare evidence, time and IDs; invoke transitions; commit local state | `src/workflow/controller.ts` |
+| Pure start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge-machine.ts` |
+| Versioned serializable topology and explicit transition edges | `src/workflow/definition.ts` |
+| Runtime state, checkpoint validation, and migration | `src/workflow/state.ts` |
 | Phase roles and execution budgets | `src/workflow/policy.ts` |
 | Artifact contracts, cross-artifact gates, and plan validation | `src/workflow/contracts.ts` |
 | Bounded evidence reads, path confinement, and digests | `src/workflow/evidence.ts` |
@@ -49,6 +57,62 @@ Actions receive their effects explicitly and remain testable without Pi,
 processes, or files. Workflow rules live in the adapter's workflow modules,
 not in the bridge client or Rust. The client validates the public boundary;
 it does not hide workflow commands behind recording calls.
+
+## Explicit state machine
+
+`PiWorkflow` is the runtime boundary. It loads the local checkpoint, reads and
+verifies artifact evidence, supplies IDs and time, and invokes the pure knowledge
+transition function. The reducer owns state changes and decisions and returns
+the next state, result, and facts. Local persistence and agent execution stay
+outside it; neither the reducer nor its guards consult Rust.
+
+The `pi.knowledge` definition at version 1 declares the five knowledge nodes
+and a terminal ready node, with stable IDs and explicit edges. Execution reads
+those edges; phase-array order is not a second transition rule. Domain guards
+still validate budgets, approvals, and evidence before taking an edge. The JSON
+definition describes possible paths, not an executable replacement for those
+rules.
+
+State carries a definition reference and workflow instance ID. New runs generate
+a separate instance ID; migrated format-1 checkpoints retain the run ID as their
+instance ID for historical stability. Its lifecycle is
+`active`, `awaiting_approval` with the exact visit and artifact, or `completed`
+with the sealed Plan artifact. Phase visits and per-attempt outcomes remain
+separate. Compatibility fields such as `human_input` and `ready` are derived for
+presentation, not independent mutable state.
+
+Knowledge completion hands off the sealed Plan to future per-increment flows;
+it does not imply product acceptance. RFC 0007 defines that composition without
+a global phase enum. No scheduler or future execution flow is implemented here.
+[XP-015](../../../docs/tasks/015-workflow-visualization.md) tracks a read-only UI
+combining the versioned graph with reported positions and history, including
+incomplete recording. Rust preserves those facts without running the machine.
+
+## Reported topology and position
+
+New observations include `definitionId`, `definitionVersion`, and `instanceId`
+in their event data. The adapter emits the following facts in addition to the
+existing phase, attempt, gate, and usage observations:
+
+| Event | Meaning |
+| --- | --- |
+| `workflow.definition` | The serializable graph in `data.definition`, emitted on the first commit with new facts in a runtime; the same definition may be reported again after reload |
+| `workflow.position` | Resulting `nodeId`, phase, visit, lifecycle status, and active attempt IDs after an operation that emits facts; a pending approval also names its artifact |
+| `workflow.transition` | A traversed graph edge, with `transitionId`, `from`, `to`, `fromVisitId`, and `toVisitId` |
+| `workflow.completed` | Knowledge completion with the sealed Plan artifact ID and output kind |
+
+A position observation is not necessarily a graph transition: attempt settlement
+or a blocked gate can leave the current node unchanged. Read-only status and
+idempotent operations without new facts do not emit positions. Completion uses
+node `ready` while retaining the final `plan` phase and visit; it does not create
+a sixth phase visit. The compatibility `run.status` value `ready` likewise does
+not claim final acceptance or run closure.
+
+Local `getRunStatus()` exposes the same typed position in `workflow`, alongside
+the derived compatibility run fields. Rust retains these observations as
+opaque data; a future consumer resolves the exact definition reference and edge
+IDs. Repeated definition reports are not new workflow versions. Existing history
+may lack these facts, and a read-only inspection does not backfill them.
 
 ## Workflow activation and delegation
 
@@ -66,9 +130,10 @@ grants human approval.
 
 Discovery retains its Markdown Brief. Define through Plan use versioned JSON
 artifacts. Feedback can revisit the responsible phase; accepted evidence is
-invalidated from that phase onward. Plan validates an execution DAG and stops
-ready for implementation. The [knowledge workflow guide](../../../docs/knowledge-workflow.md)
-defines these contracts and limits.
+invalidated from that phase onward. Plan validates an execution DAG and completes
+the knowledge instance with sealed evidence for future implementation. The
+[knowledge workflow guide](../../../docs/knowledge-workflow.md) defines these
+contracts and limits.
 
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
@@ -133,6 +198,15 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
+Checkpoint format 2 separates the definition reference and instance identity
+from lifecycle, visits, and attempts. Pi migrates valid format-1 state in memory,
+preserving existing identities and pending events. Reading alone does not rewrite
+the checkpoint format; an outbox delivery can still save the existing journal.
+The next commit with new facts writes format 2, including when recovery must
+settle an unfinished attempt as interrupted. Unknown or inconsistent state is
+rejected rather than guessed. This format change does not change the
+`pi.knowledge` definition version.
+
 A checkpoint is metadata-only adapter state. It excludes prompts and artifact
 contents; those artifacts remain files. Small checkpoints use `adapter.state`.
 Larger checkpoints use `adapter.state.chunk` events containing a checkpoint ID,
@@ -166,12 +240,15 @@ or reinterpret the original logs.
 
 ## Extending the adapter
 
-1. Add workflow rules to the module that owns their policy.
+1. Add knowledge transition rules to the pure reducer and update its definition
+   when topology changes; keep the controller responsible for local effects.
 2. Keep file/process/Pi effects separate from actions that coordinate them.
 3. Report explicit facts with stable IDs; do not infer outcomes from generic
    tool observations.
 4. Add core operations only for configuration, recording, or inspection needs.
 5. Update checkpoint compatibility and recovery tests when its schema changes.
+6. Give a new flow its own definition and state, and compose instances through
+   explicit evidence handoffs. Keep UI rendering outside execution decisions.
 
 A future decision about more autonomous agents belongs here. It does not
 require adding a phase state machine to Rust.
@@ -191,11 +268,17 @@ core through the typed public protocol and keeps workflow rules inside the
 adapter. It blocks direct recorder/configuration calls from workflow modules
 outside the journal and forbids awaiting telemetry delivery in actions and
 command/tool entry points. It also protects injected action dependencies and
-keeps workflow modules independent of the bridge process. These are static
+keeps workflow modules independent of the bridge process. Pure definition,
+state, and reducer modules cannot import concrete I/O or use ambient time,
+randomness, timers, or process state. The controller cannot navigate by phase
+array index. These are static
 conventions, not a complete TypeScript analysis; unresolved-promise tests check
 the execution guarantee dynamically.
 
-Workflow and action tests use controlled dependencies and synthetic artifacts.
+Pure reducer tests supply fixed time, IDs, and evidence; definition tests check
+stable references and declared paths. Migration tests preserve existing IDs and
+pending recording while rejecting incompatible state. Workflow and action tests
+use controlled dependencies and synthetic artifacts.
 Recording integration uses the real Rust bridge and SQLite with simulated
 execution, requiring the checkout and toolchain but no model credentials.
 Tests must cover interrupted execution, local checkpoint integrity, delayed

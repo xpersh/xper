@@ -194,6 +194,36 @@ test("human approval is bound to the pending artifact and persists across reload
     await h.cleanup();
   }
 });
+test("assignment admission uses the remaining budget after preparing local evidence", async () => {
+  const h = await setup({ maxTimeMs: 1000, attemptTimeMs: 1000 });
+  try {
+    await h.produce();
+    await h.controller.advanceRun();
+    const readArtifact = h.options.readArtifact;
+    let readDuration = 200;
+    h.options.readArtifact = async (path) => {
+      h.advanceTime(readDuration);
+      return readArtifact(path);
+    };
+    const restored = await h.restore();
+    const assignment = await restored.startAssignment();
+    assert.equal(assignment.timeoutMs, 800);
+    const started = (await restored.getRunStatus()).timeline.find(
+      (event) =>
+        (event as RecordedEvent).type === "attempt.started" &&
+        (event as RecordedEvent).data.attemptId === assignment.attemptId,
+    ) as RecordedEvent;
+    assert.equal(started.occurredAt, 1200);
+    await restored.finishAttempt({ attemptId: assignment.attemptId, outcome: "failed" });
+    const before = await restored.getRunStatus();
+    readDuration = 1000;
+    await assert.rejects(restored.startAssignment(), /time budget exhausted/);
+    const after = await restored.getRunStatus();
+    assert.deepEqual(after.run, before.run);
+  } finally {
+    await h.cleanup();
+  }
+});
 test("artifact provenance, seal, and strict contracts protect Pi gates", async () => {
   const h = await setup();
   try {

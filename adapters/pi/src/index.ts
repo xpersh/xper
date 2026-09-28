@@ -9,6 +9,7 @@ export { BridgeClient, connectBridge } from "./bridge/client.js";
 export { XperClient } from "./bridge/xper-client.js";
 export type {
   WorkflowClient,
+  WorkflowPosition,
   RunStarted,
   AssignmentStarted,
   FinishAttempt,
@@ -39,3 +40,7 @@ export type {
 
 export { PiWorkflow } from "./workflow/controller.js";
 export type { RecorderClient, RecordedEvent, RecordedStatus } from "./bridge/xper-client.js";
+
+// The same versioned definition drives Pi transitions and future read-only views.
+export { knowledgeDefinition } from "./workflow/definition.js";
+export type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "./workflow/definition.js";

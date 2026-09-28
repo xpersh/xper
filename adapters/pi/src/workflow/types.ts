@@ -73,7 +73,21 @@ export interface RunSummary {
   human_input?: [string, string] | null;
 }
 
+/** Inspection data, independent of renderer and workflow-specific context. */
+export interface WorkflowPosition {
+  definitionId: string;
+  definitionVersion: number;
+  instanceId: string;
+  nodeId: string;
+  phase: string;
+  visitId: string;
+  status: "active" | "awaiting_approval" | "completed";
+  activeAttemptIds: string[];
+  artifactId?: string;
+}
+
 export interface RunStatus {
+  workflow?: WorkflowPosition;
   run: RunSummary | null;
   /** Locally observed facts; complete shared history is queried through XperClient. */
   timeline: unknown[];

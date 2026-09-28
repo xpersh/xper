@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { isBuiltin } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,10 +24,30 @@ function filesWithExtension(directory, extension) {
   });
 }
 
-const importPattern = /(?:from\s+|import\s*\()\s*["']([^"']+)["']/g;
+const importPattern = /(?:from\s+|import\s*(?:\(\s*)?|require\s*\(\s*)["']([^"']+)["']/g;
+const pureWorkflowModules = new Set([
+  "workflow/definition.ts",
+  "workflow/state.ts",
+  "workflow/knowledge-machine.ts",
+]);
 for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   const source = readFileSync(sourceFile, "utf8");
   const adapterPath = relative(join(adapterRoot, "src"), sourceFile).replaceAll("\\", "/");
+  const pureWorkflow = pureWorkflowModules.has(adapterPath);
+  if (
+    pureWorkflow &&
+    /\b(?:Date\s*\.\s*now|Math\s*\.\s*random|randomUUID|fetch|setTimeout|setInterval|setImmediate)\s*\(|\bnew\s+Date\s*\(\s*\)|\b(?:process|globalThis\s*\.\s*crypto)\s*\./.test(
+      source,
+    )
+  ) {
+    failures.push(`${adapterPath} must receive time, identities, and effects as explicit inputs`);
+  }
+  if (
+    adapterPath === "workflow/controller.ts" &&
+    /\bphases\s*(?:\[|\.\s*(?:indexOf|slice|at|find|findIndex)\s*\()/.test(source)
+  ) {
+    failures.push(`${adapterPath} must delegate phase navigation to the explicit workflow machine`);
+  }
   if (
     !adapterPath.startsWith("__tests__/") &&
     adapterPath !== "bridge/xper-client.ts" &&
@@ -40,7 +61,11 @@ for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   }
   if (
     !adapterPath.startsWith("__tests__/") &&
-    /["'](?:run\.start|run\.advance|assignment\.start|attempt\.finish)["']/.test(source)
+    ((adapterPath.startsWith("bridge/") &&
+      /["'](?:run\.start|run\.advance|assignment\.start|attempt\.finish)["']/.test(source)) ||
+      /\.(?:request|call)\s*(?:<[^>]+>)?\s*\(\s*["'](?:run\.start|run\.advance|assignment\.start|attempt\.finish)["']/.test(
+        source,
+      ))
   ) {
     failures.push(`${adapterPath} must keep workflow commands inside Pi, not in RPC messages`);
   }
@@ -67,6 +92,17 @@ for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
       failures.push(`${adapterPath} must not depend on Pi workflow policy`);
     }
     const specifier = match[1];
+    if (
+      pureWorkflow &&
+      (isBuiltin(specifier ?? "") ||
+        /(?:^|\/)(?:pi|knowledge)\//.test(specifier ?? "") ||
+        /(?:^|\/)(?:journal|evidence|controller)\.(?:js|ts)$/.test(specifier ?? "") ||
+        specifier?.endsWith("/bridge/client.js"))
+    ) {
+      failures.push(
+        `${adapterPath} must remain pure and independent of execution, storage, and transport`,
+      );
+    }
     if (
       adapterPath.startsWith("actions/") &&
       (specifier?.startsWith("node:") ||

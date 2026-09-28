@@ -9,6 +9,9 @@ provides generic status, timelines, event/attempt counts, and aggregates of
 reported model usage. These foundations do not complete this task's comparison,
 export, semantic formulas, or richer inspection work. Metrics are a core
 responsibility; their inputs come from adapter-reported facts.
+[XP-015](015-workflow-visualization.md) separately tracks rendering versioned
+workflow topology and reported positions; it does not require these metrics
+features to be complete.
 
 ## Goal
 

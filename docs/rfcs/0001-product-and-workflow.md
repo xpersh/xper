@@ -7,6 +7,9 @@
 Workflow ownership is revised by [RFC 0006](0006-configuration-recording-and-adapter-workflows.md).
 The phase and role descriptions below describe the Pi workflow; they are not
 rules enforced by the Rust service.
+[RFC 0007](0007-explicit-adapter-state-machines.md) refines the state-machine
+model: knowledge completion hands off a sealed Plan to future per-increment
+flows; phase, instance lifecycle, and attempt state remain separate.
 
 ## Summary
 

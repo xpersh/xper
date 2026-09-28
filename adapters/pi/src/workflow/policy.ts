@@ -1,20 +1,29 @@
 import type { WorkflowPolicy, RemainingBudget } from "./types.js";
 
-export const phases = ["discovery", "define", "design", "breakdown", "plan"] as const;
-export type Phase = (typeof phases)[number];
-export const contracts: Record<Phase, { role: string; kind: string }> = {
-  discovery: { role: "discovery.explorer", kind: "discovery_brief" },
-  define: { role: "define.product", kind: "definition_contract" },
-  design: { role: "design.designer", kind: "design_decisions" },
-  breakdown: { role: "breakdown.slicer", kind: "story_map" },
-  plan: { role: "plan.planner", kind: "execution_plan" },
-};
-export const feedbackTargets: Record<string, Phase> = {
-  missing_context: "discovery",
-  ambiguous_criteria: "define",
-  infeasible_design: "design",
-  oversized_story: "breakdown",
-};
+export type { Phase } from "./definition.js";
+import { knowledgeDefinition, isKnowledgePhase, type Phase } from "./definition.js";
+
+export const phases = Object.freeze(
+  knowledgeDefinition.nodes.map((node) => node.id).filter(isKnowledgePhase),
+);
+export const contracts = Object.fromEntries(
+  knowledgeDefinition.nodes
+    .filter((node) => isKnowledgePhase(node.id))
+    .map((node) => {
+      if (!node.role || !node.artifactKind)
+        throw new Error("knowledge activities need role and artifact metadata");
+      return [node.id, { role: node.role, kind: node.artifactKind }];
+    }),
+) as Record<Phase, { role: string; kind: string }>;
+export const feedbackTargets: Record<string, Phase> = {};
+for (const edge of knowledgeDefinition.edges) {
+  if (edge.kind !== "feedback" || !edge.reason || !isKnowledgePhase(edge.to)) continue;
+  if (feedbackTargets[edge.reason] && feedbackTargets[edge.reason] !== edge.to)
+    throw new Error("knowledge feedback reason has conflicting destinations");
+  feedbackTargets[edge.reason] = edge.to;
+}
+Object.freeze(feedbackTargets);
+
 export type Policy = Required<WorkflowPolicy>;
 export function policyFrom(value: WorkflowPolicy): Policy {
   const policy: Policy = {

@@ -12,6 +12,7 @@ import { PiWorkflow } from "../workflow/controller.js";
 import { XperClient } from "../bridge/xper-client.js";
 import { saveArtifact } from "../knowledge/artifacts.js";
 import { resolveAgent } from "../knowledge/delegate.js";
+import { knowledgeDefinition } from "../workflow/definition.js";
 
 const workspace = fileURLToPath(new URL("../../../..", import.meta.url));
 const fixtures = JSON.parse(
@@ -109,8 +110,47 @@ test("all phases run through the public bridge with fake execution, durable appr
     const before = await client.getRunStatus();
     assert.equal(Object.keys(before.run?.attempts ?? {}).length, 6);
     assert.equal(Object.keys(before.run?.artifacts ?? {}).length, 5);
+    assert.equal(before.workflow?.nodeId, "ready");
+    assert.equal(before.workflow?.status, "completed");
+    assert.notEqual(before.workflow?.instanceId, before.run?.run_id);
     assert(!JSON.stringify(before.timeline).includes("Given a name"));
     await client.waitForRecording();
+    assert(bridge);
+    const recorded = await new XperClient(bridge).getRunStatus(before.run?.run_id);
+    const definitions = recorded.timeline.filter((event) => event.type === "workflow.definition");
+    assert.equal(definitions.length, 2, "reloading repeats the same immutable definition");
+    for (const event of definitions) assert.deepEqual(event.data.definition, knowledgeDefinition);
+    const transitions = recorded.timeline.filter((event) => event.type === "workflow.transition");
+    assert.deepEqual(
+      transitions.map((event) => event.data.transitionId),
+      [
+        "gate.discovery.define",
+        "gate.define.design",
+        "gate.design.breakdown",
+        "gate.breakdown.plan",
+        "gate.plan.ready",
+      ],
+    );
+    for (const event of recorded.timeline) {
+      assert.equal(event.runId, before.run?.run_id);
+      assert.equal(event.data.instanceId, before.workflow?.instanceId);
+      assert.equal(event.data.definitionId, knowledgeDefinition.id);
+      assert.equal(event.data.definitionVersion, knowledgeDefinition.version);
+    }
+    assert.deepEqual(
+      recorded.timeline.filter((event) => event.type === "workflow.position").at(-1)?.data,
+      before.workflow,
+    );
+    assert.equal(
+      recorded.timeline.filter((event) => event.type === "workflow.completed").length,
+      1,
+    );
+    assert(!recorded.timeline.some((event) => event.type === "run.completed"));
+    const checkpoint = recorded.timeline.findLast((event) => event.type === "adapter.state")?.data
+      .state as Record<string, unknown>;
+    assert.equal(checkpoint.version, 2);
+    assert.equal(checkpoint.instanceId, before.workflow?.instanceId);
+    assert.equal(Object.hasOwn(checkpoint, "ready"), false);
     client.stopRecording();
     await bridge?.shutdown();
     bridge = undefined;

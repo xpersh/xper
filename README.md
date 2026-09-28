@@ -57,7 +57,8 @@ provided by the Rust service.
 - Phases are knowledge gates, not silos or a waterfall.
 - The coordinator governs the process; it does not act as a lead developer.
 - Agents communicate through artifacts and structured contracts.
-- Verify runs continuously alongside Implementation.
+- Each implementation increment receives independent verification of behavior,
+  regressions, scope, and simplicity.
 - A failure returns to its originating phase, not always to Implementation.
 - Model routing is deterministic and auditable by default.
 - Context policy prevents selection of a provider outside its allowlist;

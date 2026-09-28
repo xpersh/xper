@@ -153,7 +153,6 @@ strategies:
       breakdown.planner: fast
       plan.planner: reviewer
       implementation.driver: coder
-      implementation.navigator: reviewer
       verify.verifier: reviewer
       judgment_day.judge: judge
 ```
@@ -344,8 +343,7 @@ Initial recommendation:
 | Define | Strong product reasoning |
 | Design | High capability for risky changes |
 | Breakdown / Plan | Balanced model |
-| Implementation Driver | Local or inexpensive |
-| Navigator | Different from Driver when feasible |
+| Implementer (`implementation.driver`) | Local or inexpensive |
 | Verify | Independent of the implementer |
 | Judgment Day | The most reliable available model and a fresh context |
 | Coordinator | Stable; need not be the most expensive |

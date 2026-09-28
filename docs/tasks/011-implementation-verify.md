@@ -18,6 +18,13 @@ call it; the adapter selects and validates the available assignment. Completing
 a role may evaluate its gate but never launches another role automatically.
 Do not add `xper_deliver` or a separate activation command for each flow.
 
+The delivery loop is **Implementer -> Verifier**. The Implementer changes code
+and supplies tests/evidence; the Verifier independently checks behavior,
+regressions, scope, and unnecessary complexity without repairing the result.
+There is no Navigator assignment, approval gate, pair rotation, or extra review
+session between them. Keep `implementation.driver` as the Implementer's public
+role ID and `verify.verifier` for the Verifier; no identifier rename is needed.
+
 Reuse the existing attempt lifecycle, frozen routing, budgets, artifacts, local
 journal, and background recorder. Implementation and Verification retain their
 own small typed transitions and definition identities under RFC 0007; do not
@@ -31,14 +38,14 @@ snapshots, process leases, or an integration scheduler. Reject overlapping
 invocations. Interruption never authorizes taking a workspace from a surviving
 child; ambiguous ownership remains paused for explicit recovery.
 
-## XP-011.1 — Execute one Driver assignment
+## XP-011.1 — Execute one Implementer assignment
 
 - Status: `pending`
 - Depends on: XP-010
 - Example: after Plan, one delegation implements one increment and returns its
   local change and actual test result; the run remains open.
 
-Consume the sealed Plan and select its first eligible Driver assignment. Supply
+Consume the sealed Plan and select its first eligible Implementer assignment. Supply
 the criteria, accepted inputs, frozen model, and bounded execution time. Require
 explicit local test commands; record actual exit status and output references,
 the base and resulting local commit, and criterion evidence. Do not commit
@@ -47,6 +54,11 @@ unrelated files or push changes.
 Acceptance:
 
 - Knowledge continues through the same tool; no second public tool is needed.
+- Change Plan generation and admission together to require one Implementer and
+  one dependent Verifier per increment. Update the prompt, validators, schema,
+  fixtures, and contract tests consistently. Historical three-role Plans remain
+  inspectable and require replanning for execution; never rewrite sealed evidence
+  or fabricate a Navigator approval to make them executable.
 - Validate the supported handoff before sealing a new Plan so an unsupported
   plan remains correctable in Knowledge. A historical unsupported Plan produces
   a local diagnostic without pretending delivery has started.
@@ -56,33 +68,35 @@ Acceptance:
   Recovery preserves interrupted work and never reruns a child automatically.
 - Missing or unanswered Rust does not delay this new delegation path.
 
-Stop here: no Navigator, Verifier, next increment, rotation, or run closure.
+Stop here: Verifier execution, subsequent increments, and run closure remain
+later slices.
 
 ## XP-011.2 — Review and verify that increment
 
 - Status: `pending`
 - Depends on: XP-011.1
-- Example: separate calls run Navigator, then Verifier; rejection makes Driver
-  eligible for an explicit bounded retry.
+- Example: the next explicit delegation runs Verifier; rejection makes the
+  Implementer eligible for a bounded retry.
 
-Use fresh read-only Navigator and Verifier sessions for the exact Driver result.
-Keep the same checkout exclusively assigned while reviewing. Record its revision
-and detect changes to evaluated source; reviewers must not repair it. Host-owned
+Use one fresh read-only Verifier session for the exact implementation result.
+Keep the same checkout exclusively assigned while verifying. Record its revision
+and detect changes to evaluated source; the Verifier must not repair it. Host-owned
 tests run serially, with output references readable from the review context.
 Test commands that change evaluated source invalidate the evidence.
 
 Acceptance:
 
-- Navigator approval and independent Verify evidence identify the evaluated
-  revision; every criterion has evidence and required local tests pass.
+- Independent Verify evidence identifies the evaluated revision; every criterion
+  has evidence and required local tests pass. The same review checks regressions,
+  unrequested scope, and unnecessary complexity.
 - Rejection records a cause and evidence, invalidates affected approvals, and
-  permits Driver rework within existing attempt/time/cost limits.
+  permits Implementer rework within existing attempt/time/cost limits.
 - Cancellation, timeout, and interruption cannot advance a gate; retry does not
   refund budgets or reuse approvals for changed code.
 - Successful Verify marks only the increment verified, not the run accepted.
 
-Stop here: fixed pair identities; no Define/Design revisit, parallel work,
-general workspace manager, or additional review tool.
+Stop here: no Define/Design revisit, parallel work, general workspace manager,
+or additional reviewer/tool.
 
 ## XP-011.3 — Deliver remaining increments sequentially
 
@@ -132,7 +146,6 @@ feedback aggregation, or general reconciliation engine.
 
 ## Deferred work, not acceptance criteria for this group
 
-- Configurable pair rotation, after evaluating the fixed pair loop.
 - Concurrent increments, isolated workspace ownership, and dependency integration,
   as separately scoped work after sequential delivery is accepted.
 - Selective reconciliation, after conservative invalidation demonstrates a need.

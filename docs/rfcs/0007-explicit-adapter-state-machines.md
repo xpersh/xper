@@ -98,13 +98,13 @@ acceptance and run closure remain [XP-012](../tasks/012-judgment-day.md).
 ### Delivery staging revision — 2026-09-28
 
 [XP-011](../tasks/011-implementation-verify.md) implements this boundary in
-separately reviewed slices: one Driver, sequential Navigator/Verifier, subsequent
-increments, and then Knowledge feedback. Start with a fixed pair and one supplied
-checkout. Keep delegation through `xper_delegate`; the main Pi agent still
-decides when to invoke it. Separate flow definitions do not require separate
+separately reviewed slices: one Implementer, independent Verifier, subsequent
+increments, and then Knowledge feedback. Use one supplied checkout and no
+Navigator or pair rotation. Keep delegation through `xper_delegate`; the main
+Pi agent still decides when to invoke it. Separate flow definitions do not require separate
 public tools or duplicate execution, persistence, and telemetry runtimes.
 
-Concurrent instances, managed workspace isolation, role rotation, and selective
+Concurrent instances, managed workspace isolation, and selective
 Plan reconciliation remain future capabilities. Do not implement them merely to
 make the first flow extensible. Initial reconciliation conservatively invalidates
 old approvals and requires an explicit continuation decision; it does not need a

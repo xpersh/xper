@@ -67,7 +67,7 @@ Stop here: closure does not merge, push, deploy, or publish changes.
 
 - Status: `pending`
 - Depends on: XP-012.2 and XP-011.4
-- Example: `REWORK_IMPLEMENTATION` makes Driver eligible again;
+- Example: `REWORK_IMPLEMENTATION` makes the Implementer eligible again;
   `REVISIT_DESIGN` and `REDEFINE` use the Knowledge handoff.
 
 Acceptance:

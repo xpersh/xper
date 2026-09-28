@@ -45,7 +45,8 @@ The remaining phases below describe the product direction.
 ## XP principles as invariants
 
 - **Test-first:** each increment starts with observable examples or tests.
-- **Pair programming:** Driver and Navigator collaborate and can exchange roles.
+- **Independent verification:** an Implementer produces the change; a separate
+  Verifier checks behavior, regressions, scope, and simplicity.
 - **Simple design:** complexity for hypothetical requirements is not accepted.
 - **Continuous integration:** changes are integrated frequently.
 - **Continuous refactoring:** part of Implementation, not a later phase.
@@ -102,7 +103,7 @@ Examples:
 | Define | What does done mean? | Goal, scope, exclusions, criteria, and examples | The outcome is observable and testable |
 | Design | What is the simplest viable solution? | Design, interfaces, alternatives, risks, and decisions | The solution is feasible, understandable, and reversible |
 | Breakdown | How do we obtain small increments? | Vertical stories, dependencies, and test cases | Each unit can be implemented and verified independently |
-| Plan | Who does what, in what order, and with which limits? | Work DAG, pairs, workspaces, budgets, and integration | There are no ownership conflicts or hidden dependencies |
+| Plan | Who does what, in what order, and with which limits? | Work DAG, assignments, workspaces, budgets, and integration | There are no ownership conflicts or hidden dependencies |
 | Implementation | Can we produce the increment with immediate feedback? | Code, tests, commits, and local decisions | Local tests pass and the change can be integrated |
 | Verify | Does it meet the contract without breaking existing behavior? | Independent acceptance, regression, and quality evidence | Every criterion has evidence |
 | Judgment Day | Should we actually accept this result? | Verdict and delivery recommendation | `accept`, `accept_with_debt`, `rework`, `reject`, or `human_decision` |
@@ -135,13 +136,17 @@ domain decisions based solely on its own preference.
 | Product / Customer proxy | Turn intent into observable behavior |
 | Designer | Propose the minimum design and record decisions |
 | Story slicer / Planner | Create vertical increments and the execution plan |
-| Driver | Implement the change with test-first development |
-| Navigator | Challenge, review, and maintain focus on simplicity and tests |
-| Verifier | Validate independently without fixing the code under evaluation |
+| Implementer | Implement the change with tests and criterion evidence |
+| Verifier | Independently check behavior, regressions, scope, and simplicity without fixing the evaluated code |
 | Judge | Issue the final verdict from a clean context |
 
 Judge should receive the intent, criteria, diff, decisions, and evidence but
 does not need to inherit the entire conversation. This reduces confirmation bias.
+
+Delivery uses Implementer -> Verifier, with explicit delegation for each role.
+It does not require a Navigator or role rotation. The Implementer retains the
+public identifier `implementation.driver`; the existing three-role Plan contract
+will be updated in [XP-011.1](../tasks/011-implementation-verify.md#xp-0111--execute-one-implementer-assignment).
 
 ## Domain concepts
 
@@ -235,6 +240,5 @@ The current separation of core, protocol, and adapters is documented in
 - Exact integration and conflict-resolution policy.
 - Artifact format and versioning.
 - Initial context, cost, time, and attempt budgets.
-- Criteria for rotating Driver and Navigator.
 - Strategy for identifying the smallest vertical increment.
 - Requirements for any future external execution library.

@@ -45,7 +45,7 @@ this slice is complete.
 | XP-008 | [First vertical slice](008-vertical-slice.md) | XP-003–XP-007 | End-to-end delegated Discovery |
 | XP-009 | [Multimodel routing](009-multimodel-routing.md) | XP-006, XP-008 | Effective profiles and contexts |
 | XP-010 | [Discovery to Plan](010-discovery-to-plan.md) | XP-008, XP-009 | First half of the XP workflow |
-| XP-011 | [Sequential Implementation and Verify](011-implementation-verify.md) | XP-010 | Driver, reviews, sequential increments, then Knowledge feedback |
+| XP-011 | [Sequential Implementation and Verify](011-implementation-verify.md) | XP-010 | Implementer, Verifier, sequential increments, then Knowledge feedback |
 | XP-012 | [Judgment and closure](012-judgment-day.md) | XP-011.3; later feedback needs XP-011.4 | Judge report, explicit closure, then feedback and debt decisions |
 | XP-013 | [Metrics and inspection](013-metrics-inspection.md) | Existing recording and XP-010; acceptance metrics need XP-012.2 | Single-run inspection, safe export, formulas, then comparison |
 | XP-014 | [Packaging and compatibility](014-packaging-compatibility.md) | XP-006, XP-010 | One installable target, compatibility, separate ports, then maintenance |
@@ -128,8 +128,9 @@ The RFCs describe product direction; they do not expand a selected slice's scope
 - Keep flow-specific pure decisions, but reuse existing execution, checkpoint,
   artifact, budget, and recording mechanisms. Extract only proven duplication;
   do not replace them with a generic workflow engine.
-- Start with sequential delivery and a fixed pair. The deferred sections retain
-  rotation, concurrency, fan-out/fan-in, and richer reconciliation as future work.
+- Delivery uses one Implementer followed by one independent Verifier, with no
+  Navigator or pair rotation. Concurrency, fan-out/fan-in, and richer reconciliation
+  remain future work in the deferred sections.
 - Rust remains configuration and telemetry. No recording response, inspection
   query, metric, or visualization may become an execution or recovery guard.
 

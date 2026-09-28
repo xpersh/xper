@@ -105,6 +105,13 @@ or worktrees are allocated by Plan. Pair roles sharing a workspace must have an
 explicit order. Future implementation scheduling must honor these edges and the
 run concurrency limit.
 
+The three-role requirement above describes the currently implemented contract.
+The planned [XP-011.1](tasks/011-implementation-verify.md#xp-0111--execute-one-implementer-assignment)
+simplifies new Plans to one Implementer (`implementation.driver`) and one
+dependent Verifier (`verify.verifier`). That slice must update the prompt,
+validation, schema, and fixtures together; this design decision alone does not
+change existing artifacts or make delivery executable.
+
 ## Limits and human gates
 
 Configure the normal global, project, or local configuration scopes:

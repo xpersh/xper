@@ -1,46 +1,82 @@
-# XP-015: Read-only workflow visualization
+# XP-015: Read-only workflow inspection
 
 - Status: `pending`
 - Milestone: M4
-- Dependencies: XP-010 and the definition/observation contract in RFC 0007
+- Entry dependency: XP-010 and the RFC 0007 definition contract
+- Next slice: XP-015.1
 
-## Goal
+## Outcome and boundary
 
-Make workflow topology and reported execution understandable without moving
-workflow control into the UI or Rust recorder.
+Show declared topology and reported execution in small independent deliveries.
+Follow the [iteration rules](README.md#iteration-rules-for-xp-011-onward).
+This group does not require delivery, final judgment, or every metric.
 
-## Scope
+The first surface is a local generated HTML/SVG document opened in a browser,
+using a supplied versioned definition/export. No server, hosting, live
+connection, application shell, statechart runtime, or UI framework is required.
+A later product UI is a separate decision informed by these views.
 
-- Render the exact adapter definition ID and version associated with an instance.
-- Show declared nodes and edges, current reported position, visits, transitions,
-  attempt outcomes, and evidence references.
-- Distinguish possible transitions from paths actually taken and blocked gates.
-- Support multiple flow instances without assuming a single global phase.
-- Show recording freshness, pending/incomplete history, and unsupported versions.
-- Choose the presentation surface when implementing this task; the current
-  definition contract does not prescribe a web dashboard or UI library.
+The view never evaluates guards, executes reducers, approves gates, schedules
+work, or calls agents. Rust records opaque adapter facts without interpreting
+Knowledge's phase names.
 
-## Acceptance criteria
+## XP-015.1 — Draw one recorded definition
 
-- Rendering consumes versioned definition data; it does not infer topology from
-  phase order or require a hardcoded knowledge-flow diagram.
-- Adding a synthetic second flow with different node names does not require
-  changing the knowledge phase enum or the Rust recorder.
-- A run with parallel instances and a revisit retains distinct instance,
-  visit, and attempt identities in the view.
-- Missing definitions and incomplete or legacy histories remain visibly unknown;
-  the view never substitutes the latest definition for a historical version.
-- The UI performs no transitions, approvals, scheduling, or agent execution.
-- Loading or failing the view cannot affect a running Pi workflow.
-- Default output excludes prompts, artifact contents, credentials, and user code.
+- Status: `pending`
+- Depends on: XP-010
+- Example: supply a recorded Knowledge definition and obtain a diagram showing
+  its actual version, nodes, and declared edges.
 
-## Out of scope
+Acceptance:
 
-- Visual workflow editing or remote execution commands.
-- Implementing the future Implementation/Verification workflows.
-- Metrics formula and comparison work owned by XP-013.
+- Render the supplied definition, without hardcoded phase order or deriving
+  possible edges from observed transitions.
+- A synthetic definition with different node names renders through the same path.
+- Missing/unsupported definitions produce a diagnostic, never substitution of
+  the newest graph or guessed historical topology.
+- The output works offline, reads no artifact contents, and modifies no run.
 
-## Design reference
+Stop here: one graph; no execution overlay, dashboard, polling, or graph editor.
 
-[RFC 0007](../rfcs/0007-explicit-adapter-state-machines.md) separates executable
-workflow definitions, instance state, observations, and presentation.
+## XP-015.2 — Show one instance's observed path
+
+- Status: `pending`
+- Depends on: XP-015.1 and the safe export from XP-013.2
+- Example: display a revisit, separating possible edges from reported traversals
+  and labeling the last observed position.
+
+Acceptance:
+
+- Match the exact definition ID/version and preserve visit/transition identities.
+  Repeated reports do not create invented traversals.
+- Show observation time and incomplete/unsupported history. An exported snapshot
+  cannot claim knowledge of unsent events or current live execution.
+- Distinguish reported blocked gates, completed instances, and final run closure;
+  infer no approvals or execution outcomes.
+
+Stop here: no subscriptions, metrics formulas, or workflow controls.
+
+## XP-015.3 — Inspect attempts and additional instances
+
+- Status: `pending`
+- Depends on: XP-015.2
+- Example: select another recorded instance and inspect its attempts, outcomes,
+  and evidence references without mixing them with the first.
+
+Acceptance:
+
+- A fixture with different definitions and overlapping attempts keeps run,
+  instance, visit, and attempt identities separate; add no global phase enum.
+- Simple local navigation reveals metadata and references. Prompts, code,
+  credentials, and artifact contents are not loaded by default.
+- A damaged instance is unavailable without corrupting another view.
+- Generating, opening, or failing the view cannot affect Pi execution.
+
+Stop here: inspecting concurrent fixtures does not authorize implementing
+concurrent execution in XP-011.
+
+## Deferred work
+
+Live UI integration, large-graph layout optimization, metric overlays, timelines,
+profile comparisons, and remote sharing need separate tasks. Visual editing
+and remote execution controls are outside this design.

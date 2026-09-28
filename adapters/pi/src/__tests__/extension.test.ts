@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { createXperExtension } from "../extension.js";
 import { PiWorkflow } from "../workflow/controller.js";
+import { XperSession } from "../pi/session.js";
 import { XperClient } from "../bridge/xper-client.js";
 import { connectBridge } from "../bridge/client.js";
 import { PiObservations } from "../pi/observations.js";
@@ -87,9 +88,12 @@ function fakePi(cwd?: string) {
       assert(handler, `missing ${event} handler`);
       await handler(payload, ctx);
     },
-    status() {
+    async connected() {
+      await until(() => statuses.at(-1) === "xper connected");
+    },
+    async status() {
       assert(command);
-      command("status", ctx);
+      await command("status", ctx);
       return messages.at(-1) ?? "";
     },
     async command(args: string) {
@@ -113,12 +117,15 @@ function pidFrom(status: string): number {
   return Number(match[1]);
 }
 
-async function until(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+async function until(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!predicate() && Date.now() < deadline) {
+  while (!(await predicate()) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert(predicate(), "condition was not reached");
+  assert(await predicate(), "condition was not reached");
 }
 
 test("Pi extension connects, reports versions, forwards errors, and does not duplicate a bridge", async () => {
@@ -127,29 +134,46 @@ test("Pi extension connects, reports versions, forwards errors, and does not dup
   createXperExtension(harness.pi, { command: binary });
 
   await harness.emit("session_start");
-  const first = harness.status();
+  await harness.connected();
+  const first = await harness.status();
   assert.match(first, /adapter pi 0\.1\.0; protocol 1; bridge connected/);
   const firstPid = pidFrom(first);
   await harness.emit("session_start");
-  assert.equal(pidFrom(harness.status()), firstPid);
+  await harness.connected();
+  assert.equal(pidFrom(await harness.status()), firstPid);
   await harness.emit("tool_execution_end", {
     isError: true,
     toolName: "bash",
     toolCallId: "call-1",
   });
   await harness.emit("session_compact_failed");
-  assert.match(harness.status(), /connected/);
+  assert.match(await harness.status(), /connected/);
 
   await harness.emit("session_shutdown");
   await harness.emit("session_shutdown");
   assert.equal(harness.statuses.at(-1), undefined);
-  assert.throws(() => process.kill(firstPid, 0), { code: "ESRCH" });
+  await until(() => {
+    try {
+      process.kill(firstPid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 
   await harness.emit("session_start");
-  const secondPid = pidFrom(harness.status());
+  await harness.connected();
+  const secondPid = pidFrom(await harness.status());
   assert.notEqual(secondPid, firstPid);
   await harness.emit("session_shutdown");
-  assert.throws(() => process.kill(secondPid, 0), { code: "ESRCH" });
+  await until(() => {
+    try {
+      process.kill(secondPid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 });
 
 test("xper starts and resumes without an agent manager, with an objective dialog or arguments", async () => {
@@ -160,6 +184,7 @@ test("xper starts and resumes without an agent manager, with an objective dialog
     createXperExtension(harness.pi, { command: binary });
     try {
       await harness.emit("session_start");
+      await harness.connected();
       const started = await harness.command(invocation);
       assert.match(started, /Started workflow .*; phase discovery/);
       assert.match(started, /xper_delegate/);
@@ -168,7 +193,7 @@ test("xper starts and resumes without an agent manager, with an objective dialog
       assert(runId);
       const resumed = await harness.command("start Continue this project");
       assert(resumed.includes(`Resumed workflow ${runId}; phase discovery`));
-      assert.match(harness.status(), /phase discovery/);
+      assert.match(await harness.status(), /phase discovery/);
     } finally {
       await harness.emit("session_shutdown");
       rmSync(directory, { recursive: true, force: true });
@@ -185,10 +210,11 @@ test("xper does not start a workflow after cancelled or empty input or without d
     createXperExtension(harness.pi, { command: binary });
     try {
       await harness.emit("session_start");
+      await harness.connected();
       const result = await harness.command(
         scenario === "help" ? "help" : scenario === "invalid-subcommand" ? "advance extra" : "",
       );
-      assert.match(harness.status(), /no run/);
+      assert.match(await harness.status(), /no run/);
       assert.equal(harness.prompts.length, scenario === "cancel" || scenario === "empty" ? 1 : 0);
       if (scenario === "no-ui") assert.match(result, /Provide an objective/);
       if (scenario === "empty") assert.match(result, /objective is required/);
@@ -204,22 +230,27 @@ test("Pi session stays usable after a bridge crash", async () => {
   const harness = fakePi();
   createXperExtension(harness.pi, { command: binary });
   await harness.emit("session_start");
-  const pid = pidFrom(harness.status());
+  await harness.connected();
+  const pid = pidFrom(await harness.status());
   process.kill(pid, "SIGKILL");
   await until(() => harness.statuses.at(-1) === "xper recorder offline");
-  assert.match(harness.status(), /bridge offline/);
+  assert.match(await harness.status(), /bridge offline/);
   await harness.emit("session_shutdown");
   await harness.emit("session_start");
-  assert.match(harness.status(), /bridge connected/);
+  await harness.connected();
+  assert.match(await harness.status(), /bridge connected/);
   await harness.emit("session_shutdown");
 });
 
-test("missing bridge binary gives an actionable error without failing session startup", async () => {
+test("missing bridge reports an actionable warning while a new local workflow starts", async () => {
   const harness = fakePi();
   createXperExtension(harness.pi, { command: resolve(workspace, "missing-xper-binary") });
   await harness.emit("session_start");
-  assert.match(harness.status(), /binary not found.*cargo build -p xper-cli/);
-  assert.match(await harness.command(""), /binary not found/);
+  await until(async () => (await harness.status()).includes("binary not found"));
+  assert.match(await harness.status(), /binary not found.*cargo build -p xper-cli/);
+  const result = await harness.command("Start without Rust");
+  assert.match(result, /Started workflow .*phase discovery/);
+  assert.match(result, /Configuration: Pi defaults/);
   assert.equal(harness.prompts.length, 0);
   await harness.emit("session_shutdown");
 });
@@ -229,7 +260,8 @@ test("incompatible bridge gives rebuild guidance", async () => {
   const reply = `process.stdin.once("data", () => process.stdout.write(JSON.stringify({jsonrpc:"2.0",protocolVersion:"1",id:"adapter-1",result:{protocolVersion:"2",bridgeVersion:"old"}})+"\\n"))`;
   createXperExtension(harness.pi, { command: process.execPath, args: ["-e", reply] });
   await harness.emit("session_start");
-  assert.match(harness.status(), /incompatible xper bridge.*Rebuild xper/);
+  await until(async () => (await harness.status()).includes("incompatible xper bridge"));
+  assert.match(await harness.status(), /incompatible xper bridge.*Rebuild xper/);
   await harness.emit("session_shutdown");
 });
 
@@ -266,6 +298,7 @@ test("records generic Pi tool signals without prompts or output", async () => {
   createXperExtension(harness.pi, { command: binary, observationsFile: journal });
   try {
     await harness.emit("session_start", { reason: "startup" });
+    await harness.connected();
     await harness.emit("tool_execution_start", {
       toolName: "bash",
       toolCallId: "call-error",
@@ -289,7 +322,7 @@ test("records generic Pi tool signals without prompts or output", async () => {
       isError: false,
       result: { details: { status: "done", isError: false, exitCode: 0, output: "secret" } },
     });
-    assert.match(harness.status(), /tools observed: started 2, completed 1, failed 1/);
+    assert.match(await harness.status(), /tools observed: started 2, completed 1, failed 1/);
     await harness.emit("session_shutdown", { reason: "quit" });
     const text = readFileSync(journal, "utf8");
     assert.doesNotMatch(text, /secret/);
@@ -387,6 +420,7 @@ process.stdin.once("data", () => {
       const harness = fakePi(cwd);
       createXperExtension(harness.pi, { command: binary, observationsFile: journal });
       await harness.emit("session_start");
+      await harness.connected();
       assert.match(
         await harness.command("Explore this project"),
         /Started workflow .*; phase discovery/,
@@ -395,7 +429,8 @@ process.stdin.once("data", () => {
       if (scenario === "succeeded") {
         await harness.emit("session_shutdown");
         await harness.emit("session_start");
-        assert.match(harness.status(), /phase discovery/);
+        await harness.connected();
+        assert.match(await harness.status(), /phase discovery/);
       }
       process.env.XPER_FAKE_OUTCOME =
         scenario === "succeeded" || scenario === "failed" ? scenario : "waiting";
@@ -407,6 +442,15 @@ process.stdin.once("data", () => {
       );
       assert.equal(result.details.outcome, scenario);
       assert.equal(result.details.phase, scenario === "succeeded" ? "define" : "discovery");
+      await until(() => {
+        const recorded = JSON.parse(
+          execFileSync(binary, ["status", "--json"], { cwd, encoding: "utf8" }),
+        ) as { run: { phase?: string; metrics?: { attemptsFinished: number } } | null };
+        return (
+          recorded.run?.metrics?.attemptsFinished === 1 &&
+          recorded.run.phase === (scenario === "succeeded" ? "define" : "discovery")
+        );
+      });
       const status = JSON.parse(
         execFileSync(binary, ["status", "--json"], { cwd, encoding: "utf8" }),
       ) as {
@@ -427,7 +471,7 @@ process.stdin.once("data", () => {
         status.timeline.filter((event) => event.type === "artifact.registered").length,
         scenario === "succeeded" ? 1 : 0,
       );
-      assert.match(harness.status(), new RegExp(`attempts ${scenario}`));
+      assert.match(await harness.status(), new RegExp(`attempts ${scenario}`));
       if (scenario === "succeeded") {
         assert(status.timeline.some((event) => event.type === "artifact.registered"));
         assert(status.timeline.some((event) => event.type === "gate.failed"));
@@ -439,7 +483,8 @@ process.stdin.once("data", () => {
         assert.doesNotMatch(JSON.stringify(status.timeline), /inspect evidence|Evidence found/);
         await harness.emit("session_shutdown");
         await harness.emit("session_start");
-        assert.match(harness.status(), /phase define/);
+        await harness.connected();
+        assert.match(await harness.status(), /phase define/);
       } else {
         assert.match(await harness.command("advance"), /"advanced":false/);
       }
@@ -485,25 +530,30 @@ test("bridge crash interrupts an attempt and permits retry on the same assignmen
   execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
   const directory = mkdtempSync(join(tmpdir(), "xper-retry-"));
   const manifest = { adapter: "pi", adapterVersion: "0.1.0", capabilities: { subagents: true } };
+  const workflows: PiWorkflow[] = [];
   try {
     const first = await connectBridge(manifest, { command: binary });
     await first.client.request("session.attach", { sessionId: "s1", cwd: directory, mode: "rpc" });
     const firstWorkflow = new PiWorkflow(new XperClient(first.client), directory, "s1");
+    workflows.push(firstWorkflow);
     await firstWorkflow.startRun("retry after interruption");
     const assigned = await firstWorkflow.startAssignment();
+    await firstWorkflow.waitForRecording();
+    await firstWorkflow.stopRecording();
     const closed = new Promise<void>((resolve) =>
       first.client.process.once("close", () => resolve()),
     );
     first.client.close();
     await closed;
     const second = await connectBridge(manifest, { command: binary });
+    const workflow = new PiWorkflow(new XperClient(second.client), directory, "s1");
+    workflows.push(workflow);
     try {
       await second.client.request("session.attach", {
         sessionId: "s1",
         cwd: directory,
         mode: "rpc",
       });
-      const workflow = new PiWorkflow(new XperClient(second.client), directory, "s1");
       const recovered = await workflow.getRunStatus();
       const projection = recovered.run as { attempts: Record<string, { outcome: string }> };
       assert.equal(projection.attempts[assigned.attemptId as string]?.outcome, "interrupted");
@@ -520,9 +570,11 @@ test("bridge crash interrupts an attempt and permits retry on the same assignmen
         "discovery",
       );
     } finally {
+      await workflow.stopRecording();
       await second.client.shutdown();
     }
   } finally {
+    await Promise.all(workflows.map((workflow) => workflow.stopRecording()));
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -533,6 +585,8 @@ test("two Pi sessions stay isolated while one run has parallel delegations", asy
   const manifest = { adapter: "pi", adapterVersion: "0.1.0", capabilities: { subagents: true } };
   const first = await connectBridge(manifest, { command: binary });
   const second = await connectBridge(manifest, { command: binary });
+  const firstWorkflow = new PiWorkflow(new XperClient(first.client), directory, "parallel-1");
+  const secondWorkflow = new PiWorkflow(new XperClient(second.client), directory, "parallel-2");
   try {
     await Promise.all([
       first.client.request("session.attach", {
@@ -546,8 +600,6 @@ test("two Pi sessions stay isolated while one run has parallel delegations", asy
         mode: "rpc",
       }),
     ]);
-    const firstWorkflow = new PiWorkflow(new XperClient(first.client), directory, "parallel-1");
-    const secondWorkflow = new PiWorkflow(new XperClient(second.client), directory, "parallel-2");
     const [one, two] = await Promise.all([
       firstWorkflow.startRun("first"),
       secondWorkflow.startRun("second"),
@@ -559,6 +611,7 @@ test("two Pi sessions stay isolated while one run has parallel delegations", asy
     ]);
     assert.equal((statusOne.run as { run_id: string }).run_id, one.runId);
     assert.equal((statusTwo.run as { run_id: string }).run_id, two.runId);
+    await Promise.all([firstWorkflow.waitForRecording(), secondWorkflow.waitForRecording()]);
     const inspected = JSON.parse(
       execFileSync(binary, ["status", "--json", "--run", one.runId as string], {
         cwd: directory,
@@ -613,6 +666,7 @@ test("two Pi sessions stay isolated while one run has parallel delegations", asy
     );
     assert.equal(Object.keys((otherSessionStatus.run as { attempts: object }).attempts).length, 1);
   } finally {
+    await Promise.all([firstWorkflow.stopRecording(), secondWorkflow.stopRecording()]);
     await Promise.allSettled([first.client.shutdown(), second.client.shutdown()]);
     rmSync(directory, { recursive: true, force: true });
   }
@@ -637,17 +691,24 @@ process.stdin.on("end",()=>process.exit(0));
   createXperExtension(harness.pi, { command: binary });
   try {
     await harness.emit("session_start");
+    await harness.connected();
     await harness.command("Start while recorder is available");
-    process.kill(pidFrom(harness.status()), "SIGKILL");
+    process.kill(pidFrom(await harness.status()), "SIGKILL");
     await until(() => harness.statuses.at(-1) === "xper recorder offline");
     const result = await harness.delegate({ task: "Keep working offline" });
     assert.equal(result.details.outcome, "succeeded");
     assert.equal(result.details.phase, "define");
-    assert.match(harness.status(), /telemetry:.*pending/);
+    assert.match(await harness.status(), /telemetry:.*pending/);
     await harness.emit("session_shutdown");
     await harness.emit("session_start");
-    assert.match(harness.status(), /phase define/);
-    assert.doesNotMatch(harness.status(), /telemetry:/);
+    await harness.connected();
+    assert.match(await harness.status(), /phase define/);
+    await until(() => {
+      const recorded = JSON.parse(
+        execFileSync(binary, ["status", "--json"], { cwd: directory, encoding: "utf8" }),
+      ) as { run: { phase?: string; metrics?: { attemptsFinished: number } } | null };
+      return recorded.run?.phase === "define" && recorded.run.metrics?.attemptsFinished === 1;
+    });
     const saved = JSON.parse(
       execFileSync(binary, ["status", "--json"], { cwd: directory, encoding: "utf8" }),
     ) as { run: { phase: string; metrics: { attemptsFinished: number } } };
@@ -657,6 +718,134 @@ process.stdin.on("end",()=>process.exit(0));
     await harness.emit("session_shutdown");
     if (previous === undefined) delete process.env.XPER_PI_COMMAND;
     else process.env.XPER_PI_COMMAND = previous;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("workflow start, delegation and advancement do not await a missing or unresponsive Rust process", async () => {
+  const previous = process.env.XPER_PI_COMMAND;
+  try {
+    for (const scenario of ["missing", "unresponsive"] as const) {
+      const directory = mkdtempSync(join(tmpdir(), "xper-independent-pi-"));
+      const child = join(directory, "fake-pi.mjs");
+      writeFileSync(
+        child,
+        `#!/usr/bin/env node
+process.stdin.once("data",()=>{
+process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:"# Brief\\nIndependent evidence"}]}})+"\\n");
+process.stdout.write(JSON.stringify({type:"agent_settled"})+"\\n");
+process.stdin.on("end",()=>process.exit(0));
+});`,
+      );
+      chmodSync(child, 0o755);
+      process.env.XPER_PI_COMMAND = child;
+      const harness = fakePi(directory);
+      createXperExtension(
+        harness.pi,
+        scenario === "missing"
+          ? { command: join(directory, "missing-rust") }
+          : {
+              command: process.execPath,
+              args: ["-e", "process.stdin.resume()"],
+              requestTimeoutMs: 10000,
+            },
+      );
+      try {
+        const start = performance.now();
+        await harness.emit("session_start");
+        assert.match(
+          await harness.command("Work independently"),
+          /Started workflow .*phase discovery/,
+        );
+        assert.match(await harness.command("advance"), /"advanced":false/);
+        const result = await harness.delegate({ task: "Inspect synthetic evidence" });
+        assert.equal(result.details.outcome, "succeeded");
+        assert.equal(result.details.phase, "define");
+        assert(
+          performance.now() - start < 2000,
+          "workflow must finish before the 10-second bridge timeout",
+        );
+        assert.match(await harness.status(), /configuration: Pi defaults/);
+      } finally {
+        await harness.emit("session_shutdown");
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    if (previous === undefined) delete process.env.XPER_PI_COMMAND;
+    else process.env.XPER_PI_COMMAND = previous;
+  }
+});
+
+test("offline new runs use the prepared workspace snapshot and report that it is cached", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "xper-cached-configuration-"));
+  mkdirSync(join(directory, ".xper", "pi"), { recursive: true });
+  writeFileSync(
+    join(directory, ".xper", "pi", "configuration.json"),
+    JSON.stringify({
+      version: 1,
+      configuration: {
+        routing: {
+          profile: "prepared",
+          context: "test",
+          routes: {
+            "discovery.explorer": [
+              { context: "test", provider: "synthetic", model: "prepared-model", thinking: "off" },
+            ],
+          },
+        },
+        adapterConfig: { maxAttempts: 1 },
+      },
+    }),
+  );
+  const harness = fakePi(directory);
+  createXperExtension(harness.pi, { command: join(directory, "missing-rust") });
+  try {
+    await harness.emit("session_start");
+    const started = await harness.command("Use cached preparation");
+    assert.match(started, /Configuration: cached configuration \(profile prepared\)/);
+    const stateFiles = readdirSync(join(directory, ".xper", "pi")).filter(
+      (file) => file !== "configuration.json" && file.endsWith(".json"),
+    );
+    assert.equal(stateFiles.length, 1);
+    const state = JSON.parse(
+      readFileSync(join(directory, ".xper", "pi", stateFiles[0] ?? ""), "utf8"),
+    ) as { state: { routing: { profile: string }; policy: { maxAttempts: number } } };
+    assert.equal(state.state.routing.profile, "prepared");
+    assert.equal(state.state.policy.maxAttempts, 1);
+  } finally {
+    await harness.emit("session_shutdown");
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reconnection preserves a live attempt and a changed Pi session gets a separate controller", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "xper-rebind-controller-"));
+  const harness = fakePi(directory);
+  const session = new XperSession({ command: binary });
+  try {
+    await session.start(harness.ctx, "startup");
+    const workflow = session.workflow;
+    assert(workflow);
+    await until(() => session.connection !== undefined);
+    await workflow.startRun("Keep a running attempt");
+    const attempt = await workflow.startAssignment();
+    const firstConnection = session.connection;
+    assert(firstConnection);
+    firstConnection.client.close();
+    await until(() => session.error !== undefined);
+    await session.start(harness.ctx, "reconnect");
+    assert.equal(session.workflow, workflow);
+    await until(() => session.connection !== undefined);
+    assert.equal((await workflow.getRunStatus()).run?.attempts[attempt.attemptId]?.outcome, null);
+    await workflow.finishAttempt({ attemptId: attempt.attemptId, outcome: "failed" });
+    harness.ctx.sessionManager.getSessionId = () => "a-different-pi-session";
+    await session.start(harness.ctx, "changed");
+    assert.notEqual(session.workflow, workflow);
+    await until(() => session.connection?.sessionId === "a-different-pi-session");
+    assert.equal((await session.workflow?.getRunStatus())?.run, null);
+  } finally {
+    await session.stop(harness.ctx, "test");
     rmSync(directory, { recursive: true, force: true });
   }
 });

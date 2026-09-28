@@ -32,6 +32,9 @@ Recording validates envelope version, identity, session ownership, and duplicate
 consistency. Repeated identical events are safe; conflicting identities are
 errors. Rebuilding a projection must not make execution decisions or fabricate
 completion after a crash. Missing tokens, cost, or outcomes remain unknown.
+An append acknowledgement is evidence of recording, never permission for an
+adapter to continue. Recording and configuration APIs may fail independently;
+their callers must not make Rust availability a prerequisite for local execution.
 
 Configuration resolves model selections and passes adapter configuration
 through. It does not select the next role or interpret the adapter's workflow

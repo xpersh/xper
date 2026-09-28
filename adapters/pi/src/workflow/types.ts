@@ -1,4 +1,4 @@
-import type { ModelSelection, RoutingSnapshot, AvailableModel } from "../bridge/xper-client.js";
+import type { ModelSelection, RoutingSnapshot } from "../bridge/xper-client.js";
 export type { ModelSelection, RoutingSnapshot, AvailableModel } from "../bridge/xper-client.js";
 
 export type AttemptOutcome = "succeeded" | "failed" | "cancelled" | "timed_out";
@@ -65,6 +65,7 @@ export type RunAdvanced = { ready?: boolean; humanArtifactId?: string } & (
 /** Adapter-owned workflow projection, stored as an opaque checkpoint by Xper. */
 export interface RunSummary {
   run_id: string;
+  routing?: RoutingSnapshot | null;
   visits: Array<{ phase: string }>;
   attempts: Record<string, { outcome: AttemptOutcome | "interrupted" | null }>;
   artifacts: Record<string, unknown>;
@@ -74,7 +75,7 @@ export interface RunSummary {
 
 export interface RunStatus {
   run: RunSummary | null;
-  /** Generic recorded facts; workflow recovery uses only versioned Pi checkpoints. */
+  /** Locally observed facts; complete shared history is queried through XperClient. */
   timeline: unknown[];
   durability: "persistent" | "volatile";
   degradedReason?: string | null;
@@ -83,11 +84,7 @@ export interface RunStatus {
 /** Workflow operations available to adapter actions, independent of the transport. */
 export interface WorkflowClient {
   recordUsage?(attemptId: string, usage: ModelUsage): Promise<void>;
-  startRun(
-    objective: string,
-    models?: AvailableModel[],
-    policy?: WorkflowPolicy,
-  ): Promise<RunStarted>;
+  startRun(objective: string, policy?: WorkflowPolicy): Promise<RunStarted>;
   inspectProfile(): Promise<RoutingSnapshot | null>;
   startAssignment(assignmentId?: string): Promise<AssignmentStarted>;
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;

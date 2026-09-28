@@ -9,6 +9,11 @@ gates, execution-plan validator, or budget admission policy.
 this boundary and the source-of-truth guarantees. The
 [Pi guide](../adapters/pi/docs/architecture.md) describes the executable workflow.
 
+Configuration preparation and recording delivery are background services to
+Pi. Workflow start, execution, local status, and recovery do not await Rust.
+The core may reject an invalid event or fail to respond without preventing Pi
+from proceeding; its response determines delivery status only.
+
 ```mermaid
 flowchart LR
     Adapter[Adapter workflow] --> Bridge[JSONL bridge]
@@ -108,6 +113,12 @@ connection lifetime belong to infrastructure and composition. Responses
 expose whether recording is persistent or volatile; an acknowledgement from
 volatile storage does not promise survival after process exit.
 
+Pi's outbox delivers independently of execution, so this store can lag the
+live workflow. Rust rejection cannot undo an observed action or authorize its
+retry. Pi retains and exposes rejected events separately from deliverable
+pending records. The local adapter checkpoint is sufficient for workflow
+recovery; a remote history query is not a prerequisite.
+
 The original workflow tables remain available for inspection. Legacy events
 are exposed with a `legacy.` type prefix and their original JSON data; the
 run is marked legacy. No Rust workflow state machine is needed to read them.
@@ -119,6 +130,9 @@ and model/thinking compatibility checks. The existing `workflow.knowledge`
 configuration is passed to Pi as opaque adapter configuration for compatibility.
 Pi validates and applies its budgets and human gates. Core configuration must
 not decide the next role or reinterpret those workflow settings.
+Pi prepares resolved configuration asynchronously and freezes the latest
+available snapshot, or visible defaults, at run start. Late configuration
+responses do not mutate that active run.
 
 ## Extending the core
 

@@ -36,6 +36,19 @@ never rerun an agent merely because its event acknowledgement was lost. A
 recording failure must not turn successful execution into failed execution.
 Report pending or volatile recording honestly and retain recoverable events.
 
+No workflow operation may await Rust, including the first session/run, status,
+or recovery. Construct local workflow state before background bridge setup.
+Prepare configuration separately; a new run freezes the latest available
+prepared snapshot or Pi defaults, with degraded preparation visible. A late
+configuration response must not alter an active run. Restore from the local
+checkpoint without first querying the recorder; preserve local integrity checks.
+
+Deliver outbox events through a background worker. Slow calls, unavailable
+recording, or rejected events must not hold the workflow's serialization queue.
+Retain failed deliveries; isolate permanent rejections so other telemetry can
+continue. Tests must exercise unresolved RPC promises as well as explicit
+errors, proving operations complete before Rust responds.
+
 ## Verification
 
 From the root:

@@ -11,7 +11,7 @@ export function registerXperDelegate(
     name: "xper_delegate",
     label: "Xper knowledge phase",
     description:
-      "Execute the current knowledge assignment from its input artifacts and ask the core to evaluate its gate. Supports Discovery through Plan. Start a run with /xper first.",
+      "Execute the current knowledge assignment from its input artifacts and evaluate its gate in Pi. Supports Discovery through Plan. Start a run with /xper first.",
     parameters: {
       type: "object",
       properties: {
@@ -25,8 +25,8 @@ export function registerXperDelegate(
       required: ["task"],
     },
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
-      const connection = session.connection;
-      if (!connection) throw new Error(session.error ?? "xper bridge offline");
+      const workflow = session.workflow;
+      if (!workflow) throw new Error("local xper workflow is not initialized");
       const result = await delegateKnowledge(
         {
           ...params,
@@ -36,7 +36,7 @@ export function registerXperDelegate(
         },
         {
           ...execution,
-          workflow: connection.workflow,
+          workflow,
           observe: ({ type, ...fields }) =>
             session.observation?.record(type, { toolCallId, ...fields }),
         },

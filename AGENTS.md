@@ -40,6 +40,12 @@ Otherwise, use `rg`; do not generate an index as part of another task.
   do not add workflow decisions to Rust or its replay logic. Read the
   [boundary decision](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
   before changing these responsibilities.
+- Rust availability must never block Pi workflow execution. Keep bridge setup,
+  configuration preparation, telemetry delivery, and remote inspection outside
+  the workflow's awaited path. Missing, slow, or rejecting Rust must leave
+  local start, delegation, gates, approval, recovery, and status usable. Freeze
+  the last prepared configuration or visible Pi defaults when starting a run;
+  retain pending/rejected observations without changing execution outcomes.
 - Add behavior to the block responsible for it and use explicit dependencies.
   Do not introduce global containers, command buses, or empty modules to
   anticipate future needs.

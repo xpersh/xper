@@ -6,6 +6,11 @@ validates their artifacts. Rust resolves configuration and stores the facts Pi
 reports. [RFC 0006](../../../docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
 explains this ownership boundary.
 
+Rust is never an execution prerequisite. The local workflow becomes available
+before bridge startup, and every workflow operation completes independently of
+configuration and recording RPCs. A missing, slow, or rejecting recorder
+changes telemetry status, not whether Pi can work.
+
 ```mermaid
 flowchart LR
     Commands[Pi commands and tools] --> Workflow[PiWorkflow]
@@ -15,7 +20,10 @@ flowchart LR
     Action --> Writer[Artifact writer]
     Workflow --> Policy[Contracts, gates and budgets]
     Workflow --> Journal[Local checkpoint and outbox]
-    Workflow --> Client[Typed configuration and recording client]
+    Journal -. Background delivery .-> Client[Typed configuration and recording client]
+    Session[Session background preparation] --> Client
+    Session --> Prepared[Prepared configuration]
+    Prepared --> Workflow
     Client --> Bridge[JSONL transport]
     Bridge --> Core[Rust configuration and recording]
 ```
@@ -26,6 +34,7 @@ flowchart LR
 | --- | --- |
 | Compose dependencies and register the extension | `src/extension.ts` |
 | Commands, tools, session hooks, and presentation | `src/pi/` |
+| Background configuration preparation and last available snapshot | `src/pi/configuration.ts` |
 | Coordinate delegation with injected execution and writing dependencies | `src/actions/delegate-knowledge.ts` |
 | Own start, assignment, completion, advancement, and recovery decisions | `src/workflow/controller.ts` |
 | Phase roles and execution budgets | `src/workflow/policy.ts` |
@@ -70,14 +79,27 @@ Recording transport failure does not change that policy's result.
 
 `XperClient` provides configuration resolution, profile inspection, event
 append, and run-status queries. `BridgeClient` owns framing and handshake.
-The extension requires the `eventRecording` and `configurationResolution`
-capabilities. The previous core workflow mutation methods are removed.
+The recording connection requires the `eventRecording` and
+`configurationResolution` capabilities; local workflow operation does not
+depend on obtaining that connection. The previous core workflow mutation
+methods are removed.
 
-At run start, Pi obtains its model catalog and requests resolved configuration.
-Rust enforces configured provider allowlists and model/thinking compatibility.
-Pi freezes the route and workflow policy in its checkpoint and selects the
-current role from that snapshot. The existing `workflow.knowledge` settings
-are passed through by Rust; Pi validates budgets and human gates.
+Session preparation obtains the model catalog and resolves configuration in
+the background. The last available snapshot is cached locally in
+`.xper/pi/configuration.json`; status distinguishes defaults, cached, and
+resolved configuration and exposes preparation errors. Rust enforces configured provider allowlists and
+model/thinking compatibility during resolution. A new run takes the latest
+available prepared configuration or Pi defaults immediately, exposes degraded
+preparation, and freezes the route and workflow policy in its checkpoint.
+A response arriving later does not alter the active run. When a prepared route
+is present, Pi selects the current role from it. The existing
+`workflow.knowledge` settings pass through Rust; Pi validates budgets and human
+gates. An unavailable prepared profile must not be presented as applied when
+the run actually started with defaults.
+
+Reconnecting replaces the recording connection without replacing the local
+controller or marking a running attempt interrupted. Session changes and
+shutdown stop local delivery; bridge shutdown proceeds in the background.
 
 Pi uses its normal credentials and model configuration. Context allowlists do
 not distinguish accounts exposed under the same provider identifier.
@@ -101,9 +123,13 @@ provider bill or a workflow budget reservation. Missing usage remains unknown.
 
 The journal stores a checkpoint and outbox atomically at
 `.xper/pi/<sha256(sessionId)>.json`. Event IDs remain stable across retries.
-Pending events are released only after a persistent core acknowledgement.
+Workflow operations update local state and schedule delivery; they never await
+the delivery worker, a recorder query, or bridge startup. Pending events are
+released only after a persistent core acknowledgement.
 Volatile acknowledgements and transport errors retain pending records and
-surface degraded recording. A local write failure retains state in memory and
+surface degraded recording. Permanent rejections are retained separately and
+surfaced; they cannot hold up subsequent events or workflow operations.
+A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
@@ -113,10 +139,20 @@ Larger checkpoints use `adapter.state.chunk` events containing a checkpoint ID,
 chunk index, total count, and content. Rust stores these as opaque events.
 Only Pi assembles and validates the checkpoint schema.
 
-The client paginates status reads and batches recording writes to respect the
-bridge frame limit. Recovery chooses the latest valid Pi checkpoint revision
-from the journal and recorded history. Pending events can be resent safely
-without duplicating the event log or executing an agent again.
+The client paginates inspection reads and batches recording writes to respect
+the bridge frame limit. Workflow recovery loads the local checkpoint, without
+consulting Rust first. Recorded checkpoints remain available for inspection;
+the controller does not automatically fetch them as a prerequisite for starting
+or resuming. A missing local checkpoint does not trigger remote recovery on the
+execution path. Pending events can be resent safely without duplicating the
+event log or executing an agent again.
+
+`/xper status` reads local workflow state and shows delivery/preparation health.
+`xper status` queries the shared Rust record, which can lag while events are
+pending or rejected. Neither the first local status request nor a delegation
+waits for an unresolved recording RPC. An unreadable or invalid local checkpoint
+is still an integrity error; the adapter preserves it rather than guessing how
+to resume.
 
 Pi marks unfinished attempts interrupted when recovering its own workflow;
 this means their execution outcome is unknown. The core never manufactures
@@ -124,8 +160,9 @@ that outcome merely by reopening SQLite. An explicit retry of an interrupted
 assignment reuses its frozen model selection and input identities.
 
 Legacy core-owned runs lack a Pi checkpoint. They remain inspectable through
-`xper status`, but do not resume in this workflow; start a new Pi session.
-This migration does not delete or reinterpret their original logs.
+`xper status`, but do not resume as a local Pi workflow. A new local run does
+not require a successful legacy-history query. This migration does not delete
+or reinterpret the original logs.
 
 ## Extending the adapter
 
@@ -151,12 +188,17 @@ npm run test --workspace @xper/adapter-pi
 
 [check-boundaries.mjs](../scripts/check-boundaries.mjs) checks access to the
 core through the typed public protocol and keeps workflow rules inside the
-adapter. It also protects injected action dependencies. These are static
-conventions, not a complete TypeScript analysis.
+adapter. It blocks direct recorder/configuration calls from workflow modules
+outside the journal and forbids awaiting telemetry delivery in actions and
+command/tool entry points. It also protects injected action dependencies and
+keeps workflow modules independent of the bridge process. These are static
+conventions, not a complete TypeScript analysis; unresolved-promise tests check
+the execution guarantee dynamically.
 
 Workflow and action tests use controlled dependencies and synthetic artifacts.
 Recording integration uses the real Rust bridge and SQLite with simulated
 execution, requiring the checkout and toolchain but no model credentials.
-Tests must cover interrupted execution, checkpoint recovery, and recording
-failure without changing the reported execution outcome. Run `npm run check`
+Tests must cover interrupted execution, local checkpoint integrity, delayed
+configuration, and missing/rejecting/never-resolving recording without delaying
+workflow operations or changing their outcomes. Run `npm run check`
 before delivering code changes.

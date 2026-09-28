@@ -1,8 +1,8 @@
 # Execution profiles and model routing
 
-Routing is optional. Without an active profile, the adapter keeps Pi's existing
+Routing is optional. Without a prepared profile, the adapter keeps Pi's existing
 model behavior. A profile assigns one provider and model directly to each role.
-A context limits the providers that profile may use.
+A context limits the providers that a resolved profile may use.
 
 Example `.xper/config.yaml`:
 
@@ -54,11 +54,17 @@ xper profile inspect --resolved
 
 Activation writes only the chosen name to `.xper/active-profile`. A `profile`
 key in configuration acts as the default when there is no local activation.
-Start a new Pi session after activation. At `/xper start`, the adapter queries
-Pi's model catalog and calls `configuration.resolve`. Rust checks that configured
-models are available and support their requested thinking levels. Pi freezes
-the resolved route in its run checkpoint,
-so later configuration changes do not alter it. Recorded attempt events preserve
+Start a new Pi session after activation. The adapter prepares configuration in
+the background using Pi's model catalog and `configuration.resolve`. Rust checks
+that configured models are available and support their requested thinking levels.
+
+`/xper start` never waits for that preparation or a Rust response. It freezes the
+latest available prepared route and policy, or Pi defaults when none is ready,
+and displays degraded preparation when appropriate. Check preparation status
+before starting if a particular profile must be applied. Configuring a profile
+on disk does not mean that a run started with defaults is using it. A late
+response or later configuration change does not alter the active run.
+Recorded attempt events preserve
 the historical selections. A requested route and an observed model change are
 different facts; do not rewrite older events when a profile changes.
 

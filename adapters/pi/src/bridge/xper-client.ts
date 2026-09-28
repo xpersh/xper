@@ -34,15 +34,17 @@ export interface RecordedStatus {
   degradedReason?: string | null;
   nextCursor?: string | null;
 }
+export interface ResolvedConfiguration {
+  routing: RoutingSnapshot | null;
+  adapterConfig: Record<string, unknown>;
+}
 export interface RecorderClient {
   appendEvents(
     events: RecordedEvent[],
   ): Promise<{ accepted: number; durability: "persistent" | "volatile" }>;
   getRunStatus(runId?: string): Promise<RecordedStatus>;
   inspectProfile(): Promise<RoutingSnapshot | null>;
-  resolveConfiguration(
-    models?: AvailableModel[],
-  ): Promise<{ routing: RoutingSnapshot | null; adapterConfig: Record<string, unknown> }>;
+  resolveConfiguration(models?: AvailableModel[]): Promise<ResolvedConfiguration>;
 }
 export interface RpcRequester {
   request(method: string, params?: Record<string, unknown>): Promise<unknown>;

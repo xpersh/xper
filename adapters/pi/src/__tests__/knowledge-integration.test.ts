@@ -40,7 +40,9 @@ test("all phases run through the public bridge with fake execution, durable appr
       command: resolve(workspace, "target/debug/xper"),
     }));
     await bridge.request("session.attach", { sessionId: "knowledge-test", cwd: root, mode: "rpc" });
-    return new PiWorkflow(new XperClient(bridge), root, "knowledge-test");
+    const recorder = new XperClient(bridge);
+    const configuration = await recorder.resolveConfiguration();
+    return new PiWorkflow(recorder, root, "knowledge-test", { configuration: () => configuration });
   };
   try {
     let client = await connect();
@@ -91,6 +93,8 @@ test("all phases run through the public bridge with fake execution, durable appr
       if (phase === "define") {
         assert.equal(result.gate?.advanced, false);
         assert.equal(result.gate?.humanArtifactId, result.artifactId);
+        await client.waitForRecording();
+        client.stopRecording();
         await bridge?.shutdown();
         bridge = undefined;
         client = await connect();
@@ -106,12 +110,16 @@ test("all phases run through the public bridge with fake execution, durable appr
     assert.equal(Object.keys(before.run?.attempts ?? {}).length, 6);
     assert.equal(Object.keys(before.run?.artifacts ?? {}).length, 5);
     assert(!JSON.stringify(before.timeline).includes("Given a name"));
+    await client.waitForRecording();
+    client.stopRecording();
     await bridge?.shutdown();
     bridge = undefined;
     client = await connect();
     assert.deepEqual((await client.getRunStatus()).run, before.run);
     assert.equal((await client.advanceRun()).ready, true);
     await assert.rejects(client.startAssignment(), /implementation is not available/);
+    await client.waitForRecording();
+    client.stopRecording();
   } finally {
     if (bridge) await bridge.shutdown().catch(() => bridge?.close());
     if (previousHome === undefined) delete process.env.HOME;

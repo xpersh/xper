@@ -117,5 +117,50 @@ test("usage recording failure leaves the execution outcome and gate decision unc
   assert.equal(result.outcome, "succeeded");
   assert.equal(result.phase, "define");
   assert.equal(reports.length, 1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert(events.includes("recording.failed"));
+});
+
+test("hanging usage and throwing observers cannot hold the tool result or gate", {
+  timeout: 5000,
+}, async () => {
+  let called = false;
+  const result = await delegateKnowledge(
+    { task: "synthetic", cwd: "/unused", signal: new AbortController().signal },
+    {
+      workflow: {
+        async startAssignment() {
+          return {
+            runId: "r",
+            assignmentId: "a",
+            attemptId: "t",
+            role: "discovery.explorer",
+            selection: null,
+          };
+        },
+        recordUsage() {
+          called = true;
+          return new Promise<void>(() => {});
+        },
+        async finishAttempt() {
+          return { attemptId: "t", outcome: "succeeded", artifactId: "artifact" };
+        },
+        async advanceRun() {
+          return { advanced: true, phase: "define" };
+        },
+      },
+      async execute() {
+        return { outcome: "succeeded", brief: "evidence", usage: [{ inputTokens: 3 }] };
+      },
+      async saveBrief() {
+        return ".xper/artifacts/t.md";
+      },
+      observe() {
+        throw new Error("observation sink unavailable");
+      },
+    },
+  );
+  assert(called);
+  assert.equal(result.outcome, "succeeded");
+  assert.equal(result.phase, "define");
 });

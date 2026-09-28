@@ -73,10 +73,18 @@ export async function delegateKnowledge(
     throw new Error("timeoutSeconds must be between 1 and 600");
   }
   const { workflow } = dependencies;
+  const observe = (event: Observation): void => {
+    try {
+      dependencies.observe?.(event);
+    } catch {
+      /* Observations cannot govern execution. */
+    }
+  };
   const started = await workflow.startAssignment(request.assignmentId);
   const { attemptId } = started;
-  dependencies.observe?.({ type: "attempt.correlated", attemptId });
+  observe({ type: "attempt.correlated", attemptId });
 
+  let usageReports: ModelUsage[] = [];
   let completion: FinishAttempt = { attemptId, outcome: "failed" };
   try {
     const result = await dependencies.execute({
@@ -94,13 +102,7 @@ export async function delegateKnowledge(
           ? { model: request.model }
           : {}),
     });
-    for (const usage of result.usage ?? []) {
-      try {
-        await workflow.recordUsage?.(attemptId, usage);
-      } catch {
-        dependencies.observe?.({ type: "recording.failed", attemptId });
-      }
-    }
+    usageReports = result.usage ?? [];
     if (result.outcome === "succeeded") {
       if (!result.brief.trim()) throw new Error("Phase artifact is empty");
       const artifactPath = await dependencies.saveBrief(
@@ -126,8 +128,15 @@ export async function delegateKnowledge(
     reason = error.message;
     return workflow.finishAttempt({ attemptId, outcome: "failed" });
   });
-  dependencies.observe?.({ type: "attempt.finished", attemptId, outcome: settled.outcome });
+  observe({ type: "attempt.finished", attemptId, outcome: settled.outcome });
   const gate = settled.outcome === "succeeded" ? await workflow.advanceRun() : undefined;
+  // Usage delivery is observational. It cannot delay settlement, gate evaluation,
+  // or the tool response, even if a recorder implementation never resolves.
+  for (const usage of usageReports) {
+    void Promise.resolve()
+      .then(() => workflow.recordUsage?.(attemptId, usage))
+      .catch(() => observe({ type: "recording.failed", attemptId }));
+  }
   const phase = gate?.phase ?? started.phase ?? "discovery";
   return {
     attemptId,

@@ -12,6 +12,12 @@ configuration and preserves the reported events and opaque Pi checkpoint.
 the ownership boundary. Moving these rules into Pi preserves its current gates;
 it does not make every phase transition unrestricted.
 
+Local start, delegation, advancement, approval, status, and checkpoint recovery
+do not wait for Rust. Configuration is prepared separately and events are
+delivered in the background. Missing, slow, or rejected telemetry remains visible
+without changing workflow outcomes. Local evidence and checkpoint integrity
+checks still apply.
+
 ## Phase contracts
 
 | Phase | Role | Minimum output | Inputs |
@@ -105,7 +111,10 @@ four concurrent attempts, no cost ceiling, and automatic gates. A configured
 cost ceiling requires a positive per-attempt reservation. All values are frozen
 at run start, including when the session resumes after a configuration change.
 Rust returns this configuration without interpreting the workflow policy; Pi
-validates it and freezes it in the run's checkpoint. There is no core
+prepares and validates it in the background. A run freezes the latest available
+prepared policy, or the defaults above if none is ready, in its checkpoint.
+That choice is visible and cannot be changed by a later configuration response.
+There is no core
 `run.start.policy` command under the new boundary.
 
 Attempt count and elapsed time apply across retries and revisits. Time includes
@@ -160,6 +169,8 @@ Recording tests independently exercise session ownership, duplicate consistency,
 atomic event batches, and generic replay. Integration tests use the real Rust
 bridge and SQLite with simulated execution, without model credentials. Recording
 failure and checkpoint recovery must preserve the original execution outcome.
+An unresolved recorder request must also leave local operations usable; testing
+only a prompt error response does not establish that execution is independent.
 
 `npm run check` includes Rust/TypeScript checks and `npm run test:contracts`,
 which validates the shared fixtures against both JSON Schemas with Ajv.

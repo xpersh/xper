@@ -75,6 +75,7 @@ async function setup(policy: WorkflowPolicy = {}) {
   const artifacts = new Map<string, { content: string; digest: string }>();
   let now = 1000;
   const options = {
+    configuration: () => ({ routing: recorder.routing, adapterConfig: { ...recorder.config } }),
     now: () => now,
     readArtifact: async (path: string) => {
       const result = artifacts.get(path);
@@ -83,6 +84,7 @@ async function setup(policy: WorkflowPolicy = {}) {
     },
   };
   const controller = new PiWorkflow(recorder, cwd, "session", options);
+  const controllers = [controller];
   const produce = async (output?: Output) => {
     const assignment = await controller.startAssignment();
     assert(assignment.artifactPath);
@@ -113,7 +115,22 @@ async function setup(policy: WorkflowPolicy = {}) {
     advanceTime: (ms: number) => {
       now += ms;
     },
-    cleanup: () => rm(cwd, { recursive: true, force: true }),
+    restore: async () => {
+      for (const previous of controllers) {
+        await previous.waitForRecording();
+        previous.stopRecording();
+      }
+      const restored = new PiWorkflow(recorder, cwd, "session", options);
+      controllers.push(restored);
+      return restored;
+    },
+    cleanup: async () => {
+      for (const workflow of controllers) {
+        await workflow.waitForRecording();
+        workflow.stopRecording();
+      }
+      await rm(cwd, { recursive: true, force: true });
+    },
   };
 }
 test("Pi owns the knowledge path and ready Plan without a workflow RPC", async () => {
@@ -128,6 +145,7 @@ test("Pi owns the knowledge path and ready Plan without a workflow RPC", async (
     }
     assert.equal((await h.controller.advanceRun()).ready, true);
     await assert.rejects(h.controller.startAssignment(), /implementation is not available/);
+    await h.controller.waitForRecording();
     assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 5);
     assert(!JSON.stringify(h.recorder.events).includes("Synthetic objective"));
   } finally {
@@ -167,9 +185,10 @@ test("human approval is bound to the pending artifact and persists across reload
     const gate = await h.controller.advanceRun();
     assert.equal(gate.advanced, false);
     assert.equal(gate.humanArtifactId, result.replayed ? undefined : result.artifactId);
-    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    const restored = await h.restore();
     await assert.rejects(restored.advanceRun("other"), /approval does not match/);
     assert.equal((await restored.advanceRun(gate.humanArtifactId)).phase, "design");
+    await restored.waitForRecording();
     assert.equal(h.recorder.events.filter((e) => e.type === "human.approved").length, 1);
   } finally {
     await h.cleanup();
@@ -246,7 +265,7 @@ test("timeout normalization, repeated results, cancellation, and retry stay dist
     const cancelled = await h.controller.startAssignment();
     await h.controller.finishAttempt({ attemptId: cancelled.attemptId, outcome: "cancelled" });
     const lost = await h.controller.startAssignment();
-    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    const restored = await h.restore();
     assert.equal(
       (await restored.getRunStatus()).run?.attempts[lost.attemptId]?.outcome,
       "interrupted",
@@ -301,14 +320,17 @@ test("recorder loss cannot stop Pi; pending facts replay idempotently after relo
     h.recorder.offline = true;
     await h.produce();
     assert.equal((await h.controller.advanceRun()).phase, "define");
+    await h.controller.waitForRecording();
     assert.match((await h.controller.getRunStatus()).degradedReason ?? "", /pending/);
-    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    const restored = await h.restore();
     assert.equal((await restored.getRunStatus()).run?.visits.at(-1)?.phase, "define");
     h.recorder.offline = false;
+    await restored.waitForRecording();
     assert.equal((await restored.getRunStatus()).degradedReason, undefined);
     const count = h.recorder.events.length;
     await restored.getRunStatus();
     assert.equal(h.recorder.events.length, count);
+    await h.controller.waitForRecording();
     assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 1);
   } finally {
     await h.cleanup();
@@ -319,6 +341,7 @@ test("volatile ACKs and local disk failure never manufacture persistent telemetr
   try {
     h.recorder.volatile = true;
     await h.produce();
+    await h.controller.waitForRecording();
     assert.match((await h.controller.getRunStatus()).degradedReason ?? "", /volatile/);
     h.recorder.volatile = false;
     await h.controller.getRunStatus();
@@ -329,6 +352,8 @@ test("volatile ACKs and local disk failure never manufacture persistent telemetr
     await journal.commit({ state: true }, [
       { schemaVersion: 1, eventId: "pending", runId: "r", occurredAt: 1, type: "custom", data: {} },
     ]);
+    await journal.waitForIdle();
+    journal.stop();
     assert.equal(journal.pending.length, 1);
     assert.match(journal.problem ?? "", /held in memory/);
   } finally {
@@ -346,47 +371,50 @@ test("lost ACK keeps exact event identities and deduplicates after reconnect", a
       return result;
     };
     await h.produce();
+    await h.controller.waitForRecording();
     const count = h.recorder.events.length;
     lose = false;
-    await h.controller.getRunStatus();
+    await h.controller.waitForRecording();
     assert.equal(h.recorder.events.length, count);
   } finally {
     await h.cleanup();
   }
 });
-test("legacy observations cannot silently turn into a new workflow", async () => {
+test("recorder history is observational and cannot choose or prevent a new Pi run", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "xper-legacy-pi-"));
   const recorder = new Recorder();
-  recorder.events = [
-    {
-      schemaVersion: 1,
-      eventId: "old",
-      runId: "legacy",
-      occurredAt: 1,
-      type: "legacy.run_started",
-      data: {},
-    },
-  ];
+  recorder.getRunStatus = async () => {
+    throw new Error("must not query execution state");
+  };
+  recorder.resolveConfiguration = async () => {
+    throw new Error("must not resolve on execution path");
+  };
+  recorder.inspectProfile = async () => {
+    throw new Error("must not inspect on execution path");
+  };
+  const controller = new PiWorkflow(recorder, cwd, "session");
   try {
-    const controller = new PiWorkflow(recorder, cwd, "session");
-    assert.match((await controller.getRunStatus()).degradedReason ?? "", /legacy/);
-    await assert.rejects(controller.startRun("do not overwrite"), /cannot resume/);
-    assert.equal(recorder.events.length, 1);
+    assert.equal((await controller.getRunStatus()).run, null);
+    assert.equal(await controller.inspectProfile(), null);
+    assert.equal((await controller.startRun("Local workflow")).resumed, false);
+    await controller.startAssignment();
+    await controller.waitForRecording();
   } finally {
+    controller.stopRecording();
     await rm(cwd, { recursive: true, force: true });
   }
 });
-test("large checkpoints are chunked below frame limits and reconstruct from recording alone", async () => {
+test("large checkpoints stay below event limits while execution resumes from local state", async () => {
   const h = await setup({ maxAttempts: 150 });
   try {
     for (let i = 0; i < 55; i++) {
       const attempt = await h.controller.startAssignment();
       await h.controller.finishAttempt({ attemptId: attempt.attemptId, outcome: "failed" });
     }
+    await h.controller.waitForRecording();
     assert(h.recorder.events.some((e) => e.type === "adapter.state.chunk"));
     assert(h.recorder.events.every((e) => Buffer.byteLength(JSON.stringify(e)) < 40000));
-    await rm(join(h.cwd, ".xper", "pi"), { recursive: true, force: true });
-    const restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    const restored = await h.restore();
     assert.equal(Object.keys((await restored.getRunStatus()).run?.attempts ?? {}).length, 55);
   } finally {
     await h.cleanup();
@@ -516,6 +544,7 @@ test("rejected input validation leaves no orphan assignment in subsequent checkp
       assignments: Record<string, unknown>;
     };
     assert.equal(Object.keys(state.assignments).length, 2);
+    await h.controller.waitForRecording();
     assert.equal(h.recorder.events.filter((e) => e.type === "assignment.created").length, 2);
   } finally {
     await h.cleanup();
@@ -547,6 +576,107 @@ test("a pending human gate can replace broken evidence without reusing old appro
     });
     await assert.rejects(h.controller.advanceRun("unrelated-approval"), /approval does not match/);
     assert.equal((await h.controller.getRunStatus()).run?.visits.at(-1)?.phase, "design");
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("cold start, decisions and local recovery complete while every Rust RPC is pending", {
+  timeout: 5000,
+}, async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "xper-hung-telemetry-"));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const recorder = new Recorder();
+  const append = recorder.appendEvents.bind(recorder);
+  let appendCalls = 0;
+  recorder.appendEvents = async (events) => {
+    appendCalls++;
+    await held;
+    return append(events);
+  };
+  recorder.getRunStatus = async () => {
+    await held;
+    throw new Error("unexpected query");
+  };
+  recorder.resolveConfiguration = async () => {
+    await held;
+    throw new Error("unexpected resolution");
+  };
+  recorder.inspectProfile = async () => {
+    await held;
+    throw new Error("unexpected inspection");
+  };
+  const options = {
+    now: () => 1000,
+    configuration: () => ({ routing: null, adapterConfig: { attemptTimeMs: 100 } }),
+    readArtifact: async () => ({ content: "Evidence", digest: "sealed" }),
+  };
+  const controller = new PiWorkflow(recorder, cwd, "session", options);
+  let restored: PiWorkflow | undefined;
+  try {
+    const started = await controller.startRun("Offline first run");
+    const assignment = await controller.startAssignment();
+    assert(assignment.artifactPath);
+    await controller.recordUsage(assignment.attemptId, { inputTokens: 2 });
+    const result = await controller.finishAttempt({
+      attemptId: assignment.attemptId,
+      outcome: "succeeded",
+      artifactPath: assignment.artifactPath,
+    });
+    assert.equal(result.outcome, "succeeded");
+    assert.equal((await controller.advanceRun()).phase, "define");
+    assert(appendCalls > 0);
+    assert.equal(recorder.events.length, 0);
+    controller.stopRecording();
+    restored = new PiWorkflow(recorder, cwd, "session", options);
+    assert.equal((await restored.startRun("Resume without Rust")).runId, started.runId);
+    assert.equal((await restored.getRunStatus()).run?.visits.at(-1)?.phase, "define");
+    assert.equal((await restored.startAssignment()).phase, "define");
+  } finally {
+    release();
+    await controller.waitForRecording();
+    await restored?.waitForRecording();
+    controller.stopRecording();
+    restored?.stopRecording();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a prepared configuration is frozen even when later preparation changes", async () => {
+  const h = await setup();
+  try {
+    h.recorder.routing = { profile: "later", context: "new", routes: {} };
+    h.recorder.config = { maxAttempts: 1 };
+    assert.equal(await h.controller.inspectProfile(), null);
+    const a = await h.controller.startAssignment();
+    assert.equal(a.selection, null);
+    await h.controller.finishAttempt({ attemptId: a.attemptId, outcome: "failed" });
+    await h.controller.startAssignment();
+    assert.equal(await h.controller.inspectProfile(), null);
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("stopping preserves already queued local usage without awaiting recording", async () => {
+  const h = await setup();
+  try {
+    const attempt = await h.controller.startAssignment();
+    const usage = h.controller.recordUsage(attempt.attemptId, { inputTokens: 17 });
+    await h.controller.stopRecording();
+    await usage;
+    const journal = new WorkflowJournal(h.cwd, "session", h.recorder);
+    await journal.load();
+    assert(
+      journal.pending.some(
+        (event) => event.type === "model.usage" && event.data.inputTokens === 17,
+      ),
+    );
+    await journal.close();
+    await assert.rejects(h.controller.startAssignment(), /stopped/);
   } finally {
     await h.cleanup();
   }

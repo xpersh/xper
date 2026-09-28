@@ -53,14 +53,17 @@ test("bridge records one routed attempt and its selection", async () => {
       cwd: root,
       mode: "rpc",
     });
-    const workflow = new PiWorkflow(new XperClient(client), root, "routing-session");
-    const routing = await workflow.inspectProfile();
+    const recorder = new XperClient(client);
+    const routing = await recorder.inspectProfile();
     assert.equal(routing?.routes["discovery.explorer"]?.[0]?.model, "m1");
-    await assert.rejects(workflow.startRun("Investigate", []));
-    assert.equal((await workflow.getRunStatus()).run, null);
-    const started = await workflow.startRun("Investigate", [
+    await assert.rejects(recorder.resolveConfiguration([]));
+    const configuration = await recorder.resolveConfiguration([
       { provider: "corp", model: "m1", reasoning: true },
     ]);
+    const workflow = new PiWorkflow(recorder, root, "routing-session", {
+      configuration: () => configuration,
+    });
+    const started = await workflow.startRun("Investigate");
     const first = await workflow.startAssignment();
     assert.equal(first.selection?.model, "m1");
     await workflow.finishAttempt({ attemptId: first.attemptId, outcome: "failed" });
@@ -76,6 +79,8 @@ test("bridge records one routed attempt and its selection", async () => {
     >;
     assert.deepEqual(persistedAttempts[first.attemptId]?.selection, first.selection);
     assert.equal(Object.keys(persistedAttempts).length, 1);
+    await workflow.waitForRecording();
+    workflow.stopRecording();
     await client.shutdown();
     client = undefined;
     ({ client } = await connectBridge(manifest, { command: binary }));
@@ -84,11 +89,10 @@ test("bridge records one routed attempt and its selection", async () => {
       cwd: root,
       mode: "rpc",
     });
-    const reopened = await new PiWorkflow(
-      new XperClient(client),
-      root,
-      "routing-session",
-    ).getRunStatus();
+    const restored = new PiWorkflow(new XperClient(client), root, "routing-session");
+    const reopened = await restored.getRunStatus();
+    await restored.waitForRecording();
+    restored.stopRecording();
     const history = (reopened.run as unknown as Record<string, unknown>).attempts as Record<
       string,
       { selection: unknown }

@@ -17,6 +17,12 @@ The durable record is the source of truth about **reported execution facts**.
 It supports inspection, metrics, and a future interface. It is not permission
 to execute the next step, and it cannot prove an unreported action occurred.
 
+Rust must never sit on Pi's execution path. A missing binary, slow bridge,
+unanswered RPC, unavailable database, or rejected event must not delay or
+prevent local workflow operations. This applies from the first session and run,
+including local status and recovery. Merely catching an error after waiting
+for an RPC does not satisfy this guarantee.
+
 | Rust core | Pi adapter |
 | --- | --- |
 | Merge configuration; resolve profiles and model selections | Choose the role to execute and apply the resolved selection |
@@ -28,9 +34,10 @@ to execute the next step, and it cannot prove an unreported action occurred.
 
 ```mermaid
 flowchart LR
-    Pi[Pi workflow and agents] -->|Resolve configuration| Config[Rust configuration]
-    Config -->|Profiles and model selections| Pi
-    Pi -->|Reported events and opaque checkpoints| Record[Rust recording]
+    Config[Rust configuration] -->|Background preparation| Prepared[Prepared configuration]
+    Prepared -->|Snapshot or Pi defaults| Pi[Pi workflow and agents]
+    Pi --> Local[Local checkpoint and outbox]
+    Local -. Background delivery .-> Record[Rust recording]
     Record --> Store[(Local event log)]
     Store --> Views[Status, metrics, future UI]
 ```
@@ -60,7 +67,11 @@ Pi's cost calculation is explicitly labelled `pi_estimate`. Consumers must
 preserve that provenance when presenting totals or comparing runs.
 
 Configuration resolution has the same boundary: Rust answers which model a
-configured role selects. Pi decides when that role runs. Record the effective
+configured role selects during background preparation. Pi decides when that
+role runs, without awaiting configuration RPCs. A new run uses the latest
+available prepared snapshot or Pi defaults and exposes degraded preparation.
+It freezes that choice; a late response cannot silently change an active run.
+Record the effective
 selection with the execution so later profile changes do not rewrite history.
 Reported actual model changes must remain distinguishable from the requested
 configuration. This decision does not add live profile switching or automatic
@@ -73,10 +84,21 @@ for different content is an error. Acknowledgement and durability are separate:
 volatile storage must never be presented as persistent history. Atomic batches
 keep related observations together without making Rust their workflow arbiter.
 
-Recording errors do not change an agent's outcome or authorize re-execution.
-The adapter retains pending events and retries them with the same IDs. A local
-checkpoint or pending-event file is recovery material; the acknowledged event
-log is the shared inspection record. If storage is unavailable everywhere,
+Recording runs in a background worker. No workflow operation waits for append,
+remote status, or connection setup. Errors and latency do not change an agent's
+outcome or authorize re-execution. The adapter retains pending events and
+retries them with the same IDs; permanent rejections are isolated and visible
+so they cannot obstruct later telemetry.
+
+The local checkpoint is Pi's recovery state. Loading it does not require a
+remote query or recorder acknowledgement. Local checkpoint integrity and
+workflow evidence checks remain mandatory; Rust being offline does not make
+damaged local state usable. The acknowledged event log is the shared inspection
+record, and can lag local execution while events are pending. Eventual delivery
+depends on the recorder becoming available and accepting those events; a
+rejected event is not silently discarded or counted as delivered.
+
+If storage is unavailable everywhere,
 recovery cannot be guaranteed. Surface that limitation rather than inventing
 complete telemetry. Missing end events remain incomplete until the adapter
 reports an outcome; reopening SQLite must not manufacture a workflow failure.

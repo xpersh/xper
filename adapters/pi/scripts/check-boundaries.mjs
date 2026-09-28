@@ -44,7 +44,25 @@ for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   ) {
     failures.push(`${adapterPath} must keep workflow commands inside Pi, not in RPC messages`);
   }
+  if (
+    adapterPath.startsWith("workflow/") &&
+    adapterPath !== "workflow/journal.ts" &&
+    /\.(?:appendEvents|resolveConfiguration|inspectProfile|getRunStatus|request)\s*\(/.test(source)
+  ) {
+    failures.push(
+      `${adapterPath} must use local execution state and prepared configuration; only the journal delivers telemetry`,
+    );
+  }
+  if (
+    (adapterPath.startsWith("actions/") || adapterPath.startsWith("pi/xper-")) &&
+    /await\s+[^;\n]*(?:recordUsage|waitForRecording|waitForIdle)\s*(?:\?\.)?\(/.test(source)
+  ) {
+    failures.push(`${adapterPath} must not await telemetry delivery`);
+  }
   for (const match of source.matchAll(importPattern)) {
+    if (adapterPath.startsWith("workflow/") && match[1]?.endsWith("/bridge/client.js")) {
+      failures.push(`${adapterPath} must not depend on the bridge process`);
+    }
     if (adapterPath.startsWith("bridge/") && /(?:^|\/)workflow\//.test(match[1] ?? "")) {
       failures.push(`${adapterPath} must not depend on Pi workflow policy`);
     }

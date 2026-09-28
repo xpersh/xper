@@ -61,7 +61,8 @@ provided by the Rust service.
 - Model routing is deterministic and auditable by default.
 - Context policy prevents selection of a provider outside its allowlist;
   Pi controls credential selection for each provider.
-- Observability must never prevent the workflow from continuing.
+- Rust availability and telemetry delivery must never delay or prevent Pi's
+  workflow from continuing.
 - Metrics measure system behavior, not human value or individual productivity.
 
 ## Relationship with Pi
@@ -77,7 +78,14 @@ checks recording integrity and serves the history; it does not decide which
 step may run next. A future adapter can use a different workflow with the
 same configuration and recording service.
 
-In this checkout, prepare the bridge and extension before the first launch:
+Pi creates its local workflow immediately. Bridge connection, configuration
+preparation, and event delivery run in the background. Starting, delegating,
+advancing, approving, inspecting local status, and resuming a local checkpoint
+do not wait for Rust, even when it is missing, slow, or rejects an event.
+New runs use the latest prepared configuration or Pi's defaults and display
+degraded preparation when needed; that choice stays frozen for the run.
+
+In this checkout, build the extension and the optional Rust recording service:
 
 ```bash
 npm ci
@@ -85,6 +93,9 @@ npm run build --workspace @xper/adapter-pi
 cargo build -p xper-cli
 pi
 ```
+
+The Rust binary enables central recording and configuration preparation. Pi's
+local workflow remains usable when that binary is unavailable.
 
 Start a workflow in the Pi session:
 
@@ -110,8 +121,9 @@ the responsible phase, configured human gates use `/xper approve <artifactId>`,
 and Plan stops with a validated execution DAG. The
 [knowledge workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection
-and timeline from SQLite. Recording failures leave execution outcomes intact;
-the adapter retains pending events for retry and shows degraded recording.
+and timeline from SQLite. This shared history can lag the live Pi workflow.
+The adapter records a local checkpoint, queues events for background delivery,
+and shows pending or rejected telemetry without changing execution outcomes.
 Only a persistent acknowledgement confirms durable shared history. Old
 core-owned runs remain inspectable, but lack the Pi checkpoint needed to
 resume under this architecture. See the
@@ -131,6 +143,9 @@ generic tool lifecycle, and correlation between `xper_delegate` and the
 Attempt. It does not store tasks, prompts, or outputs. Tool counters are
 observations; workflow outcomes come from the Pi workflow's explicit execution
 and persisted evidence.
+These generic tool observations are separate from the workflow and model-usage
+events delivered to Rust; enabling this logger does not persist every Pi tool
+event in the central recording database.
 
 The `xper` CLI configures, diagnoses, and queries recorded information;
 interactive workflow execution stays inside Pi.

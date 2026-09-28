@@ -212,7 +212,7 @@ test("a rejected assignment does not start an agent or invent an attempt result"
   assert.deepEqual(f.observations, []);
 });
 
-test("loss of the bridge while settling propagates without resettling or advancing", async () => {
+test("an uncertain local settlement failure propagates without resettling or advancing", async () => {
   const f = fixture();
   f.state.failure = "finish";
   await assert.rejects(

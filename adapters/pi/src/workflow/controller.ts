@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { object, type RecorderClient, type RecordedEvent } from "../bridge/xper-client.js";
+import {
+  object,
+  type RecorderClient,
+  type RecordedEvent,
+  type ResolvedConfiguration,
+} from "../bridge/xper-client.js";
 import { parseDocument, validateLinks, type Document } from "./contracts.js";
 import { readEvidence } from "./evidence.js";
 import { WorkflowJournal } from "./journal.js";
@@ -19,7 +24,6 @@ import type {
   ArtifactInput,
   AssignmentStarted,
   AttemptFinished,
-  AvailableModel,
   FinishAttempt,
   ModelSelection,
   RoutingSnapshot,
@@ -70,6 +74,7 @@ export interface WorkflowState {
   ready: boolean;
 }
 interface Options {
+  configuration?: () => ResolvedConfiguration | null;
   now?: () => number;
   id?: () => string;
   readArtifact?: (path: string) => Promise<{ content: string; digest: string }>;
@@ -204,25 +209,29 @@ function invalid(message: string): never {
 export class PiWorkflow implements WorkflowClient {
   private state: WorkflowState | null = null;
   private loaded = false;
-  private legacy = false;
+  private stopping = false;
   private tail: Promise<unknown> = Promise.resolve();
   private timeline: RecordedEvent[] = [];
   private readonly journal: WorkflowJournal;
+  private readonly configuration: () => ResolvedConfiguration | null;
   private readonly now: () => number;
   private readonly id: () => string;
   private readonly readArtifact: (path: string) => Promise<{ content: string; digest: string }>;
   constructor(
-    private readonly recorder: RecorderClient,
+    recorder: Pick<RecorderClient, "appendEvents">,
     cwd: string,
     sessionId: string,
     options: Options = {},
   ) {
     this.journal = new WorkflowJournal(cwd, sessionId, recorder);
+    this.configuration = options.configuration ?? (() => null);
     this.now = options.now ?? Date.now;
     this.id = options.id ?? randomUUID;
     this.readArtifact = options.readArtifact ?? ((path) => readEvidence(cwd, path));
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.stopping)
+      return Promise.reject(new WorkflowValidationError("Pi workflow has stopped"));
     const next = this.tail.then(async () => {
       await this.load();
       return operation();
@@ -284,51 +293,8 @@ export class PiWorkflow implements WorkflowClient {
     if (this.journal.state !== null && !validState(this.journal.state))
       invalid("unsupported Pi checkpoint; preserve the journal and inspect the recorded run");
     this.state = this.journal.state as WorkflowState | null;
-    try {
-      const status = await this.recorder.getRunStatus(this.state?.run_id);
-      this.journal.durability = status.durability;
-      this.timeline = status.timeline;
-      const chunks = new Map<string, { parts: string[]; count: number }>();
-      for (const event of status.timeline) {
-        let candidate: unknown;
-        if (event.type === "adapter.state" && event.data.adapter === "pi")
-          candidate = event.data.state;
-        if (event.type === "adapter.state.chunk" && event.data.adapter === "pi") {
-          const { checkpointId, index, count, content } = event.data;
-          if (
-            typeof checkpointId === "string" &&
-            Number.isSafeInteger(index) &&
-            Number.isSafeInteger(count) &&
-            Number(count) > 0 &&
-            Number(count) <= 1024 &&
-            Number(index) >= 0 &&
-            Number(index) < Number(count) &&
-            typeof content === "string"
-          ) {
-            const group = chunks.get(checkpointId) ?? { parts: [], count: Number(count) };
-            group.parts[Number(index)] = content;
-            chunks.set(checkpointId, group);
-            if (group.parts.filter((p) => typeof p === "string").length === group.count) {
-              try {
-                candidate = JSON.parse(group.parts.join(""));
-              } catch {
-                /* Incomplete checkpoints never replace usable state. */
-              }
-            }
-          }
-        }
-        if (
-          validState(candidate) &&
-          candidate.run_id === event.runId &&
-          (!this.state || candidate.revision > this.state.revision)
-        )
-          this.state = candidate;
-      }
-      this.legacy = status.run !== null && this.state === null;
-    } catch (error) {
-      if (!this.state) throw error;
-      this.journal.problem = "recorder unavailable; using the local Pi checkpoint";
-    }
+    // Execution recovers only from Pi-owned state; the recorder is never a prerequisite.
+    this.timeline = [...this.journal.pending];
     this.loaded = true;
     const recovered: RecordedEvent[] = [];
     for (const [attemptId, attempt] of Object.entries(this.state?.attempts ?? {}))
@@ -343,15 +309,10 @@ export class PiWorkflow implements WorkflowClient {
         );
       }
     if (recovered.length) await this.commit(recovered);
-    else await this.journal.flush();
+    else this.journal.flush();
   }
   private requireRun(): WorkflowState {
-    if (!this.state)
-      invalid(
-        this.legacy
-          ? "legacy core-owned run is inspectable but cannot resume without a Pi checkpoint; start a new Pi session"
-          : "start a workflow first",
-      );
+    if (!this.state) invalid("start a workflow first");
     return this.state;
   }
   private visit() {
@@ -364,18 +325,15 @@ export class PiWorkflow implements WorkflowClient {
     return budgetRemaining(s.policy, s.startedAt, this.now(), Object.keys(s.attempts).length);
   }
   inspectProfile(): Promise<RoutingSnapshot | null> {
-    return this.recorder.inspectProfile();
+    return this.serial(async () =>
+      structuredClone(this.state ? this.state.routing : (this.configuration()?.routing ?? null)),
+    );
   }
-  startRun(
-    objective: string,
-    models?: AvailableModel[],
-    policy?: WorkflowPolicy,
-  ): Promise<RunStarted> {
+  startRun(objective: string, policy?: WorkflowPolicy): Promise<RunStarted> {
     return this.serial(async () => {
       if (this.state) return { runId: this.state.run_id, phase: this.visit().phase, resumed: true };
-      if (this.legacy) this.requireRun();
       if (!objective.trim()) invalid("workflow objective is required");
-      const config = await this.recorder.resolveConfiguration(models);
+      const config = structuredClone(this.configuration() ?? { routing: null, adapterConfig: {} });
       const selectedPolicy = policyFrom(policy ?? (config.adapterConfig as WorkflowPolicy));
       if (config.routing && !config.routing.routes[contracts.discovery.role]?.length)
         invalid("active profile has no Discovery route");
@@ -399,7 +357,8 @@ export class PiWorkflow implements WorkflowClient {
         this.event("run.started", {
           workflow: "pi.knowledge.v1",
           objectiveHash: createHash("sha256").update(objective).digest("hex"),
-          routing: config.routing,
+          profile: config.routing?.profile ?? null,
+          context: config.routing?.context ?? null,
         }),
         this.event("phase.entered", { phase: "discovery", visitId: this.visit().id }),
       ]);
@@ -736,20 +695,30 @@ export class PiWorkflow implements WorkflowClient {
       await this.commit([this.event("model.usage", data)]);
     });
   }
+  /** Stop background delivery without waiting for Rust. */
+  async stopRecording(): Promise<void> {
+    this.stopping = true;
+    this.journal.stop();
+    await this.tail;
+    await this.journal.close();
+  }
+  /** Kick delivery without waiting for Rust. */
+  syncRecording(): void {
+    this.journal.flush();
+  }
+  /** Explicit diagnostics/test drain, never used by workflow execution. */
+  waitForRecording(): Promise<void> {
+    this.journal.flush();
+    return this.journal.waitForIdle();
+  }
   getRunStatus(): Promise<RunStatus> {
     return this.serial(async () => {
-      await this.journal.flush();
+      this.journal.flush();
       return {
         run: this.state ? structuredClone(this.state) : null,
         timeline: this.timeline,
         durability: this.journal.durability,
         ...(this.journal.problem ? { degradedReason: this.journal.problem } : {}),
-        ...(this.legacy
-          ? {
-              degradedReason:
-                "legacy core-owned run cannot resume without a Pi checkpoint; use xper status to inspect it",
-            }
-          : {}),
       };
     });
   }

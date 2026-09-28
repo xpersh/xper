@@ -1,7 +1,6 @@
 import type { PiExtensionAPI } from "./types.js";
 import { PROTOCOL_VERSION } from "../bridge/protocol.js";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
-import { listAvailableModels } from "../knowledge/models.js";
 
 const USAGE =
   "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance | /xper approve <artifactId>";
@@ -17,6 +16,7 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         : "start";
       let objective = first === "start" ? input.slice("start".length).trim() : input;
       const connection = session.connection;
+      const workflow = session.workflow;
       session.observation?.record("command.invoked", {
         command: "xper",
         recognized: true,
@@ -30,8 +30,8 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         return;
       }
       if (action === "start" || action === "advance" || action === "approve") {
-        if (!connection) {
-          ctx.ui.notify(`xper: ${session.error ?? "bridge offline"}`, "warning");
+        if (!workflow) {
+          ctx.ui.notify(`xper: local workflow is not initialized`, "warning");
           return;
         }
         try {
@@ -53,21 +53,19 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
                 return;
               }
             }
-            const routing = await connection.workflow.inspectProfile();
-            if (routing && !routing.routes["discovery.explorer"]?.length)
-              throw new Error("active profile has no Discovery route");
-            const models = routing ? await listAvailableModels() : undefined;
-            const result = await connection.workflow.startRun(objective, models);
+            const prepared = session.configurationSummary();
+            const result = await workflow.startRun(objective);
             message = `${result.resumed ? "Resumed" : "Started"} workflow ${result.runId}; phase ${result.phase ?? "unknown"}.`;
             if (result.phase === "discovery") {
               message += " Ask Pi to delegate Discovery with xper_delegate.";
             }
+            if (!result.resumed) message += ` Configuration: ${prepared}.`;
           } else {
             const artifactId =
               action === "approve" ? input.slice("approve".length).trim() : undefined;
             if (action === "approve" && (!artifactId || /\s/.test(artifactId)))
               throw new Error("Provide the artifact ID from the pending human gate");
-            const result = await connection.workflow.advanceRun(artifactId);
+            const result = await workflow.advanceRun(artifactId);
             message = JSON.stringify(result);
           }
           await session.refreshRun();
@@ -80,6 +78,7 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         }
         return;
       }
+      await session.refreshRun();
       const state =
         connection && !session.error
           ? `connected (pid ${connection.client.process.pid ?? "?"}, bridge ${connection.handshake.bridgeVersion})`
@@ -89,10 +88,9 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         ? `; tools observed: started ${counts.started}, completed ${counts.completed}, failed ${counts.failed}, in flight ${counts.inFlight}, unpaired ${counts.unpaired}`
         : "";
       ctx.ui.notify(
-        `xper adapter pi ${ADAPTER_VERSION}; protocol ${PROTOCOL_VERSION}; bridge ${state}${session.phaseSummary()}${observed}`,
+        `xper adapter pi ${ADAPTER_VERSION}; protocol ${PROTOCOL_VERSION}; bridge ${state}${session.phaseSummary()}; prepared configuration: ${session.configurationSummary()}${observed}`,
         connection ? "info" : "warning",
       );
-      void session.refreshRun().catch(() => {});
     },
   });
 }

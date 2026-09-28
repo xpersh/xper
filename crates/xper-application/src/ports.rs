@@ -54,14 +54,8 @@ pub trait Installation {
     /// Reports requirements without modifying files or installing packages.
     fn inspect(&self) -> Vec<Check>;
 
-    /// Human-readable destination for a potential agent change.
-    fn agent_target(&self) -> String;
-
-    /// Whether the selected scope already contains a valid agent definition.
-    fn agent_is_valid(&self) -> Result<bool, Self::Error>;
-
-    /// Applies idempotent preparation after preflight and any required approval.
-    /// Preserve valid files and check backup conflicts before writing anything.
+    /// Applies idempotent configuration preparation after preflight passes.
+    /// Preserve valid existing configuration.
     /// Returns descriptions of the changes actually made.
-    fn prepare(&mut self, repair_agent: bool) -> Result<Vec<String>, Self::Error>;
+    fn prepare(&mut self) -> Result<Vec<String>, Self::Error>;
 }

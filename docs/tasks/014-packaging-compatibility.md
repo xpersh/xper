@@ -13,7 +13,7 @@ binary and Pi TypeScript adapter.
 
 - Define combined or coordinated packaging for the CLI, bridge, and adapter.
 - Produce binaries for supported architectures.
-- Pin the tested Pi and `pi-open-agents` compatibility matrix.
+- Publish the tested Pi, CLI, and adapter compatibility matrix.
 - Validate global and project installation.
 - Implement upgrades, rollback, and incompatible-version diagnostics.
 - Run cross-platform smoke tests.

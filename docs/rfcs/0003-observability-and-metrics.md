@@ -117,11 +117,12 @@ increment.accepted
 - Model or reasoning-level changes.
 - Message and queue state when relevant.
 
-xper emits workflow meaning; Pi supplies runtime detail. `pi-open-agents`
-events are adapted to xper's vocabulary: a delegation creates an `attempt`,
-and the child process or session is correlated with its `assignment`, phase,
-model, and effective profile. The database does not depend on the extension's
-internal format; the adapter translates those events into a stable xper envelope.
+xper emits workflow meaning; Pi supplies runtime detail. The adapter creates
+an Attempt through the core before executing Discovery and reports its explicit
+result. The child process is correlated with its Assignment, phase, model, and
+effective profile. Generic Pi tool observations do not settle Attempts or pass
+gates. The database does not depend on an agent-manager package's internal
+format.
 
 ## Common envelope
 
@@ -167,10 +168,11 @@ Pi telemetry ----------+                         +-- projections
                                                  +-- aggregates
 ```
 
-In the first integration, the collector also receives events from the
-`pi-open-agents` adapter. This source is treated as a runtime detail, not the
-workflow's source of truth: if the extension changes, domain events and the
-SQLite schema remain stable.
+The current integration records generic Pi tool observations and xper
+execution correlation. The
+[direct activation revision](0004-pi-integration.md#direct-workflow-activation-revision-2026-09-27)
+retires the earlier plugin-specific telemetry. Runtime observations remain
+separate from the core's persisted workflow events and outcomes.
 
 The Event Collector is passive. Observability errors are isolated and do not
 change the workflow outcome. Persistence must support batching, flushing at

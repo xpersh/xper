@@ -30,7 +30,7 @@ Solid arrows show calls. Implementations depend on core contracts.
 | Process entry point | `crates/xper-cli/src/main.rs` | Arguments and exit code |
 | Bridge transport | `crates/xper-cli/src/bridge/mod.rs` | Framing, handshake, sessions, and heartbeat |
 | RPC translation | `crates/xper-cli/src/bridge/workflow.rs` | JSON → typed request → result → JSON |
-| CLI presentation | `crates/xper-cli/src/status.rs`, `setup.rs` | Text/JSON and terminal confirmation |
+| CLI presentation | `crates/xper-cli/src/status.rs`, `setup.rs` | Text/JSON presentation |
 | Composition | `crates/xper-cli/src/composition.rs` | Opening SQLite and session resources |
 | Local adapters | `crates/xper-cli/src/infrastructure/` | Clock, IDs, artifacts, installation, and active-profile files |
 | System actions | `crates/xper-application/src/use_cases/` | Coordination of each operation |
@@ -64,10 +64,11 @@ Functions make their required dependencies explicit. There is no global
 service container or command bus. Adding an action means writing its
 coordination and connecting it to the interface that exposes it.
 
-`initialize_workspace` receives presentation and consent callbacks. It decides
-when to invoke them and when to allow writes; the CLI decides how to display
-checks and read the response. The adapter reports which failures it can repair,
-so the application does not need to know harness-specific IDs.
+`initialize_workspace` inspects the installation before asking its adapter to
+prepare configuration. The CLI presents the checks and resulting changes.
+Required failures block writes; the application does not need to know
+harness-specific diagnostic IDs. Setup preserves existing configuration and
+leaves Pi packages, settings, and agent definitions under the user's control.
 
 ## Ports and guarantees
 
@@ -76,8 +77,8 @@ so the application does not need to know harness-specific IDs.
 - `RunRepository`: adds commits of complete boundaries. Creating a run and
   binding its session are a single atomic port operation.
 - `ArtifactReader`: check evidence availability relative to the workspace.
-- `Installation`: inspect and prepare the selected scope. Preserve valid files
-  and check backup conflicts before writing.
+- `Installation`: inspect and prepare configuration in the selected scope.
+  Preserve existing files and do not install or change harness packages.
 - `Clock` and `IdGenerator`: existing domain contracts reused by use cases to
   make their results reproducible in tests.
 

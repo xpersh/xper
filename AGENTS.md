@@ -72,6 +72,6 @@ Run all commands in these instructions from the repository root.
   modules, and what you verified. State which checks you could not run and why;
   do not claim success without evidence.
 
-`.pi/agents/xper.md` defines the agent used by the product. These `AGENTS.md`
-files provide instructions for developing this repository; they serve different
-responsibilities.
+`.pi/extensions/xper.ts` loads the Pi integration used by the product. These
+`AGENTS.md` files provide instructions for developing this repository; they
+serve different responsibilities.

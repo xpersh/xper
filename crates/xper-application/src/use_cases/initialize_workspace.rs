@@ -1,4 +1,4 @@
-//! Prepare an installation only after preflight and any required agent approval.
+//! Prepare configuration only after installation preflight passes.
 
 use crate::{
     ApplicationError,
@@ -6,12 +6,10 @@ use crate::{
     ports::Installation,
 };
 
-/// Result of initialization, including preflight or consent rejection.
+/// Result of initialization, including preflight rejection.
 pub enum Outcome {
     /// Prerequisites must be repaired before initialization can proceed.
     Blocked,
-    /// The agent needs changing and that change was not authorized.
-    ConfirmationRequired,
     /// Preparation completed, possibly without changes on a repeated request.
     Completed {
         /// Descriptions of changes actually made by the installation adapter.
@@ -19,31 +17,18 @@ pub enum Outcome {
     },
 }
 
-/// The interface handles presentation and consent; the use case controls when
-/// writes may happen. Both callbacks run only at their appropriate stage.
-pub fn execute<E: std::error::Error + Send + Sync + 'static>(
+/// Reports preflight diagnostics before allowing configuration writes.
+pub fn execute(
     installation: &mut impl Installation,
     mut report: impl FnMut(&[Check]),
-    mut confirm_agent: impl FnMut(&str) -> Result<bool, E>,
 ) -> Result<Outcome, ApplicationError> {
     let checks = installation.inspect();
     report(&checks);
-    if checks
-        .iter()
-        .any(|check| check.status == CheckStatus::Fail && !check.repairable)
-    {
+    if checks.iter().any(|check| check.status == CheckStatus::Fail) {
         return Ok(Outcome::Blocked);
     }
-    let repair_agent = !installation
-        .agent_is_valid()
-        .map_err(ApplicationError::dependency)?;
-    if repair_agent
-        && !confirm_agent(&installation.agent_target()).map_err(ApplicationError::dependency)?
-    {
-        return Ok(Outcome::ConfirmationRequired);
-    }
     let changes = installation
-        .prepare(repair_agent)
+        .prepare()
         .map_err(ApplicationError::dependency)?;
     Ok(Outcome::Completed { changes })
 }

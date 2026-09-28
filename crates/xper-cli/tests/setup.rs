@@ -113,15 +113,8 @@ fn valid_doctor_is_read_only_and_has_stable_ids() {
     );
     let json = report(&output);
     assert_eq!(json["schemaVersion"], 1);
-    for id in [
-        "PI_VERSION",
-        "OPEN_AGENTS_VERSION",
-        "AGENT_CONFLICT",
-        "PACKAGE_DECLARATION",
-        "PRIMARY_AGENT",
-        "ADAPTER",
-        "CONFIG",
-    ] {
+    assert_eq!(json["checks"].as_array().unwrap().len(), 4);
+    for id in ["PI_VERSION", "PI_SETTINGS", "ADAPTER", "CONFIG"] {
         assert_eq!(status(&json, id).as_deref(), Some("PASS"), "{id}: {json}");
     }
     assert_eq!(snapshot(&workspace.root), before);
@@ -203,7 +196,7 @@ fn init_accepts_the_latest_supported_pi_version() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(workspace.root.join(".xper/config.yaml").is_file());
-    assert!(workspace.root.join(".pi/agents/xper.md").is_file());
+    assert!(!workspace.root.join(".pi/agents/xper.md").exists());
 }
 
 #[test]
@@ -229,115 +222,95 @@ fn init_rejects_pi_versions_outside_the_supported_range_without_writes() {
 #[test]
 fn partial_init_is_idempotent_and_preserves_user_configuration() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
-    let first = workspace.command(&["init", "--yes"]);
+    let pi_before = snapshot(&workspace.root.join(".pi"));
+    let first = workspace.command(&["init"]);
     assert!(
         first.status.success(),
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
     let config = workspace.root.join(".xper/config.yaml");
-    let agent = workspace.root.join(".pi/agents/xper.md");
+    assert_eq!(
+        fs::read_to_string(&config).unwrap(),
+        "harness:\n  adapter: pi\n"
+    );
+    assert_eq!(snapshot(&workspace.root.join(".pi")), pi_before);
     fs::write(&config, "harness:\n  adapter: pi\nprofile: custom\n").unwrap();
-    fs::write(
-        &agent,
-        "---\nname: xper\nmode: primary\n---\nUser instructions.\n",
-    )
-    .unwrap();
     let before = snapshot(&workspace.root);
     let second = workspace.command(&["init", "--yes"]);
-    assert!(
-        second.status.success(),
-        "{}",
-        String::from_utf8_lossy(&second.stderr)
-    );
+    assert!(second.status.success());
     assert_eq!(snapshot(&workspace.root), before);
-    let settings: Value =
-        serde_json::from_slice(&fs::read(workspace.root.join(".pi/settings.json")).unwrap())
-            .unwrap();
-    assert_eq!(settings["theme"], "dark");
-    assert_eq!(settings["packages"][0], "npm:pi-open-agents@0.1.22");
+    assert_eq!(
+        fs::read_to_string(workspace.root.join(".gitignore")).unwrap(),
+        "/.xper/config.local.yaml\n"
+    );
 }
 
 #[test]
-fn incompatible_and_missing_dependencies_report_actions_without_writes() {
-    let incompatible = Workspace::fixture("incompatible", Some("0.85.1"));
-    let before = snapshot(&incompatible.root);
-    let output = incompatible.command(&["doctor", "--json"]);
-    assert!(!output.status.success());
+fn existing_agent_packages_and_definitions_do_not_block_doctor_or_init() {
+    let workspace = Workspace::fixture("incompatible", Some("0.85.1"));
+    let pi_before = snapshot(&workspace.root.join(".pi"));
+    let before = snapshot(&workspace.root);
+    let output = workspace.command(&["doctor", "--json"]);
     let json = report(&output);
-    assert_eq!(
-        status(&json, "OPEN_AGENTS_VERSION").as_deref(),
-        Some("FAIL")
-    );
-    assert_eq!(status(&json, "AGENT_CONFLICT").as_deref(), Some("FAIL"));
-    assert_eq!(
-        status(&json, "PACKAGE_DECLARATION").as_deref(),
-        Some("FAIL")
-    );
-    assert_eq!(snapshot(&incompatible.root), before);
+    assert!(output.status.success(), "{json}");
+    for removed in [
+        "OPEN_AGENTS_VERSION",
+        "OPEN_AGENTS_MISSING",
+        "AGENT_CONFLICT",
+        "PACKAGE_DECLARATION",
+        "PRIMARY_AGENT",
+    ] {
+        assert!(status(&json, removed).is_none(), "{removed}: {json}");
+    }
+    assert_eq!(snapshot(&workspace.root), before);
+    assert!(workspace.command(&["init"]).status.success());
+    assert_eq!(snapshot(&workspace.root.join(".pi")), pi_before);
+    let before = snapshot(&workspace.root);
+    assert!(workspace.command(&["init", "--yes"]).status.success());
+    assert_eq!(snapshot(&workspace.root), before);
+}
 
-    let missing = Workspace::fixture("partial", None);
-    let before = snapshot(&missing.root);
-    let output = missing.command(&["init", "--yes"]);
+#[test]
+fn missing_pi_reports_an_action_and_blocks_init_without_writes() {
+    let workspace = Workspace::fixture("partial", None);
+    let before = snapshot(&workspace.root);
+    let output = workspace.command(&["doctor", "--json"]);
+    assert!(!output.status.success());
+    assert_eq!(
+        status(&report(&output), "PI_MISSING").as_deref(),
+        Some("FAIL")
+    );
+    let output = workspace.command(&["init", "--yes"]);
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stdout)
-            .contains("npm install -g @mariozechner/pi-coding-agent")
+            .contains("npm install -g @earendil-works/pi-coding-agent")
     );
-    assert_eq!(snapshot(&missing.root), before);
-
-    fs::remove_file(
-        missing
-            .root
-            .join(".pi/npm/node_modules/pi-open-agents/package.json"),
-    )
-    .unwrap();
-    let output = missing.command(&["doctor", "--json"]);
-    let json = report(&output);
-    assert_eq!(
-        status(&json, "OPEN_AGENTS_MISSING").as_deref(),
-        Some("FAIL")
-    );
-    assert!(
-        output
-            .stdout
-            .windows(b"pi install npm:pi-open-agents".len())
-            .any(|window| window == b"pi install npm:pi-open-agents")
-    );
+    assert_eq!(snapshot(&workspace.root), before);
 }
 
 #[test]
-fn noninteractive_agent_repair_requires_confirmation() {
-    let workspace = Workspace::fixture("incompatible", Some("0.85.1"));
-    // Make the dependency compatible so the agent check is the only fatal preflight item.
+fn mismatched_adapter_version_still_blocks_init_without_writes() {
+    let workspace = Workspace::fixture("valid", Some("0.85.1"));
     fs::write(
-        workspace
-            .root
-            .join(".pi/npm/node_modules/pi-open-agents/package.json"),
-        "{\"version\":\"0.1.22\"}",
-    )
-    .unwrap();
-    fs::write(
-        workspace.root.join(".pi/settings.json"),
-        "{\"packages\":[\"npm:pi-open-agents@0.1.22\"]}",
+        workspace.root.join("adapters/pi/package.json"),
+        "{\"version\":\"0.0.1\"}",
     )
     .unwrap();
     let before = snapshot(&workspace.root);
-    let output = workspace.command(&["init"]);
+    let output = workspace.command(&["doctor", "--json"]);
     assert!(!output.status.success());
+    assert_eq!(status(&report(&output), "ADAPTER").as_deref(), Some("FAIL"));
+    assert!(!workspace.command(&["init"]).status.success());
     assert_eq!(snapshot(&workspace.root), before);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--yes"));
 }
 
 #[test]
-fn global_init_writes_only_global_scope_and_is_idempotent() {
+fn global_init_writes_only_global_configuration_and_is_idempotent() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
-    let global_package = workspace
-        .root
-        .join("home/.pi/agent/npm/node_modules/pi-open-agents/package.json");
-    fs::create_dir_all(global_package.parent().unwrap()).unwrap();
-    fs::write(&global_package, "{\"version\":\"0.1.22\"}").unwrap();
-    let first = workspace.command(&["init", "--global", "--yes"]);
+    let pi_before = snapshot(&workspace.root.join(".pi"));
+    let first = workspace.command(&["init", "--global"]);
     assert!(
         first.status.success(),
         "{}",
@@ -349,13 +322,10 @@ fn global_init_writes_only_global_scope_and_is_idempotent() {
             .join("home/.config/xper/config.yaml")
             .is_file()
     );
-    assert!(
-        workspace
-            .root
-            .join("home/.pi/agent/agents/xper.md")
-            .is_file()
-    );
+    assert!(!workspace.root.join("home/.pi").exists());
     assert!(!workspace.root.join(".xper/config.yaml").exists());
+    assert!(!workspace.root.join(".gitignore").exists());
+    assert_eq!(snapshot(&workspace.root.join(".pi")), pi_before);
     let before = snapshot(&workspace.root);
     let second = workspace.command(&["init", "--yes", "--global"]);
     assert!(second.status.success());
@@ -377,70 +347,62 @@ fn secrets_in_config_stop_init_without_echo_or_writes() {
 }
 
 #[test]
-fn missing_package_blocks_init_with_install_command() {
-    let workspace = Workspace::fixture("partial", Some("0.85.1"));
-    fs::remove_file(
-        workspace
-            .root
-            .join(".pi/npm/node_modules/pi-open-agents/package.json"),
-    )
-    .unwrap();
-    let before = snapshot(&workspace.root);
-    let output = workspace.command(&["init", "--yes"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("pi install npm:pi-open-agents"));
-    assert_eq!(snapshot(&workspace.root), before);
+fn malformed_or_unsupported_configuration_blocks_init_without_writes() {
+    for content in ["harness:\n\tadapter: pi\n", "harness:\n  adapter: other\n"] {
+        let workspace = Workspace::fixture("partial", Some("0.85.1"));
+        let config = workspace.root.join(".xper/config.yaml");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, content).unwrap();
+        let before = snapshot(&workspace.root);
+        let output = workspace.command(&["doctor", "--json"]);
+        assert!(!output.status.success());
+        assert_eq!(status(&report(&output), "CONFIG").as_deref(), Some("FAIL"));
+        assert!(!workspace.command(&["init"]).status.success());
+        assert_eq!(snapshot(&workspace.root), before);
+    }
 }
 
 #[test]
-fn confirmed_repair_backs_up_previous_agent() {
+fn init_does_not_create_pi_settings_agents_or_packages() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
-    let agent = workspace.root.join(".pi/agents/xper.md");
-    fs::create_dir_all(agent.parent().unwrap()).unwrap();
-    let previous = "---\nname: xper\nmode: subagent\n---\nUser instructions.\n";
-    fs::write(&agent, previous).unwrap();
-    let output = workspace.command(&["init", "--yes"]);
+    fs::remove_file(workspace.root.join(".pi/settings.json")).unwrap();
+    let output = workspace.command(&["init"]);
+    assert!(output.status.success());
+    assert!(workspace.root.join(".xper/config.yaml").is_file());
+    assert!(snapshot(&workspace.root.join(".pi")).is_empty());
+}
+
+#[test]
+fn global_agent_packages_and_existing_backups_are_preserved() {
+    let workspace = Workspace::fixture("valid", Some("0.85.1"));
+    let pi_home = workspace.root.join("home/.pi/agent");
+    fs::create_dir_all(pi_home.join("agents")).unwrap();
+    fs::write(
+        pi_home.join("settings.json"),
+        r#"{"packages":["npm:pi-open-agents@0.2.0",{"source":"npm:other-agent-manager@1.0.0","extensions":[]}]}"#,
+    )
+    .unwrap();
+    fs::write(pi_home.join("agents/xper.md"), "Existing user agent").unwrap();
+    fs::write(pi_home.join("agents/xper.md.bak"), "Existing backup").unwrap();
+    let pi_before = snapshot(&pi_home);
+    let output = workspace.command(&["doctor", "--json"]);
     assert!(
         output.status.success(),
         "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        fs::read_to_string(agent.with_extension("md.bak")).unwrap(),
-        previous
+        String::from_utf8_lossy(&output.stdout)
     );
     assert!(
-        fs::read_to_string(&agent)
-            .unwrap()
-            .contains("mode: primary")
+        workspace
+            .command(&["init", "--global", "--yes"])
+            .status
+            .success()
     );
-    let before = snapshot(&workspace.root);
-    assert!(workspace.command(&["init", "--yes"]).status.success());
-    assert_eq!(snapshot(&workspace.root), before);
-}
-
-#[test]
-fn doctor_detects_global_package_conflict_in_project_scope() {
-    let workspace = Workspace::fixture("valid", Some("0.85.1"));
-    let settings = workspace.root.join("home/.pi/agent/settings.json");
-    fs::create_dir_all(settings.parent().unwrap()).unwrap();
-    fs::write(&settings, "{\"packages\":[\"npm:pi-open-agents@0.2.0\"]}").unwrap();
-    let output = workspace.command(&["doctor", "--json"]);
-    assert!(!output.status.success());
-    assert_eq!(
-        status(&report(&output), "PACKAGE_DECLARATION").as_deref(),
-        Some("FAIL")
-    );
+    assert_eq!(snapshot(&pi_home), pi_before);
 }
 
 #[test]
 fn global_init_ignores_invalid_project_config() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
-    let global_package = workspace
-        .root
-        .join("home/.pi/agent/npm/node_modules/pi-open-agents/package.json");
-    fs::create_dir_all(global_package.parent().unwrap()).unwrap();
-    fs::write(&global_package, "{\"version\":\"0.1.22\"}").unwrap();
     let project_config = workspace.root.join(".xper/config.yaml");
     fs::create_dir_all(project_config.parent().unwrap()).unwrap();
     fs::write(&project_config, "api_key: forbidden-value\n").unwrap();
@@ -469,6 +431,26 @@ fn credentials_in_pi_settings_stop_init_before_writes() {
     assert!(!output.status.success());
     assert_eq!(snapshot(&workspace.root), before);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("forbidden-value"));
+}
+
+#[test]
+fn malformed_pi_settings_fail_in_the_selected_scope_without_writes() {
+    for (settings_path, args) in [
+        (".pi/settings.json", vec!["init"]),
+        ("home/.pi/agent/settings.json", vec!["init", "--global"]),
+    ] {
+        for content in ["{invalid", "[]"] {
+            let workspace = Workspace::fixture("partial", Some("0.85.1"));
+            let settings = workspace.root.join(settings_path);
+            fs::create_dir_all(settings.parent().unwrap()).unwrap();
+            fs::write(&settings, content).unwrap();
+            let before = snapshot(&workspace.root);
+            let output = workspace.command(&args);
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stdout).contains("PI_SETTINGS"));
+            assert_eq!(snapshot(&workspace.root), before);
+        }
+    }
 }
 
 #[test]

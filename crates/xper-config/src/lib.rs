@@ -12,7 +12,7 @@ pub use routing::resolve_profile;
 pub const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// Minimal configuration; credentials belong to Pi or the environment.
-pub const DEFAULT_CONFIG: &str = "harness:\n  adapter: pi\nadapters:\n  pi:\n    primary_agent: xper\n    require_pi_open_agents: true\n";
+pub const DEFAULT_CONFIG: &str = "harness:\n  adapter: pi\n";
 
 /// Paths searched in increasing precedence.
 #[derive(Debug, Clone)]
@@ -266,26 +266,10 @@ pub fn validate(value: &Value) -> Result<(), ConfigError> {
         return Err(ConfigError("harness.adapter must be a string".into()));
     }
     if value
-        .pointer("/adapters/pi/primary_agent")
-        .is_some_and(|v| !v.is_string())
-    {
-        return Err(ConfigError(
-            "adapters.pi.primary_agent must be a string".into(),
-        ));
-    }
-    if value
         .pointer("/adapters/pi")
         .is_some_and(|v| !v.is_object())
     {
         return Err(ConfigError("adapters.pi must be a mapping".into()));
-    }
-    if value
-        .pointer("/adapters/pi/require_pi_open_agents")
-        .is_some_and(|v| !v.is_boolean())
-    {
-        return Err(ConfigError(
-            "adapters.pi.require_pi_open_agents must be a boolean".into(),
-        ));
     }
     for key in ["contexts", "profiles"] {
         if root
@@ -375,10 +359,25 @@ mod tests {
 
     #[test]
     fn known_fields_reject_invalid_types() {
-        let invalid = parse("adapters:\n  pi:\n    require_pi_open_agents: maybe\n").unwrap();
+        let invalid = parse("adapters:\n  pi: invalid\n").unwrap();
         assert!(validate(&invalid).is_err());
         let invalid = parse("workflow:\n  implementation:\n    max_attempts: 0\n").unwrap();
         assert!(validate(&invalid).is_err());
+    }
+
+    #[test]
+    fn defaults_do_not_require_agent_packages_and_legacy_keys_remain_readable() {
+        let defaults = parse(DEFAULT_CONFIG).unwrap();
+        assert!(defaults.pointer("/adapters/pi/primary_agent").is_none());
+        assert!(
+            defaults
+                .pointer("/adapters/pi/require_pi_open_agents")
+                .is_none()
+        );
+        let legacy =
+            parse("adapters:\n  pi:\n    primary_agent: xper\n    require_pi_open_agents: true\n")
+                .unwrap();
+        assert!(validate(&legacy).is_ok());
     }
 
     #[test]

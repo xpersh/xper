@@ -11,7 +11,7 @@ evidence: start a run, delegate Discovery, and advance to Define.
 
 ## Scope
 
-- Start or resume a run from a Pi session with `xper` active.
+- Start or resume a run with `/xper` in a Pi session.
 - Create a `discovery.explorer` assignment.
 - Resolve and launch a subagent through the path chosen in XP-001.
 - Correlate the native lifecycle with an xper Attempt.
@@ -36,17 +36,17 @@ evidence: start a run, delegate Discovery, and advance to Define.
 
 ## Implementation
 
-- `/xper start <objective>` opens or resumes the run associated with that Pi
-  session and persists `Intake -> Discovery` in a single transaction. Each new
+- `/xper <objective>` (or `/xper start <objective>`) opens or resumes the run
+  associated with that Pi session and persists `Intake -> Discovery` in a single transaction. Each new
   session can start an independent run. In different worktrees, each session
   uses its own `.xper/events.sqlite`; their runs remain separate even when
   they share a directory.
 - The custom `xper_delegate` tool creates a `discovery.explorer` assignment and
   an Attempt. The adapter resolves that role and launches a child Pi process
   over RPC. It correlates the native `toolCallId` with xper's `attemptId` in
-  observations; it does not derive the result from the `pi-open-agents`
-  `subagent` tool. The child starts without a persistent session or the xper
-  extension: the attempt belongs to the primary agent's run.
+  observations. The child starts without a persistent session or extensions:
+  the attempt belongs to the parent session's run. No external subagent
+  package participates in this execution.
 - The child's final result is written as a Discovery Brief in `.xper/artifacts/`.
   The event records only its reference. Success, failure, cancellation, and
   timeout are recorded as distinct outcomes; a crash leaves an `interrupted`
@@ -80,21 +80,23 @@ From this checkout, with Pi and a provider/model configured:
 npm ci
 npm run build --workspace @xper/adapter-pi
 cargo build -p xper-cli
-pi install -l npm:pi-open-agents@0.1.22
-pi --approve --agent xper
+pi
 ```
 
 In the Pi session:
 
 ```text
-/xper start Explore the current state of this project
+/xper Explore the current state of this project
 /xper advance
 Use xper_delegate to inspect the project and produce a Discovery Brief.
 /xper status
 ```
 
-The first advance request should return `advanced: false`. After a successful
-`xper_delegate` result, the tool requests advancement, and status should show
+Bare `/xper` can also ask for the objective interactively. Starting the run
+displays the current phase and a suggested next action; it does not invoke the
+model automatically. The first advance request should report that the gate is
+not satisfied. After a successful `xper_delegate` result, the tool requests
+advancement, and status should show
 `phase define`. Outside Pi, from the same directory:
 
 ```bash

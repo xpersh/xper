@@ -11,7 +11,8 @@ cross-process boundary.
 
 The extension has small integration actions. Gate and transition rules remain
 in the Rust core's use cases. The adapter translates the Pi API, executes
-agents, saves their artifacts, and presents results.
+agents, saves their artifacts, and presents results. It requires no external
+agent manager or primary-agent definition.
 
 [extension.ts](../src/extension.ts) composes the session, executor, and artifact
 writer, and registers commands, tools, and hooks. Bridge process creation is
@@ -74,6 +75,20 @@ action so it can save the Brief and report it to the core.
 | Write the Brief without overwriting existing evidence | [discovery/artifacts.ts](../src/discovery/artifacts.ts) |
 | Query Pi's available models and map routed selections | [discovery/models.ts](../src/discovery/models.ts) |
 
+## Workflow activation
+
+`/xper <objective>` and `/xper start <objective>` call the same typed workflow
+operation to start or resume the session's run. Bare `/xper` asks for the
+objective through Pi's interactive UI; callers without that UI provide it
+inline. The command displays the phase and suggests the next action.
+`/xper status` inspects state, and `/xper advance` asks the core to evaluate
+the current gate.
+
+Starting a workflow does not replace Pi's system prompt or invoke a model
+automatically. `xper_delegate` remains the explicit Discovery execution tool.
+This separates command input and presentation from model execution and the
+core's durable workflow state without adding an agent-loader abstraction.
+
 ## Delegation flow
 
 `delegateDiscovery` receives execution and writing functions, a workflow
@@ -105,11 +120,11 @@ or a second domain/application hierarchy.
 
 Installation setup through `xper init` and `xper doctor` belongs to the CLI.
 
-For an active profile, `/xper start` asks the core for its resolved routing,
+For an active profile, starting a run asks the core for its resolved routing,
 queries Pi's available models using its normal configuration, and
 passes the catalog to `run.start`. The core validates and freezes the route.
 `assignment.start` returns a neutral model selection, which the adapter maps to
-Pi's `--model` and `--thinking`. Pi credentials are shared with the primary
+Pi's `--model` and `--thinking`. Pi credentials are shared with the parent
 process; contexts constrain provider names but cannot choose between accounts
 under the same provider identifier. A failed or timed-out execution settles
 its assignment after one attempt. Recovery can retry an interrupted attempt

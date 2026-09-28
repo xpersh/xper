@@ -1,6 +1,6 @@
-# RFC 0004: Pi integration and primary agent
+# RFC 0004: Pi integration and workflow activation
 
-- Status: accepted for the first prototype
+- Status: accepted, revised for direct workflow activation on 2026-09-27
 - Date: 2026-09-22
 - Depends on: [RFC 0001](0001-product-and-workflow.md), [RFC 0002](0002-multimodel-configuration.md), and [RFC 0003](0003-observability-and-metrics.md)
 - Related to: [RFC 0005](0005-modular-architecture.md)
@@ -8,20 +8,18 @@
 
 ## Summary
 
-xper will run inside Pi as the session's primary agent. The first prototype
-will use [`pi-open-agents`](https://pi.dev/packages/pi-open-agents) as the
-primary-agent and subagent layer. xper will add the XP state machine,
-cross-phase contracts, multimodel routing, artifacts, and observability.
+xper runs inside Pi through its own extension. `/xper` starts the workflow,
+and `xper_delegate` executes Discovery through a child Pi process. The Rust
+core owns workflow state, gates, routing, and evidence. No external
+agent-manager package is required.
 
-> **XP-001 result:** the spike recommended using `pi-open-agents` for discovery
-> and primary activation, and building a custom executor for durable delegations.
-> The explicit `0.0.1` decision below also accepts trying its `subagent` tool,
-> retaining the limitations discovered in the
-> [spike report](../spikes/001-pi-integration.md).
+The [direct activation revision](#direct-workflow-activation-revision-2026-09-27)
+supersedes the original dependency on `pi-open-agents`. The prototype and
+compatibility decisions below remain as historical evidence; they do not
+require installing that package in the current integration.
 
-This decision replaces the initial idea of an `xper run` process controlling
-Pi from outside. The xper CLI is reserved for initialization, configuration,
-diagnostics, queries, and export.
+The xper CLI remains responsible for initialization, configuration,
+diagnostics, queries, and export. Pi owns the interactive session.
 
 ## Decision for prototype 0.0.1 (2026-09-24)
 
@@ -86,42 +84,47 @@ model catalog in an isolated offline environment. The workspace checks passed.
 This evidence does not cover every intermediate release, Windows, or a new
 end-to-end run with `pi-open-agents` and real models.
 
-## Decision
+## Direct workflow activation revision (2026-09-27)
 
-The primary experience will be:
+The adapter now starts the workflow directly from `/xper`. It no longer
+requires `pi-open-agents` to discover or activate a primary agent. This
+supersedes the package requirement, primary-agent Markdown contract, generic
+`subagent` telemetry, and installation policy in the earlier decisions.
 
-```text
-user
-   |
-   v
-Pi session with xper as the primary agent
-   |
-   +-- xper extension: workflow, gates, state, and metrics
-   |
-   +-- pi-open-agents: discovery, definitions, and primary agent
-   |
-   +-- pi-open-agents subagent: provisional execution in 0.0.1
-   +-- xper executor: Discovery with durable attempts and explicit cancellation
-           |
-           +-- discovery / define / design / plan
-           +-- driver / navigator / verifier
-           +-- judgment-day
-```
+The existing executor already owns the durable Discovery lifecycle. Replacing
+one mandatory agent manager with another would not simplify that path, and
+the assessed subagent packages do not provide the removed primary-agent activation
+interface. This revision keeps the existing execution dependency in
+`delegateDiscovery`; it introduces no executor registry or backend selection.
 
-After initializing the project, start the session with:
+## Current interaction
 
-```bash
-pi --agent xper
-```
-
-In an existing session, activate it with:
+Prepare the checkout's extension and bridge as described in the
+[README](../../README.md#relationship-with-pi), then start `pi` and enter:
 
 ```text
-/agent xper
+/xper Explore the current state of this project
 ```
 
-The xper coordinator is therefore Pi's primary agent. Specialized agents are
-ephemeral subagents instantiated when a phase or assignment requires them.
+Bare `/xper` asks for an objective interactively. `/xper start <objective>`
+remains an explicit form, and `/xper status` and `/xper advance` retain their
+existing responsibilities. The command starts or resumes the session's run;
+the extension displays its phase and next action. It does not switch the
+session's primary agent or system prompt, call a model automatically, or
+execute subsequent phases on its own. Its manifest advertises
+`primaryAgent: false` and retains `subagents: true` for its own executor.
+
+```text
+Pi session
+└── xper extension
+    ├── /xper: start or resume, inspect, request advancement
+    ├── xper bridge --stdio: Rust use cases, gates, and persistence
+    └── xper_delegate: Discovery assignment and durable Attempt
+        └── child Pi RPC process: discovery.explorer
+```
+
+Only Discovery through Define is implemented. Further specialist roles and
+workflow phases remain in the backlog.
 
 ## Responsibilities
 
@@ -131,209 +134,95 @@ ephemeral subagents instantiated when a phase or assignment requires them.
 - Execute agent cycles and expose runtime events.
 - Maintain the interactive experience and conversation persistence.
 
-### pi-open-agents
-
-- Discover global and project definitions.
-- Activate `xper` as a `primary` agent.
-- Apply each agent's model, reasoning level, prompt, tools, and permissions.
-- Provide subagent discovery and definition format.
-- Execute the `subagent` tool provisionally and observably in `0.0.1`.
-- Provide interactive selection and permission compatibility for uses outside
-  xper's workflow control.
-
 ### xper Pi adapter
 
-- Register commands, tools, hooks, and TUI elements in Pi.
-- Translate Pi sessions, models, subagents, and events into the xper protocol.
-- Apply commands issued by the core in Pi.
-- Integrate with `pi-open-agents` without exposing its API to the domain.
-- Detect the active runtime's capabilities and limitations.
-- Register and execute its own structured delegation when durable attempts
-  are needed, with explicit correlation, errors, and cancellation.
+- Register `/xper`, `xper_delegate`, hooks, and status presentation.
+- Translate Pi sessions, models, and events into the public xper protocol.
+- Execute Discovery in a child Pi process, with explicit errors,
+  cancellation, timeout, and correlation to the core's Attempt.
+- Save the Brief before returning its path and reporting success.
+- Record xper observations and forward generic Pi errors without treating
+  another extension's tool events as workflow outcomes.
 
 ### xper core
 
-- Govern the XP workflow and its transitions.
-- Build the minimum context for each assignment.
-- Resolve execution profiles and model presets.
-- Evaluate gates, manage rework, and request human decisions.
-- Version artifacts and retain durable state.
-- Maintain the harness-independent observability model.
+- Govern the implemented workflow and transitions.
+- Resolve and freeze configured model routing for a run.
+- Create assignments and attempts and record their outcomes.
+- Evaluate the Discovery gate from persisted evidence.
+- Retain artifacts' references, events, projections, and recovery state.
 
-`pi-open-agents` is not the workflow's source of truth. A conversation or child
-session can disappear without invalidating artifacts, events, and states
-already persisted by xper.
+A conversation or child session can disappear without invalidating artifacts,
+events, and states already persisted by xper. The architecture and current
+limitations are detailed in the [adapter guide](../../adapters/pi/docs/architecture.md)
+and [core guide](../architecture.md).
 
-## Agent definitions
+## Initialization and migration
 
-Definitions will initially follow the Markdown format compatible with
-`pi-open-agents`. The primary agent can exist at:
+`xper init` prepares configuration in the project; `xper init --global`
+prepares configuration in the user scope. They perform preflight before
+writing, preserve valid existing configuration, and do not launch a workflow.
+They no longer create or repair `.pi/agents/xper.md`, pin an agent-manager
+package, inspect competing managers, or modify Pi settings. The legacy `--yes` flag remains accepted for script compatibility
+but does not change this configuration-only operation.
 
-```text
-~/.pi/agent/agents/xper.md   # global installation
-.pi/agents/xper.md           # project installation
-```
+The checkout removes its own `pi-open-agents` package declaration and primary
+agent definition. Existing user-managed global or project packages and agent
+files are left in place. They can be managed through Pi independently; xper
+neither requires nor automatically uninstalls them. Current launch instructions
+use `pi` followed by `/xper`.
 
-Conceptual schema:
+## Doctor and compatibility
 
-```yaml
----
-name: xper
-description: Development coordinator based on Extreme Programming
-mode: primary
-systemPrompt: replace
-permission:
-  "*": deny
-  read: allow
-  grep: allow
-  find: allow
-  ls: allow
-  subagent: allow
-allowedAgents:
-  - discovery
-  - define
-  - design
-  - breakdown
-  - planner
-  - driver
-  - navigator
-  - verifier
-  - judgment-day
----
-```
+`xper doctor` remains read-only. It checks the Pi executable and supported
+version range, Pi settings validity, xper adapter availability, and effective
+configuration. The
+accepted stable Pi range remains `0.85.1` through `0.87.1`, inclusive.
 
-Model identifiers and reasoning level are not fixed in the product template.
-They are resolved from the active execution profile and context, and the
-instantiated definition can include them when needed. The permissions above
-are also illustrative: the coordinator will follow least privilege and
-delegate code modification to the corresponding roles.
+The `PI_MISSING`, `PI_VERSION`, `PI_SETTINGS`, `ADAPTER`, and `CONFIG`
+diagnostics retain their meanings where applicable. Package,
+agent-definition, and manager-conflict diagnostics are retired because those
+resources no longer determine xper readiness. The JSON report retains its
+`schemaVersion`, `checks`, and per-check fields; consumers must allow the set
+of checks to reflect the requirements being inspected.
 
-## Initialization
+Human-readable failures include observed evidence and a corrective action.
+The CLI exits unsuccessfully when required checks fail. Installation checks
+do not certify live model execution on every accepted Pi release.
 
-`xper init` prepares xper in the current project. `xper init --global` installs
-reusable resources in the user scope. Neither command starts a development
-session.
+## Observability
 
-Initialization preflight must check, in this order:
-
-1. The `pi` executable exists and responds.
-2. The Pi version is compatible with xper.
-3. `pi-open-agents` is installed in the effective scope.
-4. Its version is within xper's tested range.
-5. No incompatible agent manager is loaded at the same time.
-6. The `xper` definition is discoverable as a `primary` agent.
-7. Required subagents exist and their permissions are valid.
-8. Referenced providers and models are available.
-9. The project is trusted when it uses local Pi resources.
-10. Configuration and data paths have appropriate permissions.
-
-If `pi-open-agents` is missing, initialization must explain that it is required
-for the first version and show:
-
-```bash
-pi install npm:pi-open-agents
-```
-
-In an interactive terminal, xper can offer to run the installation after
-explicit confirmation. Noninteractive execution must exit with a nonzero code
-and structured output identifying the missing dependency. It must not install
-packages silently.
-
-## Doctor
-
-`xper doctor` runs the same preflight without modifying the system and adds
-operational diagnostics:
-
-| Check | Failure | Proposed action |
-| --- | --- | --- |
-| Pi not found | `FAIL` | Install Pi and repeat the diagnostic |
-| Incompatible Pi | `FAIL` | Install a supported version |
-| Missing `pi-open-agents` | `FAIL` | `pi install npm:pi-open-agents` |
-| Incompatible extension | `FAIL` | Install the version recommended by xper |
-| Conflicting agent managers | `FAIL` | Disable the indicated package |
-| Missing `xper` agent | `FAIL` | Repair through `xper init` |
-| Missing optional subagent | `WARN` | Create it or disable the capability |
-| Unavailable model or credential | `FAIL` or `WARN` | Depends on whether a valid fallback exists |
-| Unwritable SQLite | `WARN` | Fix permissions; the workflow can continue without metrics |
-
-Human-readable output must include the cause, observed evidence, and a concrete
-action. `--json` output must use stable identifiers so CI or a future GUI can
-consume it.
-
-Conceptual example:
-
-```text
-PASS  pi                 0.x.y
-PASS  pi-open-agents     0.1.22
-PASS  primary-agent      xper
-PASS  execution-profile  work
-WARN  metrics-store      could not open; using degraded mode
-```
-
-The version shown is illustrative. The compatibility matrix will be part of
-each xper release. Since `pi-open-agents` is still pre-1.0, xper will not assume
-compatibility across minor versions without running its integration suite.
-
-## Decoupling
-
-xper will access Pi through an external TypeScript adapter and a versioned
-protocol. The core will not import Pi or `pi-open-agents` types. The minimum
-adapter contract must cover:
-
-- Primary-agent discovery and activation.
-- Subagent enumeration and validation.
-- Attempt creation, tracking, cancellation, and continuation.
-- Model and reasoning-level selection.
-- Tool and permission application.
-- Correlation of child sessions with assignments.
-- Receipt of lifecycle and usage events.
-
-This allows trying `pi-open-agents` first and replacing it or supporting another
-backend later without changing the state machine or metrics schema.
-
-The same boundary will allow adapters for other harnesses in their natural
-technologies. The overall architecture and dependency rules are defined in
-[RFC 0005](0005-modular-architecture.md).
+`XPER_PI_OBSERVATIONS_FILE` enables local JSONL observations with size-based
+rotation. Session lifecycle, bridge status, command names, and xper Attempt
+correlation remain observable without logging tasks, prompts, or outputs.
+Plugin-specific `subagent` counters and tested-package labels are replaced
+with generic Pi tool observations: started, completed, failed, in flight, and
+unpaired results. These observations do not determine success; workflow
+status comes from xper's recorded run and execution outcomes.
+Generic Pi tool and compaction errors still pass through the adapter's hooks.
 
 ## Consequences
 
-### Benefits
+The normal workflow needs Pi and the xper adapter, with no additional
+agent-manager installation. xper owns workflow activation through its command,
+while the existing child-process
+executor preserves Discovery's lifecycle and isolation boundary.
 
-- The experience matches OpenCode's primary-agent concept.
-- xper retains Pi's TUI, sessions, and providers.
-- Discovery, primary-agent selection, and definition format do not need to be
-  built from scratch. The durable delegation lifecycle is the responsibility
-  of xper's adapter.
-- Definitions can be partially shared with OpenCode.
-- The first prototype focuses on XP workflow and observability.
+Maintaining the Pi extension and RPC executor remains xper's responsibility.
+A child process is not a filesystem sandbox, and this revision does not add
+worktree isolation or phases beyond Define. Integration tests must preserve
+success, failure, cancellation, timeout, recovery, and session isolation, and
+cover startup without an external primary-agent package.
 
-### Risks
+## Alternatives and future work
 
-- `pi-open-agents` is young and still uses pre-1.0 versions.
-- Its API or format can change.
-- Other agent managers may register conflicting commands or tools.
-- Subagent execution does not itself replace worktree or sandbox isolation.
+The original [XP-001 spike](../spikes/001-pi-integration.md) records why the
+internal `pi-open-agents` runner was unsuitable for durable attempts. An
+external executor can be evaluated if it meets a concrete need, but is not a
+prerequisite for this revision. Such an integration belongs behind the
+existing injected execution dependency and must preserve xper's outcome,
+routing, and recovery semantics.
 
-Initial mitigations are pinning a tested version, validating installation with
-`doctor`, maintaining integration tests, and encapsulating the dependency
-behind the adapter.
-
-## Alternatives considered
-
-- **pi-landstrip:** greater adoption and process isolation, but adds a sandbox
-  and native binaries that substantially increase initial scope.
-- **pi-mode-switch:** simple for model, tool, and skill profiles, but does not
-  solve subagent orchestration on its own.
-- **Direct integration with Pi's SDK/RPC:** offers maximum control, but would
-  require rebuilding from the start an experience Pi already provides.
-- **External control plane with `xper run`:** rejected for the primary
-  experience because it duplicates Pi's lifecycle and conflicts with the intent
-  for xper to be the session's primary agent.
-
-## Open decisions
-
-- Exact supported version range for Pi and `pi-open-agents`.
-- Package-detection mechanism for global and project scopes.
-- Final names and syntax of `/xper` commands within Pi.
-- Policy for updating, repairing, or disabling conflicting dependencies.
-- Whether to add sandboxing through `pi-landstrip` or another solution later.
+Combined packaging, validation across operating systems, and later workflow
+phases remain separate tasks. This revision does not implement a generic
+agent catalog or interchangeable execution backends.

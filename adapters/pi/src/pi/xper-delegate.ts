@@ -11,7 +11,7 @@ export function registerXperDelegate(
     name: "xper_delegate",
     label: "Xper Discovery explorer",
     description:
-      "Delegate the current Discovery task and record a Discovery Brief before entering Define. Start a run with /xper start first.",
+      "Delegate the current Discovery task and record a Discovery Brief before entering Define. Start a run with /xper first.",
     parameters: {
       type: "object",
       properties: {

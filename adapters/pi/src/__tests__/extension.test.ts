@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createXperExtension, isPiToolError } from "../extension.js";
+import { createXperExtension } from "../extension.js";
 import { connectBridge } from "../bridge/client.js";
 import { PiObservations } from "../pi/observations.js";
 
@@ -25,6 +25,8 @@ function fakePi(cwd = workspace) {
   const handlers = new Map<string, (event: unknown, ctx: unknown) => void | Promise<void>>();
   const messages: string[] = [];
   const statuses: Array<string | undefined> = [];
+  const prompts: string[] = [];
+  const answers: Array<string | undefined> = [];
   let command: ((args: string, ctx: unknown) => void) | undefined;
   let tool:
     | {
@@ -40,20 +42,23 @@ function fakePi(cwd = workspace) {
   const ctx = {
     cwd,
     mode: "tui",
+    hasUI: true,
     sessionManager: { getSessionId: () => "test-session" },
     ui: {
       notify: (message: string) => messages.push(message),
       setStatus: (_key: string, text: string | undefined) => statuses.push(text),
+      input: async (title: string) => {
+        prompts.push(title);
+        return answers.shift();
+      },
     },
   };
   const pi = {
     on: (event: string, handler: (event: unknown, ctx: unknown) => void | Promise<void>) => {
       handlers.set(event, handler);
     },
-    registerCommand: (
-      _name: string,
-      options: { handler: (args: string, ctx: unknown) => void },
-    ) => {
+    registerCommand: (name: string, options: { handler: (args: string, ctx: unknown) => void }) => {
+      assert.equal(name, "xper");
       command = options.handler;
     },
     registerTool: (value: typeof tool) => {
@@ -65,6 +70,8 @@ function fakePi(cwd = workspace) {
     ctx,
     messages,
     statuses,
+    prompts,
+    answers,
     async emit(event: string, payload: unknown = {}) {
       const handler = handlers.get(event);
       assert(handler, `missing ${event} handler`);
@@ -135,6 +142,54 @@ test("Pi extension connects, reports versions, forwards errors, and does not dup
   assert.throws(() => process.kill(secondPid, 0), { code: "ESRCH" });
 });
 
+test("xper starts and resumes without an agent manager, with an objective dialog or arguments", async () => {
+  for (const invocation of ["", "Explore this project", "start Explore this project"]) {
+    const directory = mkdtempSync(join(tmpdir(), "xper-command-"));
+    const harness = fakePi(directory);
+    harness.answers.push("Explore this project");
+    createXperExtension(harness.pi, { command: binary });
+    try {
+      await harness.emit("session_start");
+      const started = await harness.command(invocation);
+      assert.match(started, /Started workflow .*; phase discovery/);
+      assert.match(started, /xper_delegate/);
+      assert.equal(harness.prompts.length, invocation ? 0 : 1);
+      const runId = started.match(/workflow ([^;]+);/)?.[1];
+      assert(runId);
+      const resumed = await harness.command("start Continue this project");
+      assert(resumed.includes(`Resumed workflow ${runId}; phase discovery`));
+      assert.match(harness.status(), /phase discovery/);
+    } finally {
+      await harness.emit("session_shutdown");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test("xper does not start a workflow after cancelled or empty input or without dialog UI", async () => {
+  for (const scenario of ["cancel", "empty", "no-ui", "help", "invalid-subcommand"] as const) {
+    const directory = mkdtempSync(join(tmpdir(), "xper-command-input-"));
+    const harness = fakePi(directory);
+    harness.ctx.hasUI = scenario !== "no-ui";
+    harness.answers.push(scenario === "empty" ? "  " : undefined);
+    createXperExtension(harness.pi, { command: binary });
+    try {
+      await harness.emit("session_start");
+      const result = await harness.command(
+        scenario === "help" ? "help" : scenario === "invalid-subcommand" ? "advance extra" : "",
+      );
+      assert.match(harness.status(), /no run/);
+      assert.equal(harness.prompts.length, scenario === "cancel" || scenario === "empty" ? 1 : 0);
+      if (scenario === "no-ui") assert.match(result, /Provide an objective/);
+      if (scenario === "empty") assert.match(result, /objective is required/);
+      if (scenario === "help" || scenario === "invalid-subcommand") assert.match(result, /Usage:/);
+    } finally {
+      await harness.emit("session_shutdown");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("Pi session stays usable after a bridge crash", async () => {
   const harness = fakePi();
   createXperExtension(harness.pi, { command: binary });
@@ -154,6 +209,8 @@ test("missing bridge binary gives an actionable error without failing session st
   createXperExtension(harness.pi, { command: resolve(workspace, "missing-xper-binary") });
   await harness.emit("session_start");
   assert.match(harness.status(), /binary not found.*cargo build -p xper-cli/);
+  assert.match(await harness.command(""), /binary not found/);
+  assert.equal(harness.prompts.length, 0);
   await harness.emit("session_shutdown");
 });
 
@@ -166,28 +223,32 @@ test("incompatible bridge gives rebuild guidance", async () => {
   await harness.emit("session_shutdown");
 });
 
-test("recognizes the failed subagent envelope observed in XP-001", () => {
-  assert.equal(
-    isPiToolError({
-      toolName: "subagent",
-      toolCallId: "call-1",
-      isError: false,
-      result: { details: { status: "error", isError: true, exitCode: 1 } },
-    }),
-    true,
-  );
-  assert.equal(
-    isPiToolError({
-      toolName: "subagent",
-      toolCallId: "call-2",
-      isError: false,
-      result: { details: { status: "done", isError: false, exitCode: 0, output: "" } },
-    }),
-    false,
-  );
+test("observes Pi tool outcomes without interpreting another extension's details", async () => {
+  const observations = new PiObservations(undefined, () => assert.fail("unexpected log error"));
+  observations.toolStarted("subagent", "call-1");
+  observations.toolEnded({
+    toolName: "subagent",
+    toolCallId: "call-1",
+    isError: false,
+    result: { details: { status: "error", isError: true, exitCode: 1 } },
+  });
+  observations.toolStarted("bash", "call-2");
+  observations.toolEnded({
+    toolName: "bash",
+    toolCallId: "call-2",
+    isError: true,
+  });
+  assert.deepEqual(observations.summary(), {
+    started: 2,
+    completed: 1,
+    failed: 1,
+    inFlight: 0,
+    unpaired: 0,
+  });
+  await observations.sessionEnded("test");
 });
 
-test("records raw subagent signals without prompts or output", async () => {
+test("records generic Pi tool signals without prompts or output", async () => {
   execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
   const directory = mkdtempSync(join(tmpdir(), "xper-pi-observe-"));
   const journal = join(directory, "observations.jsonl");
@@ -196,30 +257,29 @@ test("records raw subagent signals without prompts or output", async () => {
   try {
     await harness.emit("session_start", { reason: "startup" });
     await harness.emit("tool_execution_start", {
-      toolName: "subagent",
+      toolName: "bash",
       toolCallId: "call-error",
       args: { task: "secret prompt" },
     });
     await harness.emit("tool_execution_end", {
-      toolName: "subagent",
+      toolName: "bash",
       toolCallId: "call-error",
-      isError: false,
+      isError: true,
       result: {
         details: { status: "error", isError: true, exitCode: 1, output: "secret output" },
       },
     });
     await harness.emit("tool_execution_start", {
-      toolName: "subagent",
+      toolName: "xper_delegate",
       toolCallId: "call-done",
     });
     await harness.emit("tool_execution_end", {
-      toolName: "subagent",
+      toolName: "xper_delegate",
       toolCallId: "call-done",
       isError: false,
       result: { details: { status: "done", isError: false, exitCode: 0, output: "secret" } },
     });
-    assert.match(harness.status(), /reported done 1, reported error 1/);
-    assert.match(harness.status(), /mismatches 1/);
+    assert.match(harness.status(), /tools observed: started 2, completed 1, failed 1/);
     await harness.emit("session_shutdown", { reason: "quit" });
     const text = readFileSync(journal, "utf8");
     assert.doesNotMatch(text, /secret/);
@@ -227,13 +287,12 @@ test("records raw subagent signals without prompts or output", async () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert(
-      rows.some((row) => row.type === "session.start" && row.testedOpenAgentsVersion === "0.1.22"),
-    );
+    assert(rows.some((row) => row.type === "session.start" && row.adapterVersion === "0.1.0"));
+    assert(rows.every((row) => !("testedOpenAgentsVersion" in row)));
     assert(rows.some((row) => row.type === "bridge.connected"));
     assert(rows.some((row) => row.type === "command.invoked" && row.recognized === true));
-    assert(rows.some((row) => row.type === "session.end" && row.reportedDone === 1));
-    assert(rows.some((row) => row.type === "subagent.end" && row.reportedStatus === "error"));
+    assert(rows.some((row) => row.type === "session.end" && row.completed === 1));
+    assert(rows.some((row) => row.type === "tool.end" && row.toolName === "bash" && row.isError));
   } finally {
     await harness.emit("session_shutdown", { reason: "quit" });
     rmSync(directory, { recursive: true, force: true });
@@ -318,7 +377,10 @@ process.stdin.once("data", () => {
       const harness = fakePi(cwd);
       createXperExtension(harness.pi, { command: binary, observationsFile: journal });
       await harness.emit("session_start");
-      assert.match(await harness.command("start Explore this project"), /"phase":"discovery"/);
+      assert.match(
+        await harness.command("Explore this project"),
+        /Started workflow .*; phase discovery/,
+      );
       assert.match(await harness.command("advance"), /"advanced":false/);
       if (scenario === "succeeded") {
         await harness.emit("session_shutdown");

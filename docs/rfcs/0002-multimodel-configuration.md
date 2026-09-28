@@ -219,7 +219,7 @@ Example usage:
 
 ```bash
 xper profile activate work
-pi --agent xper
+pi
 ```
 
 The profile will also be changeable from the session through an extension
@@ -231,7 +231,7 @@ when designing the interactive interface.
 The final binding is resolved immediately before creating the agent:
 
 ```text
-pi --agent xper + profile work
+/xper <objective> + active profile work
         |
         v
 context company + strategy balanced
@@ -246,7 +246,7 @@ company.bindings.judge -> company-sol
 exact provider/model/thinking
         |
         v
-subagent created through pi-open-agents
+child agent executed by the Pi adapter
 ```
 
 The coordinator records the resolution in the run. The agent retains the
@@ -288,37 +288,28 @@ xper config show --effective
 xper doctor
 ```
 
-`xper init` must:
+Current `xper init` behavior follows
+[RFC 0004's direct activation revision](0004-pi-integration.md#direct-workflow-activation-revision-2026-09-27):
+it checks Pi compatibility, Pi settings, the adapter, and configuration before
+creating missing xper configuration. Project initialization also ignores local
+configuration in Git. It preserves existing files and does not install agent
+packages or create a primary-agent definition.
 
-1. Detect Pi and its version.
-2. Detect `pi-open-agents` and verify a compatible version.
-3. Explain and show `pi install npm:pi-open-agents` when it is missing.
-4. Verify that Pi can discover the `xper` primary agent.
-5. Read known providers.
-6. Show available, authenticated models.
-7. Adopt existing local configuration if the user wishes.
-8. Create contexts and model presets.
-9. Choose an initial strategy.
-10. Configure fallbacks, limits, and policies.
-11. Validate capabilities and credentials.
-12. Show effective routing before writing configuration.
-
-In interactive mode, `init` can offer to install the dependency after obtaining
-explicit confirmation. In noninteractive mode it does not modify packages:
-it fails with an actionable diagnostic and the exact command the user must run.
+The broader onboarding ideas in this RFC—discovering authenticated models,
+creating contexts and presets, choosing strategies, and previewing routing—
+remain future interactive features. They are not part of the current `init`.
 
 `xper doctor` repeats preflight without modifying the system and distinguishes:
 
-- `PASS`: Pi, `pi-open-agents`, the `xper` agent, and effective configuration
-  are compatible.
-- `WARN`: a recommended update or partial configuration exists but does not
-  prevent starting the session.
-- `FAIL`: Pi or `pi-open-agents` is missing, its version is incompatible, or
-  the primary agent cannot be resolved.
+- `PASS`: the inspected Pi runtime, settings, adapter, or configuration is valid.
+- `WARN`: preparation such as building the adapter or creating an xper
+  configuration file remains; built-in configuration defaults can apply.
+- `FAIL`: a required executable, supported version, or valid configuration
+  is unavailable.
 
-The minimum tested `pi-open-agents` version will be declared in xper's
-compatibility manifest. As a pre-1.0 dependency, a minor update will not be
-assumed compatible without testing.
+The supported Pi range and its validation limits are documented in
+[RFC 0004](0004-pi-integration.md#doctor-and-compatibility). External
+agent-manager package versions do not determine installation readiness.
 
 Suggested initial strategy presets:
 

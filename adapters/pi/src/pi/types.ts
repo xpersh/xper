@@ -4,11 +4,13 @@ import type { PiToolEndEvent } from "./observations.js";
 export interface PiContext {
   cwd: string;
   mode: string;
+  hasUI: boolean;
   model?: { provider: string; id: string };
   sessionManager: { getSessionId(): string };
   ui: {
     notify(message: string, type?: "info" | "warning" | "error"): void;
     setStatus(key: string, text: string | undefined): void;
+    input(title: string, placeholder?: string): Promise<string | undefined>;
   };
 }
 

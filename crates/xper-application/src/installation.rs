@@ -22,8 +22,6 @@ pub struct Check {
     pub evidence: String,
     /// Suggested correction, when available.
     pub action: Option<String>,
-    /// Whether initialization itself can repair this failed check.
-    pub repairable: bool,
 }
 
 impl Check {
@@ -39,14 +37,6 @@ impl Check {
             status,
             evidence: evidence.into(),
             action: action.map(str::to_owned),
-            repairable: false,
         }
-    }
-
-    /// Marks a diagnostic as repairable by this installation adapter.
-    #[must_use]
-    pub fn repairable(mut self) -> Self {
-        self.repairable = true;
-        self
     }
 }

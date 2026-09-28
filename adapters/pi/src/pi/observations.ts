@@ -9,24 +9,10 @@ export interface PiToolEndEvent {
   result?: { details?: unknown };
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** pi-open-agents 0.1.22 can report a failed child only in result.details. */
-export function isPiToolError(event: PiToolEndEvent): boolean {
-  if (event.isError) return true;
-  if (event.toolName !== "subagent") return false;
-  const details = event.result?.details;
-  return object(details) && details.status === "error" && details.isError === true;
-}
-
 interface ObservationCounts {
   started: number;
-  reportedDone: number;
-  reportedError: number;
-  unclassified: number;
-  mismatches: number;
+  completed: number;
+  failed: number;
   unpaired: number;
   inFlight: number;
 }
@@ -49,10 +35,8 @@ export class PiObservations {
   private ended = false;
   private readonly counts: ObservationCounts = {
     started: 0,
-    reportedDone: 0,
-    reportedError: 0,
-    unclassified: 0,
-    mismatches: 0,
+    completed: 0,
+    failed: 0,
     unpaired: 0,
     inFlight: 0,
   };
@@ -110,36 +94,23 @@ export class PiObservations {
   }
 
   toolStarted(toolName: string, toolCallId: string): void {
-    if (toolName !== "subagent") return;
     this.counts.started++;
     this.starts.set(toolCallId, Date.now());
-    this.record("subagent.start", { toolCallId });
+    this.record("tool.start", { toolName, toolCallId });
   }
 
   toolEnded(event: PiToolEndEvent): void {
-    if (event.toolName !== "subagent") return;
     const startedAt = this.starts.get(event.toolCallId);
     this.starts.delete(event.toolCallId);
     if (startedAt === undefined) this.counts.unpaired++;
 
-    const details = object(event.result?.details) ? event.result.details : undefined;
-    const reportedStatus = typeof details?.status === "string" ? details.status : null;
-    const detailsIsError = typeof details?.isError === "boolean" ? details.isError : null;
-    const exitCode = Number.isSafeInteger(details?.exitCode) ? (details?.exitCode as number) : null;
-    const signal = typeof details?.signal === "string" ? details.signal : null;
-    const reportedError = isPiToolError(event);
-    if (reportedError) this.counts.reportedError++;
-    else if (reportedStatus === "done") this.counts.reportedDone++;
-    else this.counts.unclassified++;
-    if (detailsIsError !== null && detailsIsError !== event.isError) this.counts.mismatches++;
+    if (event.isError) this.counts.failed++;
+    else this.counts.completed++;
 
-    this.record("subagent.end", {
+    this.record("tool.end", {
+      toolName: event.toolName,
       toolCallId: event.toolCallId,
-      piIsError: event.isError,
-      detailsIsError,
-      reportedStatus,
-      exitCode,
-      signal,
+      isError: event.isError,
       elapsedMs: startedAt === undefined ? null : Date.now() - startedAt,
     });
   }
@@ -148,7 +119,7 @@ export class PiObservations {
     if (this.ended) return;
     for (const [toolCallId, startedAt] of this.starts) {
       this.counts.unpaired++;
-      this.record("subagent.unpaired", { toolCallId, elapsedMs: Date.now() - startedAt });
+      this.record("tool.unpaired", { toolCallId, elapsedMs: Date.now() - startedAt });
     }
     this.starts.clear();
     this.record("session.end", { reason, ...this.summary() });

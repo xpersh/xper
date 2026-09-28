@@ -50,7 +50,7 @@ communicate with xper through a local, versioned, neutral protocol.
 | TypeScript       |      | JSON-RPC / JSONL     |      | Rust             |
 +------------------+      +----------------------+      +------------------+
 | Pi API and hooks |                                    | XP domain        |
-| pi-open-agents   |                                    | application      |
+| Pi RPC executor  |                                    | application      |
 | commands and TUI |                                    | configuration    |
 +------------------+                                    | observability    |
                                                         +--------+---------+
@@ -155,7 +155,7 @@ a manifest such as:
   "adapterVersion": "0.1.0",
   "protocolVersion": "1",
   "capabilities": {
-    "primaryAgent": true,
+    "primaryAgent": false,
     "subagents": true,
     "parallelSubagents": false,
     "modelSelection": true,
@@ -169,6 +169,11 @@ a manifest such as:
   }
 }
 ```
+
+This is an illustrative capability catalog. The current Pi adapter advertises
+`primaryAgent: false`: `/xper` activates workflow state without selecting a
+primary agent or replacing the system prompt. See the adapter guide for its
+implemented capabilities.
 
 The core validates these capabilities against the active workflow and profile:
 
@@ -305,14 +310,11 @@ workflow:
     independent_model: true
 ```
 
-Native options live under an explicit namespace:
-
-```yaml
-adapters:
-  pi:
-    primary_agent: xper
-    require_pi_open_agents: true
-```
+Native options, when needed, belong under an explicit adapter namespace.
+The current Pi integration starts workflows through `/xper` and has no
+required external agent-manager package or primary-agent configuration.
+[RFC 0004's direct activation revision](0004-pi-integration.md#direct-workflow-activation-revision-2026-09-27)
+supersedes the original `require_pi_open_agents` proposal.
 
 A profile can declare capability requirements, but not harness SDK commands
 or types.

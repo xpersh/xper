@@ -40,7 +40,7 @@ enum Commands {
         /// Prepare the user-wide scope instead of this project.
         #[arg(long)]
         global: bool,
-        /// Confirm agent creation or repair in non-interactive use.
+        /// Accepted for compatibility; initialization no longer needs confirmation.
         #[arg(long)]
         yes: bool,
     },
@@ -77,7 +77,7 @@ fn main() -> ExitCode {
         Commands::Bridge { stdio: true } => bridge::run().map(|()| true),
         Commands::Bridge { stdio: false } => unreachable!("clap requires --stdio"),
         Commands::Doctor { json } => setup::doctor(json),
-        Commands::Init { global, yes } => setup::init(global, yes),
+        Commands::Init { global, yes: _ } => setup::init(global),
         Commands::Status { json, run } => status::show(json, run.as_deref()),
         Commands::Profile { action } => match action {
             ProfileAction::Activate { name } => profile::activate(&name),

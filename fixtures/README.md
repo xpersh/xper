@@ -7,6 +7,9 @@ must not contain credentials, prompts, or user source code.
 contains a `message`; invalid envelopes also specify the expected `errorCode`.
 
 `installations/valid`, `installations/partial`, and `installations/incompatible`
-are installation snapshots used by the CLI integration tests. They contain only
-fake package metadata, agent definitions, and configuration; the tests supply a
-fake Pi executable and isolated home directory.
+are synthetic installation snapshots used by the CLI integration tests. Valid
+and partial installations need no agent-manager package or primary-agent
+definition. The historically named `incompatible` fixture retains third-party
+package metadata and agent definitions to verify that xper accepts and
+preserves user-managed Pi resources. Version failures are supplied through a
+fake Pi executable; every test uses an isolated home directory.

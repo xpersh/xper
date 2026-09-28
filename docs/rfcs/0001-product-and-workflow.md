@@ -6,15 +6,16 @@
 
 ## Summary
 
-`xper` is a primary agent and coordination layer for Pi inspired by Extreme
+`xper` is a workflow coordination layer for Pi inspired by Extreme
 Programming. Its responsibility is to turn development intent into small,
 verifiable, integrable increments through a workflow with explicit contracts,
 gates, and feedback.
 
-xper presents itself to the user as the session's primary agent, but it is more
-than a personality or a set of prompts. Its extension maintains the state
-machine, creates and coordinates subagents, prepares their context, limits
-their authority, retains their artifacts, and decides when work can advance.
+The user starts a workflow through `/xper` in a Pi session. Its extension
+connects commands and agent execution to the independent core, which owns
+workflow state, gates, routing, and evidence. The current vertical slice
+covers Discovery through Define; the remaining phases below describe the
+product direction.
 
 ## Goals
 
@@ -193,12 +194,11 @@ Verdicts:
 
 ## Conceptual architecture
 
-- Pi provides the runtime and TUI for the primary session and subagents.
-- xper registers as a `primary` agent, and the user interacts with it directly
-  within the Pi session.
+- Pi provides the runtime and TUI for the parent session and child agents.
+- The user starts the workflow with `/xper` within the Pi session.
 - Pi is the first supported harness, not a dependency of the xper domain.
-- `pi-open-agents` is the initial dependency for selecting the primary agent
-  and instantiating subagents with their model, prompt, tools, and permissions.
+- The Pi adapter executes Discovery through a child Pi RPC process without
+  an external agent-manager package.
 - A TypeScript extension acts as the Pi adapter: commands, tools, hooks,
   dynamic context, and TUI integration.
 - The independent core implements the workflow, gates, routing, durable state,
@@ -209,13 +209,14 @@ Verdicts:
 - Concurrent changes happen in worktrees or other isolated environments.
 - The coordinator integrates results according to the DAG defined in Plan.
 
-The integration is encapsulated behind an xper-owned abstraction so
-`pi-open-agents` can be replaced if its API changes or a more mature alternative
-appears. The dependency handles agent identity and execution; it must not
-become the workflow's source of truth.
+The adapter communicates with the core through the public protocol. Its
+execution dependency is explicit; execution remains separate from workflow
+state and evidence.
 
-Normal execution starts with `pi --agent xper` or by activating `/agent xper`
-in an existing session. `xper run` is not part of the planned interface.
+Normal execution starts with `pi` followed by `/xper <objective>`. Bare `/xper`
+asks for an objective interactively. This starts or resumes the run without
+switching primary agents or automatically executing subsequent phases.
+`xper run` is not part of the planned interface.
 The full decision is documented in [RFC 0004](0004-pi-integration.md).
 The separation of core, protocol, and adapters is documented in
 [RFC 0005](0005-modular-architecture.md).
@@ -228,4 +229,4 @@ The separation of core, protocol, and adapters is documented in
 - Initial context, cost, time, and attempt budgets.
 - Criteria for rotating Driver and Navigator.
 - Strategy for identifying the smallest vertical increment.
-- Final adapter contract that decouples xper from `pi-open-agents`.
+- Requirements for any future external execution library.

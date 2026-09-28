@@ -1,7 +1,8 @@
 //! Installation orchestration without processes, files, or terminal input.
 
-use std::convert::Infallible;
+use std::io;
 use xper_application::{
+    ApplicationError,
     installation::{Check, CheckStatus},
     ports::Installation,
     use_cases::{initialize_workspace, inspect_installation},
@@ -9,11 +10,13 @@ use xper_application::{
 
 struct LocalSetup {
     blocked: bool,
-    valid_agent: bool,
-    preparations: Vec<bool>,
+    fail_preparation: bool,
+    preparations: usize,
 }
+
 impl Installation for LocalSetup {
-    type Error = Infallible;
+    type Error = io::Error;
+
     fn inspect(&self) -> Vec<Check> {
         vec![
             Check::new(
@@ -27,104 +30,88 @@ impl Installation for LocalSetup {
                 None,
             ),
             Check::new(
-                "AGENT",
-                if self.valid_agent {
-                    CheckStatus::Pass
-                } else {
-                    CheckStatus::Fail
-                },
-                "agent",
-                None,
-            )
-            .repairable(),
+                "CONFIG",
+                CheckStatus::Warn,
+                "configuration not prepared",
+                Some("Run initialization"),
+            ),
         ]
     }
-    fn agent_target(&self) -> String {
-        "selected agent".into()
-    }
-    fn agent_is_valid(&self) -> Result<bool, Infallible> {
-        Ok(self.valid_agent)
-    }
-    fn prepare(&mut self, repair_agent: bool) -> Result<Vec<String>, Infallible> {
-        self.preparations.push(repair_agent);
-        if repair_agent {
-            self.valid_agent = true;
+
+    fn prepare(&mut self) -> io::Result<Vec<String>> {
+        self.preparations += 1;
+        if self.fail_preparation {
+            return Err(io::Error::other("configuration write failed"));
         }
-        Ok(vec![])
+        Ok(vec!["Created configuration".into()])
     }
 }
 
 #[test]
-fn failed_prerequisites_block_writes_and_do_not_request_consent() {
+fn inspection_reports_readiness_without_preparing_configuration() {
+    let installation = LocalSetup {
+        blocked: false,
+        fail_preparation: false,
+        preparations: 0,
+    };
+    let outcome = inspect_installation::execute(&installation);
+    assert!(outcome.ready);
+    assert_eq!(outcome.checks.len(), 2);
+    assert_eq!(installation.preparations, 0);
+}
+
+#[test]
+fn failed_prerequisites_are_reported_and_block_writes() {
     let mut installation = LocalSetup {
         blocked: true,
-        valid_agent: false,
-        preparations: vec![],
+        fail_preparation: false,
+        preparations: 0,
     };
     assert!(!inspect_installation::execute(&installation).ready);
     let mut reported = false;
-    let outcome = initialize_workspace::execute::<Infallible>(
-        &mut installation,
-        |checks| {
-            assert_eq!(checks.len(), 2);
-            reported = true;
-        },
-        |_| panic!("must not request consent after failed preflight"),
-    )
+    let outcome = initialize_workspace::execute(&mut installation, |checks| {
+        assert_eq!(checks.len(), 2);
+        assert_eq!(checks[0].status, CheckStatus::Fail);
+        reported = true;
+    })
     .unwrap();
     assert!(matches!(outcome, initialize_workspace::Outcome::Blocked));
     assert!(reported);
-    assert!(installation.preparations.is_empty());
+    assert_eq!(installation.preparations, 0);
 }
 
 #[test]
-fn declined_repair_does_not_write_any_installation_files() {
+fn warnings_allow_configuration_preparation_without_confirmation() {
     let mut installation = LocalSetup {
         blocked: false,
-        valid_agent: false,
-        preparations: vec![],
+        fail_preparation: false,
+        preparations: 0,
     };
-    let outcome = initialize_workspace::execute(
-        &mut installation,
-        |_| {},
-        |target| {
-            assert_eq!(target, "selected agent");
-            Ok::<_, Infallible>(false)
-        },
-    )
+    let mut reported = false;
+    let outcome = initialize_workspace::execute(&mut installation, |checks| {
+        assert_eq!(checks[1].status, CheckStatus::Warn);
+        reported = true;
+    })
     .unwrap();
-    assert!(matches!(
-        outcome,
-        initialize_workspace::Outcome::ConfirmationRequired
-    ));
-    assert!(installation.preparations.is_empty());
+    let initialize_workspace::Outcome::Completed { changes } = outcome else {
+        panic!("warnings must not block initialization");
+    };
+    assert_eq!(changes, ["Created configuration"]);
+    assert!(reported);
+    assert_eq!(installation.preparations, 1);
 }
 
 #[test]
-fn approved_repair_is_applied_and_valid_agents_need_no_consent() {
+fn preparation_failure_preserves_the_dependency_error() {
     let mut installation = LocalSetup {
         blocked: false,
-        valid_agent: false,
-        preparations: vec![],
+        fail_preparation: true,
+        preparations: 0,
     };
-    let outcome =
-        initialize_workspace::execute(&mut installation, |_| {}, |_| Ok::<_, Infallible>(true))
-            .unwrap();
-    assert!(matches!(
-        outcome,
-        initialize_workspace::Outcome::Completed { .. }
-    ));
-    assert_eq!(installation.preparations, [true]);
-    assert!(inspect_installation::execute(&installation).ready);
-    let outcome = initialize_workspace::execute::<Infallible>(
-        &mut installation,
-        |_| {},
-        |_| panic!("valid agent needs no approval"),
-    )
-    .unwrap();
-    assert!(matches!(
-        outcome,
-        initialize_workspace::Outcome::Completed { .. }
-    ));
-    assert_eq!(installation.preparations, [true, false]);
+    let outcome = initialize_workspace::execute(&mut installation, |_| {});
+    let Err(ApplicationError::Dependency(error)) = outcome else {
+        panic!("preparation failure must be reported as a dependency error");
+    };
+    assert_eq!(error.to_string(), "configuration write failed");
+    assert_eq!(installation.preparations, 1);
 }

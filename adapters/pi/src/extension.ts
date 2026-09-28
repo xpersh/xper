@@ -8,8 +8,6 @@ import { XperSession } from "./pi/session.js";
 import { registerXperCommand } from "./pi/xper-command.js";
 import { registerXperDelegate } from "./pi/xper-delegate.js";
 
-export { isPiToolError } from "./pi/observations.js";
-
 /** Register a Pi extension. Process creation is deferred until session_start. */
 export function createXperExtension(
   pi: PiExtensionAPI,

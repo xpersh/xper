@@ -1,9 +1,8 @@
 # xper
 
 `xper` is a multi-agent development harness based on Extreme Programming
-practices. It integrates with Pi as the primary agent and adds a coordination
-layer to govern the workflow, assign models by role, and retain local evidence
-of quality, time, cost, and rework.
+practices. Its Pi extension coordinates the workflow, assigns models by role,
+and retains local evidence of quality, time, cost, and rework.
 
 > Status: the first vertical slice is executable. Discovery can be delegated
 > from Pi and advance to Define with persisted evidence; the rest of the
@@ -30,7 +29,7 @@ implemented, verified, and accepted independently, rather than an entire project
 - [RFC 0002: Multimodel configuration and routing](docs/rfcs/0002-multimodel-configuration.md)
 - [Execution profiles and model routing](docs/routing.md)
 - [RFC 0003: Observability and metrics](docs/rfcs/0003-observability-and-metrics.md)
-- [RFC 0004: Pi integration and primary agent](docs/rfcs/0004-pi-integration.md)
+- [RFC 0004: Pi integration and workflow activation](docs/rfcs/0004-pi-integration.md)
 - [RFC 0005: Modular architecture and harness adapters](docs/rfcs/0005-modular-architecture.md)
 
 ## Implementation path
@@ -62,25 +61,14 @@ the entire workflow.
 
 ## Relationship with Pi
 
-Pi remains the runtime and interactive experience. In the first version,
-`xper` takes the form of a Pi `primary` agent through
-[`pi-open-agents`](https://pi.dev/packages/pi-open-agents), accompanied by its
-own extension for workflow, commands, state, observability, and the durable
-lifecycle of delegations. The
-[XP-001 spike](docs/spikes/001-pi-integration.md) ruled out using the internal
-`pi-open-agents` API as the attempt control plane.
+Pi provides the runtime, interactive session, models, credentials, and tools.
+The xper extension owns its commands, workflow integration, observations, and
+Discovery execution. It does not require an external agent-manager package.
 
-Pi is the first adapter, not a domain dependency. The xper core is designed in
-Rust and communicates through a versioned protocol with external adapters,
-which can use the technology required by each harness. The Pi TypeScript
+Pi is the first adapter, not a domain dependency. The Rust core communicates
+through a versioned protocol with external adapters. The Pi TypeScript
 extension translates its API, hooks, and TUI into that contract without
 introducing Pi types or concepts into the XP state machine.
-
-Start Pi with `xper` as the primary agent:
-
-```bash
-pi --approve --agent xper
-```
 
 In this checkout, prepare the bridge and extension before the first launch:
 
@@ -88,48 +76,53 @@ In this checkout, prepare the bridge and extension before the first launch:
 npm ci
 npm run build --workspace @xper/adapter-pi
 cargo build -p xper-cli
-pi install -l npm:pi-open-agents@0.1.22
-pi --approve --agent xper
+pi
 ```
 
-The `primary` definition lives in `.pi/agents/xper.md`; `.pi/settings.json`
-pins `pi-open-agents@0.1.22` for this project. The extension in `.pi/extensions`
-uses `target/debug/xper` when available and allows selecting another binary
-with `XPER_BRIDGE_COMMAND`. It starts and stops the process with the Pi session.
-`/xper start <objective>` starts or resumes a project run. The custom
-`xper_delegate` tool runs `discovery.explorer` in a child Pi process and records
-a Discovery Brief before requesting the transition to Define. `/xper status`
-shows versions, connection, phase, and attempt outcomes; `xper status --json`
-queries the projection and timeline from SQLite. A bridge crash leaves the Pi
-session usable and is shown as `offline`. The
-[XP-008 demo](docs/tasks/008-vertical-slice.md#manual-demo) details this flow.
+Start a workflow in the Pi session:
 
-To retain observations across sessions of prototype `0.0.1`:
+```text
+/xper Explore the current state of this project
+```
+
+Bare `/xper` asks for the objective in an interactive session. The explicit
+`/xper start <objective>` form also works. `/xper status` shows versions,
+connection, phase, and attempt outcomes; `/xper advance` asks the core to
+evaluate the current gate. Starting a run displays its phase and next action;
+it does not automatically call a model or execute every phase. No `/agent xper`
+activation is needed.
+
+The extension in `.pi/extensions` uses `target/debug/xper` when available and
+allows selecting another binary with `XPER_BRIDGE_COMMAND`. It starts and
+stops the bridge with the Pi session. Starting a workflow creates or resumes
+the run associated with that session. The custom `xper_delegate` tool executes
+`discovery.explorer` in a child Pi process and records a Discovery Brief before
+requesting the transition to Define. `xper status --json` queries the projection
+and timeline from SQLite. A bridge crash leaves Pi usable and is shown as
+`offline`. The [XP-008 demo](docs/tasks/008-vertical-slice.md#manual-demo)
+details this flow.
+
+To retain local observations across sessions:
 
 ```bash
 mkdir -p .xper/observations
-XPER_PI_OBSERVATIONS_FILE="$PWD/.xper/observations/pi.jsonl" pi --approve --agent xper
+XPER_PI_OBSERVATIONS_FILE="$PWD/.xper/observations/pi.jsonl" pi
 ```
 
 The Winston logger writes JSONL with size-based rotation: 5 MiB per file and
 at most five files (the current file and four previous ones). It records
-session start and end, bridge state, `/xper` invocations (without arguments),
-`subagent` signals, and correlation between the custom tool and the Attempt;
-it does not store tasks, prompts, or outputs.
-Session counters remain available when no file is configured.
-`reported done` only reflects what `pi-open-agents` reported: the
-[spike](docs/spikes/001-pi-integration.md) demonstrated that early cancellation
-can look like success. The decision to use it for work outside xper's control
-and the criteria for revisiting that decision are in
-[RFC 0004](docs/rfcs/0004-pi-integration.md).
+session start and end, bridge state, `/xper` invocations without arguments,
+generic tool lifecycle, and correlation between `xper_delegate` and the
+Attempt. It does not store tasks, prompts, or outputs. Tool counters are
+observations; workflow outcomes come from xper's own execution and persisted
+evidence.
 
-You can also activate it within a session with `/agent xper`. The `xper` CLI
-configures, validates, diagnoses, and exports information; it does not replace
-interactive Pi execution with an `xper run` command.
+The `xper` CLI configures, validates, diagnoses, and exports information;
+interactive workflow execution stays inside Pi.
 
-`xper doctor` inspects Pi, `pi-open-agents`, the adapter, the primary agent,
-conflicts, and configuration without modifying files or packages. `--json`
-returns checks with stable IDs and exits with a nonzero code if any fail:
+`xper doctor` inspects Pi, Pi settings, the adapter, and configuration without
+modifying files or packages. `--json` returns checks with stable IDs and exits
+with a nonzero code if any fail:
 
 ```bash
 xper doctor
@@ -138,21 +131,15 @@ xper doctor --json
 
 Installation checks accept Pi `0.85.1` through `0.87.1`, both inclusive,
 using numeric version comparison. Only plain stable `major.minor.patch`
-versions are accepted; prerelease and build suffixes are rejected.
-`pi-open-agents` remains pinned to `0.1.22`. The same Pi version check applies
-to `xper init` preflight.
+versions are accepted; prerelease and build suffixes are rejected. The same
+Pi version check applies to `xper init` preflight.
 
-`xper init` prepares the current project; `xper init --global` prepares the user
-scope. It creates configuration and the `primary` definition only after
-preflight passes. It requests confirmation to create or repair the agent;
-scripts can authorize this with `--yes`. Repairs save the previous definition
-as `xper.md.bak`. Valid existing files are preserved, and repeating `init` is
-idempotent. If a dependency is missing, the command explains how to install it
-and does not install packages automatically:
-
-```bash
-pi install npm:pi-open-agents
-```
+`xper init` prepares configuration in the current project; `xper init --global`
+prepares the user scope. It writes only after preflight passes, preserves valid
+existing configuration, and is idempotent. It does not install agent packages,
+create a primary-agent definition, or change user-managed Pi packages and
+settings. If Pi or the adapter is missing, diagnostics explain how to prepare
+it.
 
 Configuration is merged by key in this order: defaults, global
 (`${XDG_CONFIG_HOME:-~/.config}/xper/config.yaml`), project
@@ -169,7 +156,6 @@ References:
 - [Pi SDK](https://pi.dev/docs/latest/sdk)
 - [Extensions and events](https://pi.dev/docs/latest/extensions)
 - [Custom models](https://pi.dev/docs/latest/models)
-- [pi-open-agents](https://pi.dev/packages/pi-open-agents)
 
 ## Development
 

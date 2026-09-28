@@ -9,8 +9,9 @@ Validate a complete vertical slice:
 
 ```text
 xper init
-    -> pi --agent xper
+    -> pi
     -> Pi adapter <-> xper bridge
+    -> /xper <objective>
     -> run started
     -> Discovery assignment
     -> subagent executed

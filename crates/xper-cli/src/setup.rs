@@ -1,8 +1,8 @@
-//! Command-line presentation and user consent for installation use cases.
+//! Command-line presentation for installation use cases.
 
 use crate::infrastructure::installation::LocalInstallation;
 use serde_json::json;
-use std::io::{self, IsTerminal, Write};
+use std::io;
 use xper_application::{
     installation::{Check, CheckStatus},
     use_cases::{initialize_workspace, inspect_installation},
@@ -35,23 +35,6 @@ fn report(checks: &[Check], json_output: bool) {
     }
 }
 
-fn confirm(message: &str, yes: bool) -> io::Result<bool> {
-    if yes {
-        return Ok(true);
-    }
-    if !io::stdin().is_terminal() {
-        return Ok(false);
-    }
-    eprint!("{message} [y/N] ");
-    io::stderr().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    Ok(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
-}
-
 pub(crate) fn doctor(json_output: bool) -> io::Result<bool> {
     let installation = LocalInstallation::current(false)?;
     let outcome = inspect_installation::execute(&installation);
@@ -59,21 +42,13 @@ pub(crate) fn doctor(json_output: bool) -> io::Result<bool> {
     Ok(outcome.ready)
 }
 
-pub(crate) fn init(global: bool, yes: bool) -> io::Result<bool> {
+pub(crate) fn init(global: bool) -> io::Result<bool> {
     let mut installation = LocalInstallation::current(global)?;
-    let outcome = initialize_workspace::execute(
-        &mut installation,
-        |checks| report(checks, false),
-        |target| confirm(&format!("Create or repair {target}?"), yes),
-    )
-    .map_err(io::Error::other)?;
+    let outcome = initialize_workspace::execute(&mut installation, |checks| report(checks, false))
+        .map_err(io::Error::other)?;
     match outcome {
         initialize_workspace::Outcome::Blocked => {
             eprintln!("init: resolve the failing preflight checks, then retry");
-            Ok(false)
-        }
-        initialize_workspace::Outcome::ConfirmationRequired => {
-            eprintln!("init: agent change needs confirmation; rerun with --yes");
             Ok(false)
         }
         initialize_workspace::Outcome::Completed { changes } => {

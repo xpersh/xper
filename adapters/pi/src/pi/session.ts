@@ -10,7 +10,6 @@ import type { PiContext } from "./types.js";
 import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
 
 const ADAPTER_VERSION = "0.1.0";
-const TESTED_OPEN_AGENTS_VERSION = "0.1.22";
 const STATUS_KEY = "xper";
 
 export interface ActiveBridge {
@@ -24,7 +23,7 @@ const manifest = {
   adapter: "pi",
   adapterVersion: ADAPTER_VERSION,
   capabilities: {
-    primaryAgent: true,
+    primaryAgent: false,
     lifecycleEvents: true,
     nativeUi: true,
     subagents: true,
@@ -123,7 +122,6 @@ export class XperSession {
       reason,
       mode: ctx.mode,
       adapterVersion: ADAPTER_VERSION,
-      testedOpenAgentsVersion: TESTED_OPEN_AGENTS_VERSION,
     });
     this.starting = (async () => {
       let client: BridgeClient | undefined;

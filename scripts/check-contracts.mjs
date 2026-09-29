@@ -51,4 +51,24 @@ for (const fixture of read("fixtures/knowledge-v1.json")) {
     assert(!validateArtifact(invalid), "reject unsupported delivery roles");
   }
 }
-console.log("Shared protocol and knowledge artifact schemas match their fixtures.");
+const validateImplementation = ajv.compile(read("schemas/implementation-v1.schema.json"));
+for (const fixture of read("fixtures/implementation-v1.json")) {
+  assert(
+    validateImplementation(fixture.artifact),
+    `${fixture.name}: ${ajv.errorsText(validateImplementation.errors)}`,
+  );
+  assert(
+    !validateImplementation({ ...fixture.artifact, schemaVersion: 2 }),
+    "reject unsupported implementation artifact versions",
+  );
+  const claimed = structuredClone(fixture.artifact);
+  claimed.output.tests[0].passed = true;
+  assert(!validateImplementation(claimed), "reject model-claimed test outcomes");
+  const escaped = structuredClone(fixture.artifact);
+  escaped.output.tests[0].outputPath = "../test.log";
+  assert(!validateImplementation(escaped), "confine implementation output references");
+  const external = structuredClone(fixture.artifact);
+  external.output.changedFiles[0] = "../outside.ts";
+  assert(!validateImplementation(external), "confine implementation source paths");
+}
+console.log("Shared protocol and adapter artifact schemas match their fixtures.");

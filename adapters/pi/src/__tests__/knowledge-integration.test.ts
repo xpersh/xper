@@ -148,16 +148,17 @@ test("all phases run through the public bridge with fake execution, durable appr
     assert(!recorded.timeline.some((event) => event.type === "run.completed"));
     const checkpoint = recorded.timeline.findLast((event) => event.type === "adapter.state")?.data
       .state as Record<string, unknown>;
-    assert.equal(checkpoint.version, 2);
-    assert.equal(checkpoint.instanceId, before.workflow?.instanceId);
-    assert.equal(Object.hasOwn(checkpoint, "ready"), false);
+    assert.equal(checkpoint.version, 3);
+    const knowledge = checkpoint.knowledge as Record<string, unknown>;
+    assert.equal(knowledge.instanceId, before.workflow?.instanceId);
+    assert.equal(Object.hasOwn(knowledge, "ready"), false);
     client.stopRecording();
     await bridge?.shutdown();
     bridge = undefined;
     client = await connect();
     assert.deepEqual((await client.getRunStatus()).run, before.run);
     assert.equal((await client.advanceRun()).ready, true);
-    await assert.rejects(client.startAssignment(), /implementation is not available/);
+    await assert.rejects(client.startAssignment(), /Git checkout/);
     await client.waitForRecording();
     client.stopRecording();
   } finally {

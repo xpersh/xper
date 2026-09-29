@@ -9,6 +9,7 @@ import type {
 import { WorkflowValidationError } from "./types.js";
 import { phases, policyFrom, type Phase, type Policy } from "./policy.js";
 import { knowledgeDefinition } from "./definition.js";
+import { decodeImplementationState, type ImplementationState } from "./implementation.js";
 
 export interface Assignment {
   id: string;
@@ -273,4 +274,40 @@ export function decodeCheckpoint(value: unknown): WorkflowState | null {
   throw new WorkflowValidationError(
     "unsupported Pi checkpoint or workflow definition; preserve the journal and inspect the recorded run",
   );
+}
+
+/** Adapter checkpoint envelope composing independent workflow instances for one run. */
+export interface AdapterCheckpoint {
+  version: 3;
+  knowledge: WorkflowState;
+  implementations: Record<string, ImplementationState>;
+}
+
+/** Migrate legacy knowledge-only checkpoints without rewriting them on read. */
+export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | null {
+  if (value === null) return null;
+  if (object(value) && value.version === 3) {
+    const knowledge = decodeCheckpoint(value.knowledge);
+    if (!knowledge || !object(value.implementations))
+      throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
+    const implementations: Record<string, ImplementationState> = {};
+    for (const [incrementId, implementation] of Object.entries(value.implementations)) {
+      const decoded = decodeImplementationState(implementation);
+      const plan = knowledge.artifacts[decoded.planArtifactId];
+      if (
+        decoded.incrementId !== incrementId ||
+        decoded.runId !== knowledge.run_id ||
+        knowledge.accepted.plan !== decoded.planArtifactId ||
+        !plan ||
+        plan.digest !== decoded.planDigest ||
+        decoded.assignment.inputs.some((id) => !Object.hasOwn(knowledge.artifacts, id)) ||
+        implementations[incrementId]
+      )
+        throw new WorkflowValidationError("invalid implementation checkpoint identity");
+      implementations[incrementId] = decoded;
+    }
+    return { version: 3, knowledge, implementations };
+  }
+  const knowledge = decodeCheckpoint(value);
+  return knowledge ? { version: 3, knowledge, implementations: {} } : null;
 }

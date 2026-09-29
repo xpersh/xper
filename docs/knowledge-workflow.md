@@ -4,8 +4,9 @@ The Pi adapter implements the five knowledge phases introduced in XP-010.
 Each explicit delegation executes one assignment, saves its output, evaluates
 its gate locally, and reports the outcome to Rust. A ready Execution Plan
 completes the knowledge instance; compatibility status still names its phase
-`plan`. It does not create worktrees, execute delivery assignments, close the
-overall run, or issue a final verdict.
+`plan`. The next explicit delegation may execute only the first eligible
+Implementer assignment in that Plan. It does not create worktrees, run the
+Verifier or later increments, close the overall run, or issue a final verdict.
 
 These are Pi workflow rules, not core recording rules. Rust resolves
 configuration and preserves the reported events and opaque Pi checkpoint.
@@ -30,10 +31,11 @@ protocol. [RFC 0007](rfcs/0007-explicit-adapter-state-machines.md) defines this
 boundary and the future read-only visualization contract.
 
 The completed instance hands off a sealed Plan by artifact identity and digest.
-Future Implementation and Verification flows will have their own definitions
-and per-increment instances under the same run; they can coexist according to
-the Plan DAG. They are not extra knowledge phases, and this refactor does not
-execute them. Run closure remains a later product responsibility.
+The first eligible root assignment starts a separate `pi.implementation` v1
+instance for its increment, with nodes `implement` and `implemented`. This flow
+freezes the assignment, accepted inputs, criteria, verification cases, model,
+Git base, and limits. It is not an extra Knowledge phase. Verification and run
+closure remain later product responsibilities.
 
 ## Phase contracts
 
@@ -101,14 +103,48 @@ prerequisites' verification. Both DAGs have deterministic topological validation
 Unordered assignments cannot share a workspace or an exclusive resource, even
 when the current concurrency limit would happen to serialize them. Workspaces
 are logical IDs made of ASCII letters, digits, `_`, and `-`; no filesystem paths
-or worktrees are allocated by Plan. Future implementation scheduling must honor
-these edges and the run concurrency limit.
+or worktrees are allocated by Plan. XP-011.1 selects only the first root
+Implementer in the Plan's sealed array order; later scheduling must honor the
+remaining edges and the run concurrency limit.
 
 This narrows Plan's semantic rules within `knowledge-v1`; its structure and
 `schemaVersion: 1` remain unchanged. Existing artifacts and history are not
 rewritten. Rust can still inspect their recorded facts, but current Pi validation
-does not readmit Plans containing extra roles. Delivery execution remains future
-work in [XP-011](tasks/011-implementation-verify.md).
+does not readmit Plans containing extra roles. New Plans are checked for a usable
+Implementer handoff before sealing. Historical incompatible Plans remain
+inspectable but produce a local replan diagnostic before delivery state is
+created. See [XP-011](tasks/011-implementation-verify.md).
+
+## First implementation assignment
+
+After Plan is ready, call the same `xper_delegate` tool again. The checkout must
+be the run's Git root and initially clean. With an active profile, Pi uses the
+first frozen `implementation.driver` selection; otherwise it freezes the active
+Pi model. The child receives every accepted artifact plus the selected story's
+complete criteria and verification cases, and may use `read`, `bash`, `edit`,
+and `write`. It must change only that increment, run useful tests, create a local
+commit, leave the checkout clean, and never push.
+
+The child returns strict JSON containing test commands and criterion evidence.
+Pi treats these as proposals, not proof: it requires a new commit descended from
+the recorded base, obtains the changed paths from Git, executes every declared
+command serially under the same attempt deadline, writes bounded stdout/stderr
+logs below `.xper/artifacts/`, and verifies that tests did not change tracked
+files or HEAD. Pi never commits, pushes, resets, or cleans the checkout.
+
+The resulting [implementation-v1 artifact](../schemas/implementation-v1.schema.json)
+records the assignment and increment IDs, base and resulting Git hashes, changed
+files, commands, observed exit codes, confined log references, and exact
+criterion coverage. Nonzero test exits produce a failed attempt while retaining
+that observed result as evidence. Only all-zero exits complete the implementation
+instance. The run remains open; another explicit delegation cannot start the
+Verifier in this slice.
+
+Failures, cancellation, and timeout may be retried explicitly within both the
+remaining run budget and the assignment's `maxAttempts`, `maxTimeMs`, and
+`maxCostMicros`. Recovery marks an unfinished attempt `interrupted`, preserves
+the checkout, and requires its `assignmentId` on retry; it never relaunches the
+child automatically.
 
 ## Limits and human gates
 
@@ -153,7 +189,8 @@ The reservation must represent the operator's expected maximum invocation cost;
 this slice does not observe token prices or interrupt a provider at a billing
 threshold. Plan checks the sum of proposed assignment budgets against remaining
 attempt, wall-time, and cost limits, conservatively summing time even for parallel
-work. Per-assignment execution enforcement belongs to XP-011.
+work. The Implementer additionally enforces its own cumulative assignment limits;
+the child and host-run commands share one deadline.
 
 Human gates are owned by Pi. A gate first records a request naming its current
 artifact. Review the file, then explicitly run `/xper approve <artifactId>`.
@@ -170,27 +207,36 @@ After the normal checkout build:
 3. Inspect a blocked gate's reason and produce a corrected output or feedback.
 4. Approve a configured human gate using the displayed artifact ID.
 5. Repeat until the response says `execution plan ready`.
+6. Ensure the dedicated checkout is clean, then ask Pi to use `xper_delegate`
+   once more for the first Implementer.
 
-`/xper status` shows the phase, outcomes, artifact count, pending approval, and
-ready-plan state. `/xper advance` evaluates the current gate; unlike the original
+`/xper status` shows the phase, outcomes, artifact count, pending approval,
+ready-plan state, and any Implementation instance position. `/xper advance`
+evaluates the current gate; unlike the original
 Discovery-only slice, a second call in Define now evaluates Define rather than
 replaying Discovery's result. Repeated calls on an unchanged accepted Plan return
 `ready: true, resumed: true` without new events.
 
-Profiles must include the five roles in the table to execute the entire flow.
+Profiles must include the five Knowledge roles in the table to reach Plan and
+`implementation.driver` to execute the first increment.
 Existing Discovery-only profiles remain usable for Discovery; dispatch explains
 when the current role has no route. New runs resume from Pi's versioned
-checkpoint. Checkpoint format 2 gives the instance an explicit definition
-reference and lifecycle; valid format-1 checkpoints migrate locally without
-changing existing run, visit, assignment, attempt, or event identities. Restoring
-a checkpoint does not repeat an agent invocation. Core-owned legacy runs remain
+checkpoint. Checkpoint envelope format 3 retains the unchanged Knowledge v2
+state and a map of per-increment Implementation v1 instances. Valid Knowledge
+format-1 and format-2 checkpoints migrate in memory without changing existing
+run, visit, assignment, attempt, evidence, or outbox identities; format 3 is
+written on the next local commit. Restoring a checkpoint does not repeat an
+agent invocation. Core-owned legacy runs remain
 available for historical inspection, but cannot resume under the new architecture
 because they lack that checkpoint.
 
 ## Verification
 
 Pi workflow tests exercise gates, feedback, evidence, dependency validation,
-budgets, and approvals using synthetic artifacts and controlled dependencies.
+budgets, approvals, implementation recovery, and unavailable recording using
+synthetic artifacts and controlled dependencies. Real temporary Git checkout
+tests cover commits, ancestry, cleanliness, changed files, host-run commands,
+logs, failed exits, and source mutation without model credentials.
 Recording tests independently exercise session ownership, duplicate consistency,
 atomic event batches, and generic replay. Integration tests use the real Rust
 bridge and SQLite with simulated execution, without model credentials. Recording

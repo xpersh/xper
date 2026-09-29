@@ -1,5 +1,6 @@
 import type { BridgeOptions } from "./bridge/client.js";
 import { saveArtifact } from "./knowledge/artifacts.js";
+import { runImplementation } from "./implementation/execution.js";
 import { resolveAgent, runKnowledge } from "./knowledge/delegate.js";
 import { piModelOptions } from "./knowledge/models.js";
 import type { PiExtensionAPI } from "./pi/types.js";
@@ -16,30 +17,36 @@ export function createXperExtension(
   const session = new XperSession(options);
   registerXperCommand(pi, session);
   registerXperDelegate(pi, session, {
-    execute: ({
-      task,
-      cwd,
-      signal,
-      role,
-      timeoutMs,
-      model,
-      selection,
-      inputArtifacts,
-      artifactKind,
-      budget,
-    }) =>
-      runKnowledge(
+    execute: (execution) => {
+      const {
+        task,
+        cwd,
+        signal,
+        role,
+        timeoutMs,
+        model,
+        selection,
+        inputArtifacts,
+        artifactKind,
+        budget,
+      } = execution;
+      const modelOptions = selection ? piModelOptions(selection) : model ? { model } : {};
+      const runChild = (message: string, childTimeoutMs: number) =>
+        runKnowledge(message, cwd, signal, {
+          systemPrompt: resolveAgent(role).systemPrompt,
+          timeoutMs: childTimeoutMs,
+          ...(role === "implementation.driver" ? { tools: ["read", "bash", "edit", "write"] } : {}),
+          ...modelOptions,
+        });
+      if (execution.workflow === "implementation")
+        return runImplementation(execution, { runChild });
+      return runChild(
         inputArtifacts?.length
           ? `${task}\n\nInput artifacts (read these files):\n${JSON.stringify(inputArtifacts)}\nRequired output: ${artifactKind}\nRemaining budget: ${JSON.stringify(budget)}`
           : task,
-        cwd,
-        signal,
-        {
-          systemPrompt: resolveAgent(role).systemPrompt,
-          timeoutMs,
-          ...(selection ? piModelOptions(selection) : model ? { model } : {}),
-        },
-      ),
+        timeoutMs,
+      );
+    },
     saveBrief: saveArtifact,
   });
   registerPiHooks(pi, session);

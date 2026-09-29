@@ -6,6 +6,7 @@
 /.xper/observations/
 /.xper/events.sqlite*
 /.xper/artifacts/
+/.xper/pi/
 /.xper/demo-008/
 /.xper/config.local.yaml
 /.xper/active-profile

@@ -12,6 +12,10 @@ export type {
   WorkflowPosition,
   RunStarted,
   AssignmentStarted,
+  KnowledgeAssignmentStarted,
+  ImplementationAssignmentStarted,
+  StartedAssignment,
+  ImplementationCriterion,
   FinishAttempt,
   AttemptFinished,
   AttemptOutcome,
@@ -42,5 +46,5 @@ export { PiWorkflow } from "./workflow/controller.js";
 export type { RecorderClient, RecordedEvent, RecordedStatus } from "./bridge/xper-client.js";
 
 // The same versioned definition drives Pi transitions and future read-only views.
-export { knowledgeDefinition } from "./workflow/definition.js";
+export { implementationDefinition, knowledgeDefinition } from "./workflow/definition.js";
 export type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "./workflow/definition.js";

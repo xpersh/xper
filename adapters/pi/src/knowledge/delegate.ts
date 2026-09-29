@@ -23,6 +23,12 @@ export function resolveAgent(role: string): { name: string; systemPrompt: string
       systemPrompt:
         "You are discovery.explorer. Investigate the user's task and return a concise Discovery Brief with context, evidence, risks, and open questions. Use tools only to inspect the project; do not implement changes.",
     };
+  if (role === "implementation.driver")
+    return {
+      name: role,
+      systemPrompt:
+        "You are implementation.driver. Work only in the supplied existing checkout. Read its AGENTS.md instructions and accepted artifacts, implement the assigned increment with tests, and create a local commit containing only that work. Never clone, create a worktree, reset unrelated work, or push. Leave the checkout clean. Your final response must be only the requested JSON report; do not invent test exit statuses because the host reruns the commands.",
+    };
   const output = outputs[role];
   if (!output) throw new Error(`Unsupported xper agent: ${role}`);
   return {
@@ -43,6 +49,7 @@ export function runKnowledge(
     systemPrompt: string;
     model?: string;
     thinking?: string;
+    tools?: string[];
   },
 ): Promise<DelegateResult> {
   if (signal?.aborted) return Promise.resolve({ outcome: "cancelled" });
@@ -57,7 +64,7 @@ export function runKnowledge(
       "--no-skills",
       "--no-context-files",
       "--tools",
-      "read,bash",
+      (options.tools ?? ["read", "bash"]).join(","),
       ...(options.model ? ["--model", options.model] : []),
       ...(options.thinking ? ["--thinking", options.thinking] : []),
       "--system-prompt",

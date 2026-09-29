@@ -6,8 +6,10 @@ service resolves configuration and model profiles, records reported events,
 and makes the execution history available for inspection and metrics.
 
 > Status: Discovery, Define, Design, Breakdown, and Plan are executable from
-> Pi with artifact contracts, feedback, gates, and persisted evidence.
-> Implementation, verification, and final judgment are still under development.
+> Pi with artifact contracts, feedback, gates, and persisted evidence. After a
+> sealed Plan, the first eligible Implementer can edit, test, and commit one
+> increment while Pi independently checks Git and reruns its declared tests.
+> Verification, later increments, and final judgment are still under development.
 > Basic event and usage summaries are available; full metric comparison and a
 > dashboard remain future work.
 
@@ -42,8 +44,8 @@ implemented, verified, and accepted independently, rather than an entire project
 
 The technical backlog is organized as a sequence of small, verifiable tasks in
 [docs/tasks/README.md](docs/tasks/README.md). The implemented vertical slice
-covers Pi's knowledge workflow through Plan, with configuration and recording
-provided by the Rust service.
+covers Pi's knowledge workflow through Plan and one Implementer assignment,
+with configuration and recording provided by the Rust service.
 
 ## Short definition
 
@@ -70,8 +72,9 @@ provided by the Rust service.
 ## Relationship with Pi
 
 Pi provides the runtime, interactive session, models, credentials, and tools.
-The xper extension owns its commands, workflow integration, observations, and
-knowledge-phase execution. It does not require an external agent-manager package.
+The xper extension owns its commands, workflow integration, observations,
+knowledge execution, and the first per-increment implementation flow. It does
+not require an external agent-manager package.
 
 Pi is the first adapter, not a Rust dependency. Through a versioned protocol it
 requests resolved configuration and reports events to the Rust service. Pi
@@ -80,12 +83,12 @@ checks recording integrity and serves the history; it does not decide which
 step may run next. A future adapter can use a different workflow with the
 same configuration and recording service.
 
-Pi expresses the knowledge workflow as a pure typed state machine, with a
-versioned graph shared by execution and future inspection. Its runtime performs
-artifact and process effects outside the transition function. The knowledge
-instance completes with a sealed Plan; future Implementation and Verification
-flows will compose per increment under the same run. Their execution and a
-read-only graph UI remain backlog work.
+Pi expresses Knowledge and Implementation as separate pure typed state machines,
+with versioned graphs shared by execution and future inspection. Its runtime
+performs artifact and process effects outside the transition functions. The
+knowledge instance completes with a sealed Plan; a `pi.implementation` instance
+can then implement the first eligible increment under the same open run. The
+Verifier, later increments, closure, and a read-only graph UI remain backlog work.
 
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
@@ -123,13 +126,16 @@ The extension in `.pi/extensions` uses `target/debug/xper` when available and
 allows selecting another binary with `XPER_BRIDGE_COMMAND`. It starts and
 stops the bridge with the Pi session. Starting a workflow creates or resumes
 the run associated with that session. The custom `xper_delegate` tool executes
-the current knowledge role in a child Pi process,
-saves its artifact, and evaluates the gate in the adapter. Discovery keeps its
-Markdown Brief; later phases use structured JSON contracts. Feedback returns to
-the responsible phase, configured human gates use `/xper approve <artifactId>`,
-and Plan completes the knowledge instance with a validated execution DAG. This
-does not close the run or execute the planned delivery work. The
-[knowledge workflow guide](docs/knowledge-workflow.md) covers contracts and
+the current Knowledge role or the first eligible Implementer in a child Pi
+process, saves its artifact, and evaluates the gate in the adapter. Discovery
+keeps its Markdown Brief; later work uses structured JSON contracts. Feedback
+returns to the responsible phase, configured human gates use
+`/xper approve <artifactId>`, and Plan completes the knowledge instance with a
+validated execution DAG. The
+Implementer must leave a clean local commit; the adapter verifies its ancestry,
+changed files, and declared tests without committing, pushing, resetting, or
+cleaning the checkout. Completion stops before Verifier and does not close the
+run. The [workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection
 and timeline from SQLite. This shared history can lag the live Pi workflow.
 The adapter records a local checkpoint, queues events for background delivery,

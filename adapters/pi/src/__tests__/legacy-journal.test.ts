@@ -8,7 +8,7 @@ import { object, type RecordedEvent, type RecorderClient } from "../bridge/xper-
 import { PiWorkflow } from "../workflow/controller.js";
 import { type JournalData, WorkflowJournal } from "../workflow/journal.js";
 import { policyFrom } from "../workflow/policy.js";
-import { decodeCheckpoint } from "../workflow/state.js";
+import { decodeAdapterCheckpoint, decodeCheckpoint } from "../workflow/state.js";
 import { WorkflowValidationError } from "../workflow/types.js";
 
 function legacyState(active = false) {
@@ -158,8 +158,9 @@ test("the next local transition persists migrated state while retaining the hist
   assert.equal(assignment.phase, "discovery");
   const snapshot = await h.snapshot();
   assert(object(snapshot.state));
-  assert.equal(snapshot.state.version, 2);
-  assert.equal(snapshot.state.instanceId, "historical-run");
+  assert.equal(snapshot.state.version, 3);
+  assert(object(snapshot.state.knowledge));
+  assert.equal(snapshot.state.knowledge.instanceId, "historical-run");
   assert.deepEqual(snapshot.pending.slice(0, historicalEvents.length), historicalEvents);
   assert.equal(
     new Set(snapshot.pending.map((event) => event.eventId)).size,
@@ -168,7 +169,7 @@ test("the next local transition persists migrated state while retaining the hist
   const checkpoint = snapshot.pending.find((event) => event.type === "adapter.state");
   assert(checkpoint);
   assert.deepEqual(checkpoint.data.state, snapshot.state);
-  const state = decodeCheckpoint(snapshot.state);
+  const state = decodeAdapterCheckpoint(snapshot.state)?.knowledge;
   assert.equal(state?.attempts[assignment.attemptId]?.outcome, null);
   assert.equal(state?.attempts["historical-attempt"]?.outcome, "failed");
 });
@@ -179,9 +180,9 @@ test("legacy recovery interrupts an active attempt once and never admits executi
   const recovered = await beforeTimeout(first.getRunStatus());
   await beforeTimeout(h.deliveryStarted);
   const snapshot = await h.snapshot();
-  const state = decodeCheckpoint(snapshot.state);
+  const state = decodeAdapterCheckpoint(snapshot.state)?.knowledge;
   assert(object(snapshot.state));
-  assert.equal(snapshot.state.version, 2);
+  assert.equal(snapshot.state.version, 3);
   assert.equal(state?.attempts["historical-attempt"]?.outcome, "interrupted");
   assert.deepEqual(Object.keys(state?.assignments ?? {}), ["historical-assignment"]);
   assert.deepEqual(Object.keys(state?.attempts ?? {}), ["historical-attempt"]);

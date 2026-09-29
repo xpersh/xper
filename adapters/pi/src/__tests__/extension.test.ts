@@ -810,9 +810,13 @@ test("offline new runs use the prepared workspace snapshot and report that it is
     assert.equal(stateFiles.length, 1);
     const state = JSON.parse(
       readFileSync(join(directory, ".xper", "pi", stateFiles[0] ?? ""), "utf8"),
-    ) as { state: { routing: { profile: string }; policy: { maxAttempts: number } } };
-    assert.equal(state.state.routing.profile, "prepared");
-    assert.equal(state.state.policy.maxAttempts, 1);
+    ) as {
+      state: {
+        knowledge: { routing: { profile: string }; policy: { maxAttempts: number } };
+      };
+    };
+    assert.equal(state.state.knowledge.routing.profile, "prepared");
+    assert.equal(state.state.knowledge.policy.maxAttempts, 1);
   } finally {
     await harness.emit("session_shutdown");
     rmSync(directory, { recursive: true, force: true });

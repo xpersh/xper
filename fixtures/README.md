@@ -14,10 +14,13 @@ package metadata and agent definitions to verify that xper accepts and
 preserves user-managed Pi resources. Version failures are supplied through a
 fake Pi executable; every test uses an isolated home directory.
 
-
 `knowledge-v1.json` contains synthetic Definition, Design, Story Map, Execution
-Plan, and feedback artifacts. Pi workflow and fake-executor integration tests consume these examples.
-The Rust core does not deserialize or validate knowledge artifacts. Their input IDs are replaced by actual
-registered IDs during the integration test. `npm run test:contracts` validates
-both fixture files against the public schemas; protocol result fixtures can name
-a `resultSchema` to validate method-specific response fields as well.
+Plan, and feedback artifacts. Pi workflow and fake-executor integration tests
+consume these examples. The Rust core does not deserialize or validate knowledge
+artifacts. Their input IDs are replaced by actual registered IDs during the
+integration test. `npm run test:contracts` validates the fixture files against
+the public schemas; protocol result fixtures can name a `resultSchema` to validate
+method-specific response fields as well.
+`implementation-v1.json` contains a host-observed implementation result with
+the exact Git revisions, changed paths, test command exit code and criterion
+evidence consumed by the future Verifier.

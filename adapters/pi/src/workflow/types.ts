@@ -33,7 +33,7 @@ export interface RemainingBudget {
   concurrency: number;
 }
 
-export interface AssignmentStarted {
+interface AssignmentStartedBase {
   runId: string;
   assignmentId: string;
   attemptId: string;
@@ -47,14 +47,38 @@ export interface AssignmentStarted {
   budget?: RemainingBudget;
 }
 
+export interface KnowledgeAssignmentStarted extends AssignmentStartedBase {
+  /** Omitted for compatibility with the original Knowledge-only response. */
+  workflow?: "knowledge";
+}
+
+export interface ImplementationCriterion {
+  id: string;
+  behavior: string;
+  example: string;
+}
+
+export interface ImplementationAssignmentStarted extends AssignmentStartedBase {
+  workflow: "implementation";
+  incrementId: string;
+  baseCommit: string;
+  criteria: ImplementationCriterion[];
+  verification: string[];
+  model?: string;
+}
+
+export type AssignmentStarted = KnowledgeAssignmentStarted | ImplementationAssignmentStarted;
+export type StartedAssignment = AssignmentStarted;
+
 export type FinishAttempt = { attemptId: string } & (
   | { outcome: "succeeded"; artifactPath: string }
-  | { outcome: Exclude<AttemptOutcome, "succeeded"> }
+  | { outcome: "failed"; artifactPath?: string }
+  | { outcome: Exclude<AttemptOutcome, "succeeded" | "failed"> }
 );
 
 export type AttemptFinished = { attemptId: string; outcome: AttemptOutcome } & (
   | { replayed: true }
-  | { replayed?: false; artifactId: string | null }
+  | { replayed?: false; artifactId: string | null; workflowCompleted?: boolean }
 );
 
 export type RunAdvanced = { ready?: boolean; humanArtifactId?: string } & (
@@ -88,6 +112,7 @@ export interface WorkflowPosition {
 
 export interface RunStatus {
   workflow?: WorkflowPosition;
+  implementations?: Record<string, WorkflowPosition>;
   run: RunSummary | null;
   /** Locally observed facts; complete shared history is queried through XperClient. */
   timeline: unknown[];
@@ -100,7 +125,7 @@ export interface WorkflowClient {
   recordUsage?(attemptId: string, usage: ModelUsage): Promise<void>;
   startRun(objective: string, policy?: WorkflowPolicy): Promise<RunStarted>;
   inspectProfile(): Promise<RoutingSnapshot | null>;
-  startAssignment(assignmentId?: string): Promise<AssignmentStarted>;
+  startAssignment(assignmentId?: string, fallbackModel?: string): Promise<StartedAssignment>;
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;
   advanceRun(approvedArtifactId?: string): Promise<RunAdvanced>;
   getRunStatus(): Promise<RunStatus>;

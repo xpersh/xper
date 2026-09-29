@@ -1,5 +1,10 @@
 import type { ResolvedConfiguration } from "../bridge/xper-client.js";
-import { parseDocument, validateLinks, type Document } from "./contracts.js";
+import {
+  parseDocument,
+  selectImplementationHandoff,
+  validateLinks,
+  type Document,
+} from "./contracts.js";
 import {
   knowledgeDefinition,
   forwardTransition,
@@ -10,7 +15,7 @@ import { admit, budgetRemaining, contracts, policyFrom } from "./policy.js";
 import { currentVisit, type Assignment, type WorkflowState } from "./state.js";
 import { WorkflowValidationError } from "./types.js";
 import type {
-  AssignmentStarted,
+  KnowledgeAssignmentStarted,
   AttemptFinished,
   FinishAttempt,
   ModelUsage,
@@ -53,7 +58,7 @@ export type KnowledgeEvent =
 
 interface Results {
   "run.start": RunStarted;
-  "assignment.start": AssignmentStarted;
+  "assignment.start": KnowledgeAssignmentStarted;
   "attempt.finish": AttemptFinished;
   "gate.evaluate": RunAdvanced;
   "session.recover": undefined;
@@ -399,7 +404,11 @@ export function transitionKnowledge<E extends KnowledgeEvent>(
             if (inputPhase !== "discovery")
               upstream[inputPhase] = parseDocument(input, state.artifacts[id]?.inputs ?? []);
           }
-          if (document) validateLinks(document.output, upstream, budget);
+          if (document) {
+            validateLinks(document.output, upstream, budget);
+            if (document.output.kind === "execution_plan")
+              selectImplementationHandoff(document.output, upstream, state.routing);
+          }
         }
       } catch (error) {
         return blocked(error instanceof Error ? error.message : "artifact unavailable");

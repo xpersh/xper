@@ -9,9 +9,9 @@ export function registerXperDelegate(
 ): void {
   pi.registerTool({
     name: "xper_delegate",
-    label: "Xper knowledge phase",
+    label: "Xper assignment",
     description:
-      "Execute the current knowledge assignment from its input artifacts and evaluate its gate in Pi. Supports Discovery through Plan. Start a run with /xper first.",
+      "Execute the current xper assignment from sealed artifacts and evaluate its local gate. Supports Knowledge through the first Implementer assignment. Start a run with /xper first.",
     parameters: {
       type: "object",
       properties: {
@@ -41,16 +41,16 @@ export function registerXperDelegate(
             session.observation?.record(type, { toolCallId, ...fields }),
         },
       );
-      const { attemptId, outcome, phase, artifactPath, artifactId } = result;
+      const { attemptId, outcome, phase, incrementId, artifactPath, artifactId } = result;
       await session.refreshRun();
       return {
         content: [
           {
             type: "text",
-            text: `Knowledge attempt ${attemptId}: ${outcome}; phase ${phase}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
+            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
           },
         ],
-        details: { attemptId, outcome, phase, artifactId },
+        details: { attemptId, outcome, phase, incrementId, artifactId },
       };
     },
   });

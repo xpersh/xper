@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/myugen/xper/schemas/implementation-v1.schema.json",
+  "title": "xper implementation result v1",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "inputs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "implementation_result" },
+        "assignmentId": { "type": "string", "minLength": 1 },
+        "incrementId": { "type": "string", "minLength": 1 },
+        "baseCommit": { "$ref": "#/$defs/commit" },
+        "resultingCommit": { "$ref": "#/$defs/commit" },
+        "changedFiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "tests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/test" },
+          "minItems": 1
+        },
+        "criteria": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/criterionEvidence" },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "kind",
+        "assignmentId",
+        "incrementId",
+        "baseCommit",
+        "resultingCommit",
+        "changedFiles",
+        "tests",
+        "criteria"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schemaVersion", "inputs", "output"],
+  "additionalProperties": false,
+  "$defs": {
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "test": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "exitCode": { "type": "integer", "minimum": 0 },
+        "outputPath": {
+          "type": "string",
+          "pattern": "^\\.xper/artifacts/[a-z0-9-]+\\.log$"
+        }
+      },
+      "required": ["command", "exitCode", "outputPath"],
+      "additionalProperties": false
+    },
+    "criterionEvidence": {
+      "type": "object",
+      "properties": {
+        "criterionId": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 },
+        "paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        }
+      },
+      "required": ["criterionId", "evidence", "paths"],
+      "additionalProperties": false
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+"
+    }
+  }
+}

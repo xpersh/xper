@@ -1,0 +1,31 @@
+[
+  {
+    "name": "one implemented increment with host-run evidence",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": ["brief-1", "definition-1", "design-1", "stories-1", "plan-1"],
+      "output": {
+        "kind": "implementation_result",
+        "assignmentId": "driver",
+        "incrementId": "s1",
+        "baseCommit": "1111111111111111111111111111111111111111",
+        "resultingCommit": "2222222222222222222222222222222222222222",
+        "changedFiles": ["src/greeting.ts", "src/greeting.test.ts"],
+        "tests": [
+          {
+            "command": "npm test -- greeting",
+            "exitCode": 0,
+            "outputPath": ".xper/artifacts/test-output-attempt-1-1.log"
+          }
+        ],
+        "criteria": [
+          {
+            "criterionId": "c1",
+            "evidence": "The greeting test covers the requested example.",
+            "paths": ["src/greeting.test.ts"]
+          }
+        ]
+      }
+    }
+  }
+]

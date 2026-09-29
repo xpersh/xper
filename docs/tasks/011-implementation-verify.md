@@ -3,7 +3,7 @@
 - Status: `pending`
 - Milestone: M3
 - Entry dependency: XP-010
-- Next slice: XP-011.1
+- Next slice: XP-011.2
 
 ## Outcome and boundary
 
@@ -39,10 +39,16 @@ child; ambiguous ownership remains paused for explicit recovery.
 
 ## XP-011.1 — Execute one Implementer assignment
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-010
 - Example: after Plan, one delegation implements one increment and returns its
   local change and actual test result; the run remains open.
+
+Implementation note: extend the existing `xper_delegate`, Pi workflow controller,
+attempt/budget policy, artifact evidence, journal, and child executor. A temporary
+Git checkout with a fake child will prove that the host observes the resulting
+commit and reruns the declared commands; pure reducer, migration, handoff, retry,
+recovery, and unavailable-recorder tests will cover the workflow boundary.
 
 Consume the sealed Plan and select its first eligible Implementer assignment. Supply
 the criteria, accepted inputs, frozen model, and bounded execution time. Require
@@ -67,6 +73,34 @@ Acceptance:
 
 Stop here: Verifier execution, subsequent increments, and run closure remain
 later slices.
+
+### Delivery evidence
+
+- The existing `xper_delegate` now changes from a sealed Knowledge Plan to one
+  `pi.implementation` v1 instance, selects the first eligible root Implementer,
+  and stops with that increment implemented while the run remains open.
+- The adapter reuses its controller, journal, outbox, artifact writer, routing,
+  and global policy. New flow-specific code is limited to the pure Implementation
+  reducer plus Git inspection, child execution, and host-test effects. No Rust
+  workflow logic, protocol RPC, dependency, public tool, Verifier, scheduler,
+  worktree manager, push, reset, or run closure was added.
+- A real temporary checkout proves the child commit, base/result ancestry,
+  changed files, serial host-run command and log capture. Regression cases cover
+  nonzero exits despite a claimed success, dirty initial/final trees, missing or
+  divergent commits, and tests that modify tracked source without cleanup.
+- Reducer and controller tests cover definition identity, deterministic outcomes,
+  frozen routing or Pi model, exact Plan-order handoff, cumulative run and
+  assignment budgets, overlap, failed evidence, explicit interrupted retry,
+  v1/v2-to-v3 migration, incompatible historical Plans, and recovery without
+  automatic child execution.
+- `npm run check` passes formatting, lint, architecture boundaries, strict
+  TypeScript, 67 Rust tests, shared JSON Schema fixtures, and 141 adapter tests.
+  `git diff --check` also passes.
+- The final diff adds 1,554 production, 917 test, and 343 documentation/contract
+  lines (2,814 total; 204 removed), above the roadmap's size alarm. This accepted
+  slice includes its inseparable reducer, checkpoint migration, real Git gate,
+  artifact contract, resilience tests, and documentation. Review should evaluate
+  that scope explicitly; no behavior from XP-011.2 or later was pulled forward.
 
 ## XP-011.2 — Review and verify that increment
 

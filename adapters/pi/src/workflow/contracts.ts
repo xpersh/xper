@@ -1,6 +1,7 @@
 import { object } from "../bridge/xper-client.js";
 import { feedbackTargets } from "./policy.js";
-import type { RemainingBudget } from "./types.js";
+import type { RoutingSnapshot } from "../bridge/xper-client.js";
+import type { ImplementationCriterion, RemainingBudget } from "./types.js";
 
 export interface Criterion {
   id: string;
@@ -25,6 +26,12 @@ export interface PlannedAssignment {
   maxAttempts: number;
   maxTimeMs: number;
   maxCostMicros: number;
+}
+export interface ImplementationHandoff {
+  assignment: PlannedAssignment;
+  incrementId: string;
+  criteria: ImplementationCriterion[];
+  verification: string[];
 }
 export type Output =
   | {
@@ -296,4 +303,41 @@ export function validateLinks(
       (budget.costMicros === null || sum("maxCostMicros") <= budget.costMicros),
     "execution plan exceeds remaining run budgets",
   );
+}
+
+/** Validate the exact Plan subset executable by the first delivery slice. */
+export function selectImplementationHandoff(
+  output: Output,
+  upstream: Partial<Record<string, Document>>,
+  routing: RoutingSnapshot | null,
+): ImplementationHandoff {
+  demand(output.kind === "execution_plan", "a sealed execution plan is required");
+  const definition = upstream.define?.output;
+  const breakdown = upstream.breakdown?.output;
+  demand(
+    definition?.kind === "definition_contract" && breakdown?.kind === "story_map",
+    "the sealed Plan is missing accepted Definition or Breakdown evidence",
+  );
+  if (routing)
+    demand(
+      Boolean(routing.routes["implementation.driver"]?.length),
+      "active profile has no implementation.driver route",
+    );
+  const assignment = output.assignments.find(
+    (candidate) => candidate.role === "implementation.driver" && !candidate.dependencies.length,
+  );
+  demand(
+    assignment,
+    "the sealed Plan has no eligible implementation.driver assignment; replan before delivery",
+  );
+  const story = breakdown.stories.find((candidate) => candidate.id === assignment.incrementId);
+  demand(story, "the selected implementation assignment references an unknown increment");
+  const criteria = story.criteria.map((id) => definition.criteria.find((item) => item.id === id));
+  demand(criteria.every(Boolean), "the selected increment references an unknown criterion");
+  return {
+    assignment: structuredClone(assignment),
+    incrementId: assignment.incrementId,
+    criteria: structuredClone(criteria as ImplementationCriterion[]),
+    verification: [...story.verification],
+  };
 }

@@ -14,6 +14,7 @@ import type {
 import { PiWorkflow } from "../workflow/controller.js";
 import {
   parseDocument,
+  selectImplementationHandoff,
   validateDag,
   validateLinks,
   type Document,
@@ -74,6 +75,12 @@ async function setup(policy: WorkflowPolicy = {}) {
   recorder.config = policy;
   const artifacts = new Map<string, { content: string; digest: string }>();
   let now = 1000;
+  let workspace = {
+    root: cwd,
+    head: "1111111111111111111111111111111111111111",
+    clean: true,
+    status: "",
+  };
   const options = {
     configuration: () => ({ routing: recorder.routing, adapterConfig: { ...recorder.config } }),
     now: () => now,
@@ -82,6 +89,7 @@ async function setup(policy: WorkflowPolicy = {}) {
       if (!result) throw new Error("artifact unavailable");
       return result;
     },
+    inspectWorkspace: async () => structuredClone(workspace),
   };
   const controller = new PiWorkflow(recorder, cwd, "session", options);
   const controllers = [controller];
@@ -115,6 +123,9 @@ async function setup(policy: WorkflowPolicy = {}) {
     advanceTime: (ms: number) => {
       now += ms;
     },
+    setWorkspace: (next: typeof workspace) => {
+      workspace = structuredClone(next);
+    },
     restore: async () => {
       for (const previous of controllers) {
         await previous.waitForRecording();
@@ -133,6 +144,18 @@ async function setup(policy: WorkflowPolicy = {}) {
     },
   };
 }
+
+async function sealPlan(harness: Awaited<ReturnType<typeof setup>>, plan?: Output) {
+  let planPath = "";
+  for (const phase of ["discovery", "define", "design", "breakdown", "plan"]) {
+    const produced = await harness.produce(phase === "plan" ? plan : undefined);
+    planPath = produced.assignment.artifactPath ?? planPath;
+    const gate = await harness.controller.advanceRun();
+    assert(gate.advanced);
+  }
+  return planPath;
+}
+
 test("Pi owns the knowledge path and ready Plan without a workflow RPC", async () => {
   const h = await setup();
   try {
@@ -144,11 +167,209 @@ test("Pi owns the knowledge path and ready Plan without a workflow RPC", async (
       if (phase === "plan") assert.equal(gate.ready, true);
     }
     assert.equal((await h.controller.advanceRun()).ready, true);
-    await assert.rejects(h.controller.startAssignment(), /implementation is not available/);
+    const implementation = await h.controller.startAssignment(undefined, "provider/model");
+    assert.equal(implementation.workflow, "implementation");
+    if (implementation.workflow === "implementation") {
+      assert.equal(implementation.incrementId, "s1");
+      assert.equal(implementation.role, "implementation.driver");
+      assert(implementation.artifactPath);
+      const content = JSON.stringify({
+        schemaVersion: 1,
+        inputs: implementation.inputArtifacts?.map((artifact) => artifact.artifact_id),
+        output: {
+          kind: "implementation_result",
+          assignmentId: implementation.assignmentId,
+          incrementId: implementation.incrementId,
+          baseCommit: implementation.baseCommit,
+          resultingCommit: "2222222222222222222222222222222222222222",
+          changedFiles: ["src/change.ts"],
+          tests: [
+            {
+              command: "npm test",
+              exitCode: 0,
+              outputPath: `.xper/artifacts/test-output-${implementation.attemptId}-1.log`,
+            },
+          ],
+          criteria: implementation.criteria.map((criterion) => ({
+            criterionId: criterion.id,
+            evidence: "host-observed test",
+            paths: ["src/change.ts"],
+          })),
+        },
+      });
+      h.artifacts.set(implementation.artifactPath, { content, digest: content });
+      const completed = await h.controller.finishAttempt({
+        attemptId: implementation.attemptId,
+        outcome: "succeeded",
+        artifactPath: implementation.artifactPath,
+      });
+      assert.equal(completed.replayed, undefined);
+      if (!completed.replayed) assert.equal(completed.workflowCompleted, true);
+      assert.equal((await h.controller.getRunStatus()).implementations?.s1?.nodeId, "implemented");
+      await assert.rejects(h.controller.startAssignment(undefined, "provider/model"), /Verifier/);
+    }
     await h.controller.waitForRecording();
-    assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 5);
+    assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 6);
+    assert(!h.recorder.events.some((event) => event.type === "run.finished"));
     assert(!JSON.stringify(h.recorder.events).includes("Synthetic objective"));
   } finally {
+    await h.cleanup();
+  }
+});
+
+test("implementation recovery interrupts locally and requires the frozen assignment identity", async () => {
+  const h = await setup();
+  try {
+    const fixturePlan = fixtures.find((fixture) => fixture.phase === "plan")?.artifact.output;
+    assert(fixturePlan?.kind === "execution_plan");
+    const plan = structuredClone(fixturePlan);
+    const driver = plan.assignments.find(
+      (assignment) => assignment.role === "implementation.driver",
+    );
+    assert(driver);
+    driver.maxAttempts = 2;
+    await sealPlan(h, plan);
+    const started = await h.controller.startAssignment(undefined, "provider/frozen-model");
+    assert.equal(started.workflow, "implementation");
+    const restored = await h.restore();
+    const recovered = await restored.getRunStatus();
+    assert.equal(recovered.implementations?.s1?.status, "active");
+    assert.deepEqual(recovered.implementations?.s1?.activeAttemptIds, []);
+    assert(
+      recovered.timeline.some(
+        (event) =>
+          (event as RecordedEvent).type === "attempt.finished" &&
+          (event as RecordedEvent).data.attemptId === started.attemptId &&
+          (event as RecordedEvent).data.outcome === "interrupted",
+      ),
+    );
+    await assert.rejects(
+      restored.startAssignment(undefined, "provider/changed-model"),
+      /retry interrupted assignment driver explicitly/,
+    );
+    const retry = await restored.startAssignment("driver", "provider/changed-model");
+    assert.equal(retry.workflow, "implementation");
+    if (retry.workflow === "implementation") {
+      assert.equal(retry.model, "provider/frozen-model");
+      assert.equal(retry.baseCommit, "1111111111111111111111111111111111111111");
+    }
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("an unsupported historical Plan is rejected before implementation state or facts exist", async () => {
+  const h = await setup();
+  try {
+    const planPath = await sealPlan(h);
+    const original = h.artifacts.get(planPath);
+    assert(original);
+    const historical = JSON.parse(original.content) as Document;
+    assert.equal(historical.output.kind, "execution_plan");
+    historical.output.assignments = historical.output.assignments.filter(
+      (assignment) => assignment.role !== "verify.verifier",
+    );
+    h.artifacts.set(planPath, {
+      content: JSON.stringify(historical),
+      // The evidence reader is the digest boundary. Keeping this seal simulates
+      // a Plan accepted by an older validator without pretending it was edited.
+      digest: original.digest,
+    });
+    const before = await h.controller.getRunStatus();
+    await assert.rejects(
+      h.controller.startAssignment(undefined, "provider/model"),
+      /sealed Plan is unsupported; replan before delivery/,
+    );
+    const after = await h.controller.getRunStatus();
+    assert.equal(after.implementations, undefined);
+    assert.equal(after.timeline.length, before.timeline.length);
+    assert(
+      !after.timeline.some((event) => (event as RecordedEvent).type === "implementation.started"),
+    );
+    h.artifacts.set(planPath, { content: original.content, digest: "modified" });
+    await assert.rejects(
+      h.controller.startAssignment(undefined, "provider/model"),
+      /artifact changed after registration/,
+    );
+    assert.equal((await h.controller.getRunStatus()).implementations, undefined);
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("a dirty initial checkout is rejected before creating an implementation attempt", async () => {
+  const h = await setup();
+  try {
+    await sealPlan(h);
+    const before = await h.controller.getRunStatus();
+    h.setWorkspace({
+      root: h.cwd,
+      head: "1111111111111111111111111111111111111111",
+      clean: false,
+      status: " M src/change.ts",
+    });
+    await assert.rejects(
+      h.controller.startAssignment(undefined, "provider/model"),
+      /initially clean dedicated checkout/,
+    );
+    const after = await h.controller.getRunStatus();
+    assert.equal(after.implementations, undefined);
+    assert.equal(after.timeline.length, before.timeline.length);
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("implementation settlement, retry, status and recovery do not await Rust", {
+  timeout: 5000,
+}, async () => {
+  const h = await setup();
+  let restored: PiWorkflow | undefined;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    const fixturePlan = fixtures.find((fixture) => fixture.phase === "plan")?.artifact.output;
+    assert(fixturePlan?.kind === "execution_plan");
+    const plan = structuredClone(fixturePlan);
+    const driver = plan.assignments.find(
+      (assignment) => assignment.role === "implementation.driver",
+    );
+    assert(driver);
+    driver.maxAttempts = 3;
+    await sealPlan(h, plan);
+    await h.controller.waitForRecording();
+    const append = h.recorder.appendEvents.bind(h.recorder);
+    h.recorder.appendEvents = async (events) => {
+      await held;
+      return append(events);
+    };
+    const beforeTimeout = async <T>(operation: Promise<T>): Promise<T> =>
+      Promise.race([
+        operation,
+        new Promise<T>((_resolve, reject) =>
+          setTimeout(() => reject(new Error("local operation awaited Rust")), 250),
+        ),
+      ]);
+    const first = await beforeTimeout(
+      h.controller.startAssignment(undefined, "provider/frozen-model"),
+    );
+    await beforeTimeout(
+      h.controller.finishAttempt({ attemptId: first.attemptId, outcome: "failed" }),
+    );
+    const second = await beforeTimeout(h.controller.startAssignment());
+    assert.equal(second.workflow, "implementation");
+    await beforeTimeout(h.controller.getRunStatus());
+    await beforeTimeout(h.controller.stopRecording());
+    restored = new PiWorkflow(h.recorder, h.cwd, "session", h.options);
+    await beforeTimeout(restored.getRunStatus());
+    await assert.rejects(beforeTimeout(restored.startAssignment()), /retry interrupted/);
+    const third = await beforeTimeout(restored.startAssignment("driver"));
+    assert.equal(third.workflow, "implementation");
+  } finally {
+    release();
+    await restored?.stopRecording();
     await h.cleanup();
   }
 });
@@ -544,6 +765,64 @@ test("story coverage, verifier ordering, dependent increments and Plan budgets a
   assert.throws(
     () => parseDocument(JSON.stringify({ ...definition, extra: true }), definition.inputs),
     /structured/,
+  );
+});
+
+test("implementation handoff follows sealed Plan order and requires the frozen route", () => {
+  const definitionFixture = fixtures.find((fixture) => fixture.phase === "define")?.artifact;
+  const breakdownFixture = fixtures.find((fixture) => fixture.phase === "breakdown")?.artifact;
+  const planFixture = fixtures.find((fixture) => fixture.phase === "plan")?.artifact;
+  assert(definitionFixture && breakdownFixture && planFixture);
+  const definition = structuredClone(definitionFixture);
+  const breakdown = structuredClone(breakdownFixture);
+  const plan = structuredClone(planFixture);
+  assert(definition?.output.kind === "definition_contract");
+  assert(breakdown?.output.kind === "story_map");
+  assert(plan?.output.kind === "execution_plan");
+  definition.output.criteria.push({ id: "c2", behavior: "Second", example: "Two" });
+  breakdown.output.stories.push({
+    id: "s2",
+    value: "Second increment",
+    criteria: ["c2"],
+    verification: ["verify second"],
+    independentlyVerifiable: true,
+    dependencies: [],
+  });
+  const [driver, verifier] = plan.output.assignments;
+  assert(driver && verifier);
+  plan.output.assignments = [
+    { ...driver, id: "driver-2", incrementId: "s2", workspace: "s2" },
+    {
+      ...verifier,
+      id: "verifier-2",
+      incrementId: "s2",
+      dependencies: ["driver-2"],
+      workspace: "s2",
+    },
+    driver,
+    verifier,
+  ];
+  const upstream = { define: definition, breakdown };
+  const budget = { attempts: 32, timeMs: 3_600_000, costMicros: null, concurrency: 4 };
+  validateLinks(plan.output, upstream, budget);
+  const routing = {
+    profile: "delivery",
+    context: "local",
+    routes: {
+      "implementation.driver": [
+        {
+          context: "local",
+          provider: "synthetic",
+          model: "implementer",
+          thinking: "medium",
+        },
+      ],
+    },
+  };
+  assert.equal(selectImplementationHandoff(plan.output, upstream, routing).incrementId, "s2");
+  assert.throws(
+    () => selectImplementationHandoff(plan.output, upstream, { ...routing, routes: {} }),
+    /no implementation.driver route/,
   );
 });
 

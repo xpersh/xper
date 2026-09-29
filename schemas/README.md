@@ -101,8 +101,15 @@ Plan requires one `implementation.driver` and one dependent `verify.verifier`
 per increment. This is a semantic restriction within `knowledge-v1`; the artifact
 structure and `schemaVersion: 1` are unchanged. Existing artifacts and recorded
 history are not rewritten. Rust preserves them for inspection, while current Pi
-validation rejects Plans containing extra roles. This change does not add
-delivery execution.
+validation rejects Plans containing extra roles.
+
+[implementation-v1.schema.json](implementation-v1.schema.json) defines the
+host-observed result of one Implementer assignment. It binds the assignment and
+increment to the recorded Git base and resulting commit, changed repository
+paths, at least one locally rerun command with its real exit code and confined
+log reference, and evidence for every selected criterion. The child proposes
+commands and criterion evidence; it cannot supply a trusted pass flag. This is
+an adapter artifact contract and does not add a Rust protocol method.
 
 The stable error catalog remains in
 [the Rust protocol crate](../crates/xper-protocol/src/lib.rs) and

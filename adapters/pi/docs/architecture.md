@@ -1,9 +1,9 @@
 # Pi adapter architecture
 
-The Pi extension owns the executable knowledge workflow. It decides phases,
-assignments, gates, feedback, approvals, and budgets; executes agents; and
-validates their artifacts. Rust resolves configuration and stores the facts Pi
-reports. [RFC 0006](../../../docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
+The Pi extension owns the executable Knowledge and per-increment workflows. It
+decides assignments, gates, feedback, approvals, and budgets; executes agents;
+and validates artifacts and checkout evidence. Rust resolves configuration and
+stores the facts Pi reports. [RFC 0006](../../../docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
 explains this ownership boundary.
 [RFC 0007](../../../docs/rfcs/0007-explicit-adapter-state-machines.md) explains
 the explicit state machine and future composition and visualization boundaries.
@@ -19,10 +19,12 @@ flowchart LR
     Commands --> Action[delegateKnowledge]
     Action --> Workflow
     Action --> Executor[Child Pi execution]
+    Action --> Implementation[Implementation runner]
+    Implementation --> Git[Git inspection and host-run tests]
     Action --> Writer[Artifact writer]
-    Workflow --> Machine[Pure knowledge transition]
-    Machine --> Definition[Versioned definition and edges]
-    Machine --> Policy[Contracts, gates and budgets]
+    Workflow --> Machines[Pure Knowledge and Implementation transitions]
+    Machines --> Definition[Versioned definitions and edges]
+    Machines --> Policy[Contracts, gates and budgets]
     Workflow --> Evidence[Local artifact evidence]
     Workflow --> Journal[Local checkpoint and outbox]
     Journal -. Background delivery .-> Client[Typed configuration and recording client]
@@ -42,7 +44,8 @@ flowchart LR
 | Background configuration preparation and last available snapshot | `src/pi/configuration.ts` |
 | Coordinate delegation with injected execution and writing dependencies | `src/actions/delegate-knowledge.ts` |
 | Prepare evidence, time and IDs; invoke transitions; commit local state | `src/workflow/controller.ts` |
-| Pure start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge-machine.ts` |
+| Pure Knowledge start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge-machine.ts` |
+| Pure per-increment Implementation transition and result validation | `src/workflow/implementation.ts` |
 | Versioned serializable topology and explicit transition edges | `src/workflow/definition.ts` |
 | Runtime state, checkpoint validation, and migration | `src/workflow/state.ts` |
 | Phase roles and execution budgets | `src/workflow/policy.ts` |
@@ -52,6 +55,7 @@ flowchart LR
 | Typed configuration, recording, and inspection operations | `src/bridge/xper-client.ts` |
 | Transport, correlation, handshake, envelopes, and errors | `src/bridge/client.ts`, `protocol.ts` |
 | Role prompts, child Pi execution, and output writing | `src/knowledge/` |
+| Implementer handoff, Git inspection, host-run tests, and result construction | `src/implementation/` |
 
 Actions receive their effects explicitly and remain testable without Pi,
 processes, or files. Workflow rules live in the adapter's workflow modules,
@@ -61,10 +65,10 @@ it does not hide workflow commands behind recording calls.
 ## Explicit state machine
 
 `PiWorkflow` is the runtime boundary. It loads the local checkpoint, reads and
-verifies artifact evidence, supplies IDs and time, and invokes the pure knowledge
-transition function. The reducer owns state changes and decisions and returns
-the next state, result, and facts. Local persistence and agent execution stay
-outside it; neither the reducer nor its guards consult Rust.
+verifies artifact evidence, supplies IDs and time, and invokes the applicable
+pure transition function. Each reducer owns its state changes and decisions and
+returns the next state, result, and facts. Local persistence and agent execution
+stay outside them; neither reducer nor its guards consult Rust.
 
 The `pi.knowledge` definition at version 1 declares the five knowledge nodes
 and a terminal ready node, with stable IDs and explicit edges. Execution reads
@@ -81,9 +85,12 @@ with the sealed Plan artifact. Phase visits and per-attempt outcomes remain
 separate. Compatibility fields such as `human_input` and `ready` are derived for
 presentation, not independent mutable state.
 
-Knowledge completion hands off the sealed Plan to future per-increment flows;
-it does not imply product acceptance. RFC 0007 defines that composition without
-a global phase enum. No scheduler or future execution flow is implemented here.
+Knowledge completion hands off the sealed Plan to a separate
+`pi.implementation` definition at version 1. Each instance is keyed by increment
+and transitions from `implement` to terminal `implemented` only after host-owned
+Git and test checks pass. This composition does not expand the Knowledge phase
+enum or imply product acceptance. No Verifier, later-increment scheduler, or run
+closure is implemented here.
 [XP-015](../../../docs/tasks/015-workflow-visualization.md) tracks a read-only UI
 combining the versioned graph with reported positions and history, including
 incomplete recording. Rust preserves those facts without running the machine.
@@ -99,7 +106,7 @@ existing phase, attempt, gate, and usage observations:
 | `workflow.definition` | The serializable graph in `data.definition`, emitted on the first commit with new facts in a runtime; the same definition may be reported again after reload |
 | `workflow.position` | Resulting `nodeId`, phase, visit, lifecycle status, and active attempt IDs after an operation that emits facts; a pending approval also names its artifact |
 | `workflow.transition` | A traversed graph edge, with `transitionId`, `from`, `to`, `fromVisitId`, and `toVisitId` |
-| `workflow.completed` | Knowledge completion with the sealed Plan artifact ID and output kind |
+| `workflow.completed` | Completion of the named workflow instance with its output artifact ID and kind |
 
 A position observation is not necessarily a graph transition: attempt settlement
 or a blocked gate can leave the current node unchanged. Read-only status and
@@ -108,8 +115,9 @@ node `ready` while retaining the final `plan` phase and visit; it does not creat
 a sixth phase visit. The compatibility `run.status` value `ready` likewise does
 not claim final acceptance or run closure.
 
-Local `getRunStatus()` exposes the same typed position in `workflow`, alongside
-the derived compatibility run fields. Rust retains these observations as
+Local `getRunStatus()` exposes Knowledge in `workflow` and Implementation
+positions in the increment-keyed `implementations` map, alongside the derived
+compatibility run fields. Rust retains these observations as
 opaque data; a future consumer resolves the exact definition reference and edge
 IDs. Repeated definition reports are not new workflow versions. Existing history
 may lack these facts, and a read-only inspection does not backfill them.
@@ -123,7 +131,9 @@ or automatically running a model.
 
 `xper_delegate` asks the local workflow for its current assignment, executes
 the selected role in a child Pi process, saves its output, and reports the
-result locally. Pi validates the artifact and evaluates the gate after success.
+result locally. It continues to serve all Knowledge roles and, after Plan, the
+first eligible `implementation.driver`; no second public delivery tool exists.
+Pi validates the artifact and evaluates the owning gate after success.
 `/xper advance` reevaluates the gate; `/xper approve <artifactId>` supplies an
 explicit user decision for a pending human gate. The delegation tool never
 grants human approval.
@@ -131,9 +141,23 @@ grants human approval.
 Discovery retains its Markdown Brief. Define through Plan use versioned JSON
 artifacts. Feedback can revisit the responsible phase; accepted evidence is
 invalidated from that phase onward. Plan validates an execution DAG and completes
-the knowledge instance with sealed evidence for future implementation. The
+the knowledge instance with sealed evidence for implementation. Before sealing
+and again before starting delivery, one shared handoff validator rereads the
+accepted Definition, Breakdown, and Plan, checks their digests and current role,
+dependency, and routing contract, then selects the first root Implementer in
+sealed Plan order. The
 [knowledge workflow guide](../../../docs/knowledge-workflow.md) defines these
 contracts and limits.
+
+The Implementer runs with `read`, `bash`, `edit`, and `write` in the run's
+existing dedicated checkout. It must create a local commit and return strict
+JSON with commands and criterion evidence. The implementation runner treats
+that response only as a proposal: it checks a clean tree, a distinct descendant
+of the recorded base, obtains changed files from Git, reruns every command
+serially under the shared deadline, stores bounded output logs, and checks the
+tree and HEAD again. It creates the canonical `implementation_result`; it never
+commits, pushes, resets, or cleans. Nonzero exits remain failed-attempt evidence.
+Completion stops before Verifier and leaves the run open.
 
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
@@ -198,14 +222,13 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
-Checkpoint format 2 separates the definition reference and instance identity
-from lifecycle, visits, and attempts. Pi migrates valid format-1 state in memory,
-preserving existing identities and pending events. Reading alone does not rewrite
-the checkpoint format; an outbox delivery can still save the existing journal.
-The next commit with new facts writes format 2, including when recovery must
-settle an unfinished attempt as interrupted. Unknown or inconsistent state is
-rejected rather than guessed. This format change does not change the
-`pi.knowledge` definition version.
+Checkpoint envelope format 3 contains the unchanged Knowledge v2 state and an
+increment-keyed map of Implementation v1 instances. Pi migrates valid Knowledge
+format-1 and format-2 checkpoints in memory, preserving identities, evidence,
+and pending events. Reading alone does not rewrite the checkpoint; the next
+local commit with facts writes format 3. Unknown definitions or inconsistent
+instance identities are rejected rather than guessed. This envelope change does
+not change either workflow definition version.
 
 A checkpoint is metadata-only adapter state. It excludes prompts and artifact
 contents; those artifacts remain files. Small checkpoints use `adapter.state`.
@@ -230,8 +253,10 @@ to resume.
 
 Pi marks unfinished attempts interrupted when recovering its own workflow;
 this means their execution outcome is unknown. The core never manufactures
-that outcome merely by reopening SQLite. An explicit retry of an interrupted
-assignment reuses its frozen model selection and input identities.
+that outcome merely by reopening SQLite. Implementation recovery preserves the
+checkout and requires the matching assignment ID before retry, reusing the
+frozen model, Plan, inputs, Git base, and cumulative budgets. Recovery never
+launches a child automatically.
 
 Legacy core-owned runs lack a Pi checkpoint. They remain inspectable through
 `xper status`, but do not resume as a local Pi workflow. A new local run does

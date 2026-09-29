@@ -10,12 +10,15 @@ import type {
   ModelUsage,
 } from "../workflow/types.js";
 
-export type KnowledgeExecutionResult = { usage?: ModelUsage[] } & (
-  | { outcome: "succeeded"; brief: string }
-  | { outcome: Exclude<AttemptOutcome, "succeeded"> }
-);
+export type KnowledgeExecutionResult = {
+  outcome: AttemptOutcome;
+  brief?: string | undefined;
+  reason?: string | undefined;
+  usage?: ModelUsage[] | undefined;
+};
 
 export interface KnowledgeExecution {
+  attemptId?: string;
   task: string;
   role: string;
   cwd: string;
@@ -26,6 +29,12 @@ export interface KnowledgeExecution {
   inputArtifacts?: ArtifactInput[];
   artifactKind?: string;
   budget?: RemainingBudget;
+  workflow?: "knowledge" | "implementation";
+  assignmentId?: string;
+  incrementId?: string;
+  baseCommit?: string;
+  criteria?: Array<{ id: string; behavior: string; example: string }>;
+  verification?: string[];
 }
 
 type Observation =
@@ -56,6 +65,7 @@ export interface DelegateKnowledgeResult {
   attemptId: string;
   outcome: AttemptOutcome;
   phase: string;
+  incrementId?: string;
   artifactId: string | null;
   artifactPath?: string;
   gate?: RunAdvanced;
@@ -67,7 +77,7 @@ export async function delegateKnowledge(
   request: DelegateKnowledgeRequest,
   dependencies: KnowledgeDependencies,
 ): Promise<DelegateKnowledgeResult> {
-  if (!request.task?.trim()) throw new Error("Knowledge task is required");
+  if (!request.task?.trim()) throw new Error("Assignment task is required");
   const timeoutSeconds = request.timeoutSeconds ?? 120;
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 600) {
     throw new Error("timeoutSeconds must be between 1 and 600");
@@ -80,12 +90,13 @@ export async function delegateKnowledge(
       /* Observations cannot govern execution. */
     }
   };
-  const started = await workflow.startAssignment(request.assignmentId);
+  const started = await workflow.startAssignment(request.assignmentId, request.model);
   const { attemptId } = started;
   observe({ type: "attempt.correlated", attemptId });
 
   let usageReports: ModelUsage[] = [];
   let completion: FinishAttempt = { attemptId, outcome: "failed" };
+  let reason: string | undefined;
   try {
     const result = await dependencies.execute({
       task: request.task,
@@ -96,40 +107,58 @@ export async function delegateKnowledge(
       ...(started.inputArtifacts ? { inputArtifacts: started.inputArtifacts } : {}),
       ...(started.artifactKind ? { artifactKind: started.artifactKind } : {}),
       ...(started.budget ? { budget: started.budget } : {}),
+      ...(started.workflow === "implementation"
+        ? {
+            attemptId,
+            workflow: "implementation" as const,
+            assignmentId: started.assignmentId,
+            incrementId: started.incrementId,
+            baseCommit: started.baseCommit,
+            criteria: started.criteria,
+            verification: started.verification,
+          }
+        : {}),
       ...(started.selection
         ? { selection: started.selection }
-        : request.model
-          ? { model: request.model }
-          : {}),
+        : started.workflow === "implementation" && started.model
+          ? { model: started.model }
+          : request.model
+            ? { model: request.model }
+            : {}),
     });
     usageReports = result.usage ?? [];
-    if (result.outcome === "succeeded") {
-      if (!result.brief.trim()) throw new Error("Phase artifact is empty");
+    if (result.outcome === "succeeded" || (started.workflow === "implementation" && result.brief)) {
+      if (!result.brief?.trim()) throw new Error("Phase artifact is empty");
       const artifactPath = await dependencies.saveBrief(
         request.cwd,
         attemptId,
         result.brief,
         started.artifactPath,
       );
-      completion = { attemptId, outcome: "succeeded", artifactPath };
+      completion =
+        result.outcome === "succeeded"
+          ? { attemptId, outcome: "succeeded", artifactPath }
+          : { attemptId, outcome: "failed", artifactPath };
     } else {
       completion = { attemptId, outcome: result.outcome };
     }
-  } catch {
+    reason = result.reason;
+  } catch (error) {
+    reason = error instanceof Error ? error.message : "assignment execution failed";
     completion = { attemptId, outcome: request.signal.aborted ? "cancelled" : "failed" };
   }
-
-  let reason: string | undefined;
   const settled = await workflow.finishAttempt(completion).catch(async (error: unknown) => {
     // The Pi controller validates before settling. Malformed output becomes a
     // failed attempt; recorder availability does not affect that decision.
-    if (completion.outcome !== "succeeded" || !(error instanceof WorkflowValidationError))
-      throw error;
+    if (!(error instanceof WorkflowValidationError) || !("artifactPath" in completion)) throw error;
     reason = error.message;
     return workflow.finishAttempt({ attemptId, outcome: "failed" });
   });
   observe({ type: "attempt.finished", attemptId, outcome: settled.outcome });
-  const gate = settled.outcome === "succeeded" ? await workflow.advanceRun() : undefined;
+  const gate =
+    settled.outcome === "succeeded" && started.workflow !== "implementation"
+      ? await workflow.advanceRun()
+      : undefined;
   // Usage delivery is observational. It cannot delay settlement, gate evaluation,
   // or the tool response, even if a recorder implementation never resolves.
   for (const usage of usageReports) {
@@ -137,16 +166,25 @@ export async function delegateKnowledge(
       .then(() => workflow.recordUsage?.(attemptId, usage))
       .catch(() => observe({ type: "recording.failed", attemptId }));
   }
-  const phase = gate?.phase ?? started.phase ?? "discovery";
+  const phase =
+    gate?.phase ??
+    started.phase ??
+    (started.workflow === "implementation" ? "implementation" : "discovery");
   return {
     attemptId,
     outcome: settled.outcome,
     phase,
     ...(gate ? { gate } : {}),
     ...(reason ? { reason } : {}),
+    ...(started.workflow === "implementation" ? { incrementId: started.incrementId } : {}),
     artifactId: settled.replayed ? null : settled.artifactId,
-    ...(settled.outcome === "succeeded" && completion.outcome === "succeeded"
+    ...(started.workflow === "implementation" &&
+    "artifactPath" in completion &&
+    !settled.replayed &&
+    settled.artifactId
       ? { artifactPath: completion.artifactPath }
-      : {}),
+      : settled.outcome === "succeeded" && completion.outcome === "succeeded"
+        ? { artifactPath: completion.artifactPath }
+        : {}),
   };
 }

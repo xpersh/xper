@@ -5,6 +5,7 @@ import {
   type Artifact,
   type Assignment,
   type Attempt,
+  decodeAdapterCheckpoint,
   decodeCheckpoint,
   toRunSummary,
 } from "../workflow/state.js";
@@ -131,6 +132,22 @@ test("version 1 migration preserves identities, sealed evidence, frozen routing 
   assert(!Object.hasOwn(state, "ready"));
   assert(!Object.hasOwn(state, "human_input"));
   assert.notEqual(state.attempts, legacy.attempts);
+});
+
+test("version 1 and 2 knowledge checkpoints migrate into an empty version 3 envelope", () => {
+  const legacy = deepFreeze(legacyCheckpoint());
+  const fromOne = decodeAdapterCheckpoint(legacy);
+  assert(fromOne);
+  assert.equal(fromOne.version, 3);
+  assert.equal(fromOne.knowledge.run_id, legacy.run_id);
+  assert.deepEqual(fromOne.implementations, {});
+
+  const versionTwo = decodeCheckpoint(legacy);
+  assert(versionTwo);
+  const fromTwo = decodeAdapterCheckpoint(deepFreeze(versionTwo));
+  assert(fromTwo);
+  assert.deepEqual(fromTwo.knowledge, versionTwo);
+  assert.deepEqual(fromTwo.implementations, {});
 });
 
 test("migration keeps unfinished attempts unfinished and decoding twice is idempotent", () => {

@@ -303,6 +303,107 @@ test("delegation obeys Pi artifact inputs and timeout and preserves a human gate
   assert.equal(result.artifactPath, ".xper/artifacts/definition-contract-t.json");
 });
 
+test("the same delegation action executes an Implementer without launching Verifier", async () => {
+  const f = fixture();
+  f.dependencies.workflow.startAssignment = async () => ({
+    workflow: "implementation",
+    runId: "r",
+    assignmentId: "driver",
+    attemptId: "implementation-attempt",
+    role: "implementation.driver",
+    selection: null,
+    model: "frozen/provider-model",
+    incrementId: "s1",
+    baseCommit: "1111111111111111111111111111111111111111",
+    criteria: [{ id: "c1", behavior: "Works", example: "Observed" }],
+    verification: ["run focused test"],
+    artifactKind: "implementation_result",
+    artifactPath: ".xper/artifacts/implementation-result-implementation-attempt.json",
+    inputArtifacts: [
+      {
+        artifact_id: "plan",
+        kind: "execution_plan",
+        path: ".xper/artifacts/plan.json",
+        version: 1,
+      },
+    ],
+    timeoutMs: 1000,
+  });
+  f.state.execution = { outcome: "succeeded", brief: '{"implementation":true}' };
+  f.dependencies.saveBrief = async (_cwd, _attempt, _content, path) => {
+    assert(path);
+    return path;
+  };
+  const result = await delegateKnowledge(f.request, f.dependencies);
+  assert.equal(result.phase, "implementation");
+  assert.equal(result.gate, undefined);
+  assert.equal(f.calls.includes("advance"), false);
+  assert.deepEqual(
+    f.executions.map((execution) => ({
+      attemptId: execution.attemptId,
+      workflow: execution.workflow,
+      assignmentId: execution.assignmentId,
+      incrementId: execution.incrementId,
+      model: execution.model,
+    })),
+    [
+      {
+        attemptId: "implementation-attempt",
+        workflow: "implementation",
+        assignmentId: "driver",
+        incrementId: "s1",
+        model: "frozen/provider-model",
+      },
+    ],
+  );
+});
+
+test("invalid failed-attempt evidence is dropped while the implementation attempt still settles", async () => {
+  const f = fixture();
+  f.dependencies.workflow.startAssignment = async () => ({
+    workflow: "implementation",
+    runId: "r",
+    assignmentId: "driver",
+    attemptId: "implementation-attempt",
+    role: "implementation.driver",
+    selection: null,
+    model: "frozen/provider-model",
+    incrementId: "s1",
+    baseCommit: "1111111111111111111111111111111111111111",
+    criteria: [{ id: "c1", behavior: "Works", example: "Observed" }],
+    verification: ["run focused test"],
+    artifactKind: "implementation_result",
+    artifactPath: ".xper/artifacts/implementation-result-implementation-attempt.json",
+  });
+  f.state.execution = {
+    outcome: "failed",
+    brief: '{"malformed":true}',
+    reason: "host-run test failed",
+  };
+  f.dependencies.saveBrief = async (_cwd, _attempt, _content, path) => {
+    assert(path);
+    return path;
+  };
+  f.dependencies.workflow.finishAttempt = async (request) => {
+    f.completions.push(request);
+    if ("artifactPath" in request)
+      throw new WorkflowValidationError("invalid implementation evidence");
+    return { attemptId: request.attemptId, outcome: request.outcome, artifactId: null };
+  };
+  const result = await delegateKnowledge(f.request, f.dependencies);
+  assert.equal(result.outcome, "failed");
+  assert.match(result.reason ?? "", /invalid implementation evidence/);
+  assert.equal(result.artifactPath, undefined);
+  assert.deepEqual(f.completions, [
+    {
+      attemptId: "implementation-attempt",
+      outcome: "failed",
+      artifactPath: ".xper/artifacts/implementation-result-implementation-attempt.json",
+    },
+    { attemptId: "implementation-attempt", outcome: "failed" },
+  ]);
+});
+
 test("a Pi deadline normalizes late success to timeout without advancing", async () => {
   const f = fixture();
   f.dependencies.workflow.finishAttempt = async (request) => ({

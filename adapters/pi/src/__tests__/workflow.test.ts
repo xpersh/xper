@@ -15,6 +15,7 @@ import { PiWorkflow } from "../workflow/controller.js";
 import {
   parseDocument,
   selectImplementationHandoff,
+  selectNextImplementationHandoff,
   validateDag,
   validateLinks,
   type Document,
@@ -156,12 +157,79 @@ async function sealPlan(harness: Awaited<ReturnType<typeof setup>>, plan?: Outpu
   return planPath;
 }
 
+function twoIncrementOutputs(dependent: boolean) {
+  const definition = structuredClone(
+    fixtures.find((fixture) => fixture.phase === "define")?.artifact.output,
+  );
+  const breakdown = structuredClone(
+    fixtures.find((fixture) => fixture.phase === "breakdown")?.artifact.output,
+  );
+  const plan = structuredClone(
+    fixtures.find((fixture) => fixture.phase === "plan")?.artifact.output,
+  );
+  assert(definition?.kind === "definition_contract");
+  assert(breakdown?.kind === "story_map");
+  assert(plan?.kind === "execution_plan");
+  definition.criteria.push({ id: "c2", behavior: "Returns a farewell", example: "Goodbye Ada" });
+  breakdown.stories.push({
+    id: "s2",
+    value: "Receive a farewell",
+    criteria: ["c2"],
+    verification: ["assert farewell for a synthetic name"],
+    independentlyVerifiable: true,
+    dependencies: dependent ? ["s1"] : [],
+  });
+  const [driver, verifier] = plan.assignments;
+  assert(driver && verifier);
+  plan.assignments.push(
+    {
+      ...driver,
+      id: "driver-2",
+      incrementId: "s2",
+      dependencies: dependent ? [verifier.id] : [],
+      workspace: "s2",
+    },
+    {
+      ...verifier,
+      id: "verifier-2",
+      incrementId: "s2",
+      dependencies: ["driver-2"],
+      workspace: "s2",
+    },
+  );
+  return { definition, breakdown, plan };
+}
+
+async function sealTwoIncrementPlan(
+  harness: Awaited<ReturnType<typeof setup>>,
+  dependent = true,
+  maxAttempts = 1,
+) {
+  const outputs = twoIncrementOutputs(dependent);
+  for (const assignment of outputs.plan.assignments) assignment.maxAttempts = maxAttempts;
+  for (const phase of ["discovery", "define", "design", "breakdown", "plan"]) {
+    const output =
+      phase === "define"
+        ? outputs.definition
+        : phase === "breakdown"
+          ? outputs.breakdown
+          : phase === "plan"
+            ? outputs.plan
+            : undefined;
+    await harness.produce(output);
+    const gate = await harness.controller.advanceRun();
+    assert(gate.advanced);
+  }
+  return outputs;
+}
+
 async function completeImplementation(
   harness: Awaited<ReturnType<typeof setup>>,
   resultingCommit: string,
   fallbackModel = "provider/model",
+  controller = harness.controller,
 ) {
-  const assignment = await harness.controller.startAssignment(undefined, fallbackModel);
+  const assignment = await controller.startAssignment(undefined, fallbackModel);
   assert.equal(assignment.workflow, "implementation");
   if (assignment.workflow !== "implementation") assert.fail("implementation assignment expected");
   assert(assignment.artifactPath);
@@ -190,7 +258,7 @@ async function completeImplementation(
     },
   });
   harness.artifacts.set(assignment.artifactPath, { content, digest: content });
-  const finished = await harness.controller.finishAttempt({
+  const finished = await controller.finishAttempt({
     attemptId: assignment.attemptId,
     outcome: "succeeded",
     artifactPath: assignment.artifactPath,
@@ -205,8 +273,9 @@ async function completeVerification(
   harness: Awaited<ReturnType<typeof setup>>,
   verdict: "verified" | "rejected",
   fallbackModel = "provider/model",
+  controller = harness.controller,
 ) {
-  const assignment = await harness.controller.startAssignment(undefined, fallbackModel);
+  const assignment = await controller.startAssignment(undefined, fallbackModel);
   assert.equal(assignment.workflow, "verification");
   if (assignment.workflow !== "verification") assert.fail("verification assignment expected");
   assert(assignment.artifactPath);
@@ -254,7 +323,7 @@ async function completeVerification(
     },
   });
   harness.artifacts.set(assignment.artifactPath, { content, digest: content });
-  const finished = await harness.controller.finishAttempt({
+  const finished = await controller.finishAttempt({
     attemptId: assignment.attemptId,
     outcome: "succeeded",
     artifactPath: assignment.artifactPath,
@@ -362,21 +431,146 @@ test("explicit delivery verifies one exact implementation without finishing the 
     assert(!status.timeline.some((event) => (event as RecordedEvent).type === "run.finished"));
     await assert.rejects(
       h.controller.startAssignment(undefined, "provider/model"),
-      /increment is verified; later increments are not available yet/,
+      /all planned increments are verified; the run is ready for Judgment Day/,
     );
   } finally {
     await h.cleanup();
   }
 });
 
-test("verification admission and settlement never await an unresponsive recorder", async () => {
+test("dependent increments advance explicitly in one checkout and survive reload", async () => {
+  const h = await setup({ maxAttempts: 9 });
+  try {
+    await sealTwoIncrementPlan(h);
+    const firstImplementation = await completeImplementation(
+      h,
+      "2222222222222222222222222222222222222222",
+    );
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    const firstVerification = await completeVerification(h, "verified");
+    const beforeReload = await h.controller.getRunStatus();
+    assert.equal(beforeReload.implementations?.s2, undefined);
+    assert.equal(beforeReload.verifications?.s2, undefined);
+
+    const restored = await h.restore();
+    const recovered = await restored.getRunStatus();
+    assert.equal(recovered.verifications?.s1?.nodeId, "verified");
+    assert.equal(recovered.implementations?.s2, undefined);
+
+    const secondImplementation = await completeImplementation(
+      h,
+      "3333333333333333333333333333333333333333",
+      "provider/model",
+      restored,
+    );
+    assert.equal(secondImplementation.assignment.incrementId, "s2");
+    assert.equal(
+      secondImplementation.assignment.baseCommit,
+      "2222222222222222222222222222222222222222",
+    );
+    assert(secondImplementation.assignment.inputArtifacts);
+    assert(
+      secondImplementation.assignment.inputArtifacts.some(
+        (artifact) => artifact.artifact_id === firstVerification.artifactId,
+      ),
+    );
+    assert(
+      !secondImplementation.assignment.inputArtifacts.some(
+        (artifact) => artifact.artifact_id === firstImplementation.artifactId,
+      ),
+    );
+    h.setWorkspace({
+      root: h.cwd,
+      head: "3333333333333333333333333333333333333333",
+      clean: true,
+      status: "",
+    });
+    const secondVerification = await completeVerification(
+      h,
+      "verified",
+      "provider/model",
+      restored,
+    );
+    assert.notEqual(secondImplementation.artifactId, firstImplementation.artifactId);
+    assert.notEqual(secondVerification.artifactId, firstVerification.artifactId);
+    const status = await restored.getRunStatus();
+    assert.equal(status.implementations?.s1?.nodeId, "implemented");
+    assert.equal(status.verifications?.s1?.nodeId, "verified");
+    assert.equal(status.implementations?.s2?.nodeId, "implemented");
+    assert.equal(status.verifications?.s2?.nodeId, "verified");
+    assert(!status.timeline.some((event) => (event as RecordedEvent).type === "run.finished"));
+    await assert.rejects(
+      restored.startAssignment(undefined, "provider/model"),
+      /all planned increments are verified; the run is ready for Judgment Day/,
+    );
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("a rejected prerequisite remains the only delivery frontier", async () => {
   const h = await setup();
+  try {
+    await sealTwoIncrementPlan(h, true, 2);
+    await completeImplementation(h, "2222222222222222222222222222222222222222");
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    await completeVerification(h, "rejected");
+    const rework = await h.controller.startAssignment(undefined, "provider/model");
+    assert.equal(rework.workflow, "implementation");
+    if (rework.workflow !== "implementation") assert.fail("implementation rework expected");
+    assert.equal(rework.incrementId, "s1");
+    assert.equal((await h.controller.getRunStatus()).implementations?.s2, undefined);
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("a later increment requires the latest verified checkout revision", async () => {
+  const h = await setup({ maxAttempts: 9 });
+  try {
+    await sealTwoIncrementPlan(h);
+    await completeImplementation(h, "2222222222222222222222222222222222222222");
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    await completeVerification(h, "verified");
+    h.setWorkspace({
+      root: h.cwd,
+      head: "9999999999999999999999999999999999999999",
+      clean: true,
+      status: "",
+    });
+    await assert.rejects(
+      h.controller.startAssignment(undefined, "provider/model"),
+      /checkout revision does not match the latest verified increment/,
+    );
+    assert.equal((await h.controller.getRunStatus()).implementations?.s2, undefined);
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("verification admission and settlement never await an unresponsive recorder", async () => {
+  const h = await setup({ maxAttempts: 9 });
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
   try {
-    await sealPlan(h);
+    await sealTwoIncrementPlan(h);
     await completeImplementation(h, "2222222222222222222222222222222222222222");
     h.setWorkspace({
       root: h.cwd,
@@ -398,6 +592,14 @@ test("verification admission and settlement never await an unresponsive recorder
     ]);
     assert.equal(completed.assignment.workflow, "verification");
     assert.equal((await h.controller.getRunStatus()).verifications?.s1?.nodeId, "verified");
+    const next = await Promise.race([
+      h.controller.startAssignment(undefined, "provider/model"),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("next implementation awaited Rust")), 250),
+      ),
+    ]);
+    assert.equal(next.workflow, "implementation");
+    if (next.workflow === "implementation") assert.equal(next.incrementId, "s2");
   } finally {
     release();
     await h.cleanup();
@@ -1151,6 +1353,73 @@ test("implementation handoff follows sealed Plan order and requires the frozen r
     () => selectImplementationHandoff(plan.output, upstream, { ...routing, routes: {} }),
     /no implementation.driver route/,
   );
+});
+
+test("next implementation selection uses verified dependency evidence and pending budgets", () => {
+  const dependent = twoIncrementOutputs(true);
+  const definitionFixture = fixtures.find((fixture) => fixture.phase === "define")?.artifact;
+  const breakdownFixture = fixtures.find((fixture) => fixture.phase === "breakdown")?.artifact;
+  assert(definitionFixture && breakdownFixture);
+  const upstream = {
+    define: { ...structuredClone(definitionFixture), output: dependent.definition },
+    breakdown: { ...structuredClone(breakdownFixture), output: dependent.breakdown },
+  };
+  const [driver, verifier] = dependent.plan.assignments;
+  assert(driver && verifier);
+  const implementationOnly = new Map([[driver.id, "implementation-1"]]);
+  const blocked = selectNextImplementationHandoff(
+    dependent.plan,
+    upstream,
+    null,
+    implementationOnly,
+  );
+  assert.equal(blocked.status, "blocked");
+  if (blocked.status === "blocked")
+    assert.deepEqual(blocked.unsatisfiedDependencyIds, [verifier.id]);
+
+  const verified = new Map([
+    [driver.id, "implementation-1"],
+    [verifier.id, "verification-1"],
+  ]);
+  const next = selectNextImplementationHandoff(dependent.plan, upstream, null, verified);
+  assert.equal(next.status, "ready");
+  if (next.status === "ready") {
+    assert.equal(next.handoff.incrementId, "s2");
+    assert.deepEqual(next.dependencyArtifactIds, ["verification-1"]);
+  }
+  assert.throws(
+    () =>
+      validateLinks(dependent.plan, upstream, {
+        attempts: 2,
+        timeMs: 2_000,
+        costMicros: 0,
+        concurrency: 1,
+      }),
+    /exceeds remaining run budgets/,
+  );
+  validateLinks(
+    dependent.plan,
+    upstream,
+    { attempts: 2, timeMs: 2_000, costMicros: 0, concurrency: 1 },
+    new Set(verified.keys()),
+  );
+
+  const independent = twoIncrementOutputs(false);
+  const independentUpstream = {
+    define: { ...structuredClone(definitionFixture), output: independent.definition },
+    breakdown: { ...structuredClone(breakdownFixture), output: independent.breakdown },
+  };
+  const independentNext = selectNextImplementationHandoff(
+    independent.plan,
+    independentUpstream,
+    null,
+    verified,
+  );
+  assert.equal(independentNext.status, "ready");
+  if (independentNext.status === "ready") {
+    assert.equal(independentNext.handoff.incrementId, "s2");
+    assert.deepEqual(independentNext.dependencyArtifactIds, []);
+  }
 });
 
 test("a ready Plan is revalidated against sealed evidence and remaining time", async () => {

@@ -210,6 +210,35 @@ test("version 3 wraps its existing implementation as the first immutable history
   assert.deepEqual(migrated.verifications, {});
   assert.equal(JSON.stringify(versionThree).includes('"version":4'), false);
 
+  const second = structuredClone(started.state);
+  second.instanceId = "implementation-s2-1";
+  second.incrementId = "s2";
+  second.assignment = {
+    ...second.assignment,
+    id: "driver-2",
+    incrementId: "s2",
+    workspace: "s2",
+    attemptIds: ["implementation-attempt-2"],
+  };
+  const firstAttempt = second.attempts["implementation-attempt-1"];
+  assert(firstAttempt);
+  second.attempts = {
+    "implementation-attempt-2": {
+      ...firstAttempt,
+      artifactPath: ".xper/artifacts/implementation-attempt-2.json",
+    },
+  };
+  assert.throws(
+    () =>
+      decodeAdapterCheckpoint({
+        version: 4,
+        knowledge,
+        implementations: { s1: [started.state], s2: [second] },
+        verifications: {},
+      }),
+    /invalid overlapping delivery checkpoint/,
+  );
+
   assert.throws(
     () =>
       decodeAdapterCheckpoint({

@@ -97,7 +97,8 @@ enum or imply product acceptance. Its exact result then hands off to a
 `pi.verification` v1 instance, which transitions from `verify` to terminal
 `verified` or `rejected`. Rejection makes a fresh Implementation instance
 eligible while retaining both histories and consumed budgets. Verification does
-not enable later increments or close the run.
+not close the run. After a verified result, another explicit delegation selects
+the next Plan-eligible increment; verifying them all makes Judgment Day eligible.
 [XP-015](../../../docs/tasks/015-workflow-visualization.md) tracks a read-only UI
 combining the versioned graph with reported positions and history, including
 incomplete recording. Rust preserves those facts without running the machine.
@@ -140,7 +141,7 @@ or automatically running a model.
 `xper_delegate` asks the local workflow for its current assignment, executes
 the selected role in a child Pi process, saves its output, and reports the
 result locally. It continues to serve all Knowledge roles and, after Plan, the
-first eligible `implementation.driver` or dependent `verify.verifier`; no second
+next eligible `implementation.driver` or dependent `verify.verifier`; no second
 public delivery tool exists.
 Pi validates the artifact and evaluates the owning gate after success.
 `/xper advance` reevaluates the gate; `/xper approve <artifactId>` supplies an
@@ -153,8 +154,10 @@ invalidated from that phase onward. Plan validates an execution DAG and complete
 the knowledge instance with sealed evidence for implementation. Before sealing
 and again before starting delivery, one shared handoff validator rereads the
 accepted Definition, Breakdown, and Plan, checks their digests and current role,
-dependency, and routing contract, then selects the first root Implementer in
-sealed Plan order. The
+dependency, and routing contract. Initial delivery selects the first root
+Implementer. Later delivery maps verified assignment IDs to their exact
+artifacts, subtracts their budgets from the pending Plan, and selects the first
+remaining Implementer whose dependencies are satisfied in sealed Plan order. The
 [knowledge workflow guide](../../../docs/knowledge-workflow.md) defines these
 contracts and limits.
 
@@ -182,6 +185,14 @@ rejection is a successfully executed review: the reducer records its cause,
 evidence, invalidated Implementation artifact, and rework request. A later
 explicit delegation creates a new Implementation instance based on the rejected
 commit; a new review targets only its new artifact and commit.
+
+After verification succeeds, the next explicit delegation starts another
+eligible increment in the same checkout. Its inputs include accepted Knowledge
+evidence plus artifacts for its direct Plan dependencies, and its base must equal
+the unique latest verified commit. Independent increments use Plan order and
+remain serial. Recovery preserves the single pending frontier without starting
+it. Once all planned increments verify, the run remains open and reports that it
+is ready for Judgment Day; no `run.finished` event is emitted.
 
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
@@ -253,9 +264,9 @@ format-1 and format-2 checkpoints in memory, preserving identities, evidence,
 and pending events. Envelope format 3 wraps each Implementation as its first
 history entry. Reading alone does not rewrite the checkpoint; the next local
 commit with facts writes format 4. Unknown definitions, duplicate identities,
-or inconsistent run, Plan, artifact, digest, base, commit, or history references
-are rejected rather than guessed. This envelope change does not change an
-existing workflow definition version.
+or inconsistent run, Plan, artifact, digest, base, commit, history, sequential
+commit chain, or single-frontier references are rejected rather than guessed.
+This envelope change does not change an existing workflow definition version.
 
 A checkpoint is metadata-only adapter state. It excludes prompts and artifact
 contents; those artifacts remain files. Small checkpoints use `adapter.state`.

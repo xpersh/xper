@@ -3,7 +3,7 @@
 - Status: `pending`
 - Milestone: M3
 - Entry dependency: XP-010
-- Next slice: XP-011.3
+- Next slice: XP-011.4
 
 ## Outcome and boundary
 
@@ -164,7 +164,7 @@ or additional reviewer/tool.
 
 ## XP-011.3 — Deliver remaining increments sequentially
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-011.2
 - Example: after increment A verifies, the next explicit delegation can start
   dependent increment B in the same checkout.
@@ -183,6 +183,32 @@ Acceptance:
 
 Stop here: no concurrent dispatch, merge algorithm, workspace pool, or scheduler
 optimization. Serial execution does not remove future instance boundaries.
+
+### Delivery evidence
+
+- The existing `xper_delegate` now resumes the single unfinished delivery
+  frontier or selects the first pending Implementer in sealed Plan order whose
+  explicit dependencies have verified artifact evidence. Independent increments
+  use the same serial selection; no child starts during reload or verification.
+- Later increments require the clean checkout at the unique latest verified
+  commit, add direct dependency artifacts to their sealed inputs, and retain
+  separate increment, workflow-instance, attempt, and artifact identities.
+  Rejection and failed attempts keep the prerequisite as the only frontier.
+- Remaining-Plan admission excludes satisfied assignments while global budgets
+  still count every Knowledge, Implementation, and Verification attempt.
+  Assignment budgets remain local to the planned role and cumulative across its
+  retries and rework.
+- Checkpoint envelope format 4 and both delivery definition versions remain
+  unchanged. Recovery validates one pending frontier and one verified commit
+  chain; all verified increments produce a Judgment Day readiness diagnostic
+  without `run.finished`, a Judge flow, a new tool, or a protocol/schema change.
+- Controller fixtures cover dependent and independent selection, two increments
+  with reload between them, direct evidence, exact checkout revision, blocked
+  prerequisites, tight cumulative budgets, and an unresponsive recorder.
+- `npm run check` passes formatting, Clippy/Biome lint, architecture boundaries,
+  strict TypeScript, 67 Rust tests, shared contract fixtures, and 161 adapter
+  tests. `git diff --check` also passes. The final diff updates nine files with
+  694 additions and 161 removals and adds no dependency or public contract.
 
 ## XP-011.4 — Return a concrete problem to Knowledge
 

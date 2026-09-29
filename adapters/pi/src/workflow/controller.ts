@@ -7,7 +7,7 @@ import type {
 import { inspectGitWorkspace, type GitWorkspace } from "../implementation/workspace.js";
 import {
   parseDocument,
-  selectImplementationHandoff,
+  selectNextImplementationHandoff,
   selectVerificationHandoff,
   validateLinks,
   type PlannedAssignment,
@@ -38,6 +38,7 @@ import { budgetRemaining } from "./policy.js";
 import {
   decodeAdapterCheckpoint,
   toRunSummary,
+  verifiedDeliveryTip,
   type AdapterCheckpoint,
   type WorkflowState,
 } from "./state.js";
@@ -72,6 +73,18 @@ interface Options {
 function invalid(message: string): never {
   throw new WorkflowValidationError(message);
 }
+
+type DeliveryFrontier =
+  | {
+      kind: "implementation";
+      implementation: ImplementationState;
+      rejected?: VerificationState;
+    }
+  | {
+      kind: "verification";
+      implementation: ImplementationState;
+      verification?: VerificationState;
+    };
 
 /** Local runtime: prepare evidence, apply a pure decision, checkpoint and enqueue telemetry. */
 export class PiWorkflow implements WorkflowClient {
@@ -363,6 +376,49 @@ export class PiWorkflow implements WorkflowClient {
       concurrency: 1,
     };
   }
+  private deliveryFrontier(): DeliveryFrontier | null {
+    const checkpoint = this.requireRun();
+    const frontiers: DeliveryFrontier[] = [];
+    for (const [incrementId, history] of Object.entries(checkpoint.implementations)) {
+      const implementation = history.at(-1);
+      if (!implementation) invalid("implementation history is empty");
+      if (implementation.lifecycle.status === "active") {
+        frontiers.push({ kind: "implementation", implementation });
+        continue;
+      }
+      const verification = (checkpoint.verifications[incrementId] ?? []).findLast(
+        (candidate) => candidate.implementation.instanceId === implementation.instanceId,
+      );
+      if (!verification || verification.lifecycle.status === "active") {
+        frontiers.push({
+          kind: "verification",
+          implementation,
+          ...(verification ? { verification } : {}),
+        });
+        continue;
+      }
+      if (verification.lifecycle.verdict === "rejected")
+        frontiers.push({ kind: "implementation", implementation, rejected: verification });
+    }
+    if (frontiers.length > 1) invalid("delivery checkpoint has overlapping increment frontiers");
+    return frontiers[0] ?? null;
+  }
+  private satisfiedAssignmentArtifacts(): Map<string, string> {
+    const checkpoint = this.requireRun();
+    const satisfied = new Map<string, string>();
+    for (const [incrementId, history] of Object.entries(checkpoint.implementations)) {
+      const implementation = history.at(-1);
+      if (implementation?.lifecycle.status !== "completed") continue;
+      satisfied.set(implementation.assignment.id, implementation.lifecycle.artifactId);
+      const verification = (checkpoint.verifications[incrementId] ?? []).findLast(
+        (candidate) => candidate.implementation.instanceId === implementation.instanceId,
+      );
+      if (verification?.lifecycle.status !== "completed") continue;
+      if (verification.lifecycle.verdict !== "verified") continue;
+      satisfied.set(verification.assignment.id, verification.lifecycle.artifactId);
+    }
+    return satisfied;
+  }
   private async implementationHandoff(now: number) {
     const knowledge = this.knowledge();
     if (knowledge.lifecycle.status !== "completed") invalid("the execution Plan is not sealed");
@@ -385,29 +441,44 @@ export class PiWorkflow implements WorkflowClient {
     if (plan?.output.kind !== "execution_plan")
       invalid("sealed Plan is unsupported; replan before delivery");
     try {
-      validateLinks(plan.output, documents, this.runBudget(now));
-      const handoff = selectImplementationHandoff(plan.output, documents, knowledge.routing);
+      const satisfied = this.satisfiedAssignmentArtifacts();
+      validateLinks(plan.output, documents, this.runBudget(now), new Set(satisfied.keys()));
+      const selection = selectNextImplementationHandoff(
+        plan.output,
+        documents,
+        knowledge.routing,
+        satisfied,
+      );
+      if (selection.status === "complete")
+        invalid("all planned increments are verified; the run is ready for Judgment Day");
+      if (selection.status === "blocked")
+        invalid(
+          `the next implementation is blocked by unverified Plan dependencies (${selection.unsatisfiedDependencyIds.join(", ")})`,
+        );
       const planId = knowledge.accepted.plan;
       if (!planId) invalid("sealed Plan identity is unavailable");
       const planArtifact = knowledge.artifacts[planId];
       if (!planArtifact) invalid("sealed Plan artifact is unavailable");
-      const inputs = Object.values(knowledge.accepted);
+      const inputs = [
+        ...new Set([...Object.values(knowledge.accepted), ...selection.dependencyArtifactIds]),
+      ];
       return {
-        ...handoff,
+        ...selection.handoff,
         planArtifact,
         inputs,
-        inputArtifacts: inputs.map((id) => {
-          const artifact = knowledge.artifacts[id];
-          if (!artifact) invalid("accepted input artifact is unavailable");
-          return {
-            artifact_id: artifact.artifact_id,
-            kind: artifact.kind,
-            path: artifact.path,
-            version: artifact.version,
-          };
-        }),
+        inputArtifacts: inputs.map((id) => this.artifactInput(id)),
+        expectedBaseCommit: verifiedDeliveryTip(
+          this.requireRun().implementations,
+          this.requireRun().verifications,
+        ),
       };
     } catch (error) {
+      if (
+        error instanceof WorkflowValidationError &&
+        (error.message.startsWith("all planned increments") ||
+          error.message.startsWith("the next implementation is blocked"))
+      )
+        throw error;
       invalid(
         `sealed Plan is unsupported; replan before delivery (${error instanceof Error ? error.message : "invalid handoff"})`,
       );
@@ -483,95 +554,84 @@ export class PiWorkflow implements WorkflowClient {
       if (knowledge.lifecycle.status === "completed") {
         const checkpoint = this.requireRun();
         const nowBeforeEvidence = this.now();
-        const implementationHistory = Object.values(checkpoint.implementations)[0] ?? [];
-        const latestImplementation = implementationHistory.at(-1);
-        const incrementId = latestImplementation?.incrementId;
-        const verificationHistory = incrementId
-          ? (checkpoint.verifications[incrementId] ?? [])
-          : [];
-        const latestVerification = verificationHistory.at(-1);
+        const frontier = this.deliveryFrontier();
 
-        if (latestImplementation?.lifecycle.status === "completed") {
-          const verificationForLatest =
-            latestVerification?.implementation.instanceId === latestImplementation.instanceId
-              ? latestVerification
-              : undefined;
-          if (!verificationForLatest || verificationForLatest.lifecycle.status === "active") {
-            const handoff = verificationForLatest
-              ? {
-                  assignment: verificationForLatest.assignment,
-                  planArtifact: knowledge.artifacts[verificationForLatest.planArtifactId],
-                  inputs: verificationForLatest.assignment.inputs,
-                  inputArtifacts: verificationForLatest.assignment.inputs.map((id) =>
-                    this.artifactInput(id),
-                  ),
-                  criteria: verificationForLatest.assignment.criteria,
-                  verification: verificationForLatest.assignment.verification,
-                  implementation: verificationForLatest.implementation,
-                }
-              : await this.verificationHandoff(latestImplementation);
-            if (!handoff.planArtifact) invalid("verification handoff evidence is unavailable");
-            for (const id of handoff.inputs) await this.artifact(id);
-            const workspace = await this.inspectWorkspace(this.cwd);
-            if (!workspace.clean) invalid("verification requires a clean dedicated checkout");
-            if (workspace.head !== handoff.implementation.evaluatedCommit)
-              invalid("verification checkout revision does not match the implementation result");
-            const frozen = verificationHistory[0]?.assignment;
-            const selection =
-              frozen?.selection ?? knowledge.routing?.routes["verify.verifier"]?.[0] ?? null;
-            const model = frozen?.model ?? (selection ? null : (fallbackModel ?? null));
-            if (!selection && !model)
-              invalid("verification requires the active Pi model to freeze its selection");
-            const now = this.now();
-            return this.commitVerification(
-              transitionVerification(
-                verificationForLatest ?? null,
-                {
-                  type: "assignment.start",
-                  runId: knowledge.run_id,
-                  instanceId: verificationForLatest?.instanceId ?? this.id(),
-                  attemptId: this.id(),
-                  ...(assignmentId ? { assignmentId } : {}),
-                  planArtifactId: handoff.planArtifact.artifact_id,
-                  planDigest: handoff.planArtifact.digest,
-                  implementation: handoff.implementation,
-                  assignment: handoff.assignment,
-                  inputs: handoff.inputs,
-                  inputArtifacts: handoff.inputArtifacts,
-                  criteria: handoff.criteria,
-                  verification: handoff.verification,
-                  selection,
-                  model,
-                  attemptTimeMs: knowledge.policy.attemptTimeMs,
-                  attemptCostMicros: knowledge.policy.attemptCostMicros,
-                  assignmentBudget: this.assignmentBudget(
-                    handoff.assignment,
-                    verificationHistory,
-                    now,
-                  ),
-                  globalBudget: this.runBudget(now),
-                },
-                now,
-              ),
+        if (frontier?.kind === "verification") {
+          const { implementation, verification: verificationForLatest } = frontier;
+          const verificationHistory = checkpoint.verifications[implementation.incrementId] ?? [];
+          const handoff = verificationForLatest
+            ? {
+                assignment: verificationForLatest.assignment,
+                planArtifact: knowledge.artifacts[verificationForLatest.planArtifactId],
+                inputs: verificationForLatest.assignment.inputs,
+                inputArtifacts: verificationForLatest.assignment.inputs.map((id) =>
+                  this.artifactInput(id),
+                ),
+                criteria: verificationForLatest.assignment.criteria,
+                verification: verificationForLatest.assignment.verification,
+                implementation: verificationForLatest.implementation,
+              }
+            : await this.verificationHandoff(implementation);
+          if (!handoff.planArtifact) invalid("verification handoff evidence is unavailable");
+          for (const id of handoff.inputs) await this.artifact(id);
+          const workspace = await this.inspectWorkspace(this.cwd);
+          if (!workspace.clean) invalid("verification requires a clean dedicated checkout");
+          if (workspace.head !== handoff.implementation.evaluatedCommit)
+            invalid("verification checkout revision does not match the implementation result");
+          const frozen = verificationHistory[0]?.assignment;
+          const selection =
+            frozen?.selection ?? knowledge.routing?.routes["verify.verifier"]?.[0] ?? null;
+          const model = frozen?.model ?? (selection ? null : (fallbackModel ?? null));
+          if (!selection && !model)
+            invalid("verification requires the active Pi model to freeze its selection");
+          const now = this.now();
+          return this.commitVerification(
+            transitionVerification(
+              verificationForLatest ?? null,
+              {
+                type: "assignment.start",
+                runId: knowledge.run_id,
+                instanceId: verificationForLatest?.instanceId ?? this.id(),
+                attemptId: this.id(),
+                ...(assignmentId ? { assignmentId } : {}),
+                planArtifactId: handoff.planArtifact.artifact_id,
+                planDigest: handoff.planArtifact.digest,
+                implementation: handoff.implementation,
+                assignment: handoff.assignment,
+                inputs: handoff.inputs,
+                inputArtifacts: handoff.inputArtifacts,
+                criteria: handoff.criteria,
+                verification: handoff.verification,
+                selection,
+                model,
+                attemptTimeMs: knowledge.policy.attemptTimeMs,
+                attemptCostMicros: knowledge.policy.attemptCostMicros,
+                assignmentBudget: this.assignmentBudget(
+                  handoff.assignment,
+                  verificationHistory,
+                  now,
+                ),
+                globalBudget: this.runBudget(now),
+              },
               now,
-            );
-          }
-          if (verificationForLatest.lifecycle.verdict === "verified")
-            invalid("the increment is verified; later increments are not available yet");
+            ),
+            now,
+          );
         }
 
+        const latestImplementation =
+          frontier?.kind === "implementation" ? frontier.implementation : undefined;
         const existing =
           latestImplementation?.lifecycle.status === "active" ? latestImplementation : undefined;
-        const rejected =
-          latestVerification?.lifecycle.status === "completed" &&
-          latestVerification.lifecycle.verdict === "rejected"
-            ? latestVerification
-            : undefined;
+        const rejected = frontier?.kind === "implementation" ? frontier.rejected : undefined;
         const rejectionArtifactId =
           rejected?.lifecycle.status === "completed" ? rejected.lifecycle.artifactId : undefined;
-        const initialHandoff = !latestImplementation
+        const initialHandoff = !frontier
           ? await this.implementationHandoff(nowBeforeEvidence)
           : null;
+        const incrementId = initialHandoff?.incrementId ?? latestImplementation?.incrementId;
+        if (!incrementId) invalid("implementation increment is unavailable");
+        const implementationHistory = checkpoint.implementations[incrementId] ?? [];
         const planArtifact =
           initialHandoff?.planArtifact ??
           knowledge.artifacts[
@@ -588,7 +648,7 @@ export class PiWorkflow implements WorkflowClient {
             : rejectionArtifactId && latestImplementation?.lifecycle.status === "completed"
               ? [
                   ...new Set([
-                    ...Object.values(knowledge.accepted),
+                    ...latestImplementation.assignment.inputs,
                     latestImplementation.lifecycle.artifactId,
                     rejectionArtifactId,
                   ]),
@@ -610,6 +670,11 @@ export class PiWorkflow implements WorkflowClient {
           invalid("implementation retry requires a clean checkout");
         if (rejected && !existing && workspace.head !== rejected.implementation.evaluatedCommit)
           invalid("rework checkout revision does not match the rejected implementation");
+        if (
+          initialHandoff?.expectedBaseCommit &&
+          workspace.head !== initialHandoff.expectedBaseCommit
+        )
+          invalid("implementation checkout revision does not match the latest verified increment");
         const frozen = implementationHistory[0]?.assignment;
         const selection =
           frozen?.selection ?? knowledge.routing?.routes["implementation.driver"]?.[0] ?? null;

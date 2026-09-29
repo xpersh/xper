@@ -285,6 +285,66 @@ export interface AdapterCheckpoint {
   verifications: Record<string, VerificationState[]>;
 }
 
+export function verifiedDeliveryTip(
+  implementations: Record<string, ImplementationState[]>,
+  verifications: Record<string, VerificationState[]>,
+): string | null {
+  const verifiedEdges = new Map<string, string>();
+  const evaluatedCommits = new Set<string>();
+  for (const [incrementId, history] of Object.entries(implementations)) {
+    const implementation = history.at(-1);
+    if (!implementation) throw new WorkflowValidationError("invalid implementation history");
+    const verification = (verifications[incrementId] ?? []).findLast(
+      (candidate) => candidate.implementation.instanceId === implementation.instanceId,
+    );
+    if (verification?.lifecycle.status !== "completed") continue;
+    if (verification.lifecycle.verdict !== "verified") continue;
+    const { baseCommit, evaluatedCommit } = verification.implementation;
+    if (verifiedEdges.has(baseCommit) || evaluatedCommits.has(evaluatedCommit))
+      throw new WorkflowValidationError("invalid sequential delivery checkpoint");
+    verifiedEdges.set(baseCommit, evaluatedCommit);
+    evaluatedCommits.add(evaluatedCommit);
+  }
+  if (!verifiedEdges.size) return null;
+  const roots = [...verifiedEdges.keys()].filter((commit) => !evaluatedCommits.has(commit));
+  if (roots.length !== 1)
+    throw new WorkflowValidationError("invalid sequential delivery checkpoint");
+  let commit = roots[0] as string;
+  const visited = new Set<string>();
+  while (verifiedEdges.has(commit)) {
+    if (visited.has(commit))
+      throw new WorkflowValidationError("invalid sequential delivery checkpoint");
+    visited.add(commit);
+    commit = verifiedEdges.get(commit) as string;
+  }
+  if (visited.size !== verifiedEdges.size)
+    throw new WorkflowValidationError("invalid sequential delivery checkpoint");
+  return commit;
+}
+
+function validateSerialDelivery(
+  implementations: Record<string, ImplementationState[]>,
+  verifications: Record<string, VerificationState[]>,
+): void {
+  let frontiers = 0;
+  for (const [incrementId, history] of Object.entries(implementations)) {
+    const implementation = history.at(-1);
+    if (!implementation) throw new WorkflowValidationError("invalid implementation history");
+    const verification = (verifications[incrementId] ?? []).findLast(
+      (candidate) => candidate.implementation.instanceId === implementation.instanceId,
+    );
+    if (
+      implementation.lifecycle.status === "active" ||
+      !verification ||
+      verification.lifecycle.status === "active" ||
+      verification.lifecycle.verdict === "rejected"
+    )
+      frontiers++;
+  }
+  if (frontiers > 1) throw new WorkflowValidationError("invalid overlapping delivery checkpoint");
+  verifiedDeliveryTip(implementations, verifications);
+}
+
 /** Migrate legacy knowledge-only checkpoints without rewriting them on read. */
 export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | null {
   if (value === null) return null;
@@ -394,6 +454,7 @@ export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | nul
       for (const instance of history)
         if (instance.assignment.inputs.some((id) => !artifactIds.has(id)))
           throw new WorkflowValidationError("invalid delivery checkpoint artifact reference");
+    validateSerialDelivery(implementations, verifications);
     return { version: 4, knowledge, implementations, verifications };
   }
   if (object(value) && value.version === 3) {

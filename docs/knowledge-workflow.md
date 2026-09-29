@@ -4,10 +4,10 @@ The Pi adapter implements the five knowledge phases introduced in XP-010.
 Each explicit delegation executes one assignment, saves its output, evaluates
 its gate locally, and reports the outcome to Rust. A ready Execution Plan
 completes the knowledge instance; compatibility status still names its phase
-`plan`. Subsequent explicit delegations may execute the first eligible
-Implementer and its dependent Verifier for one increment. Rejection enables a
-fresh bounded Implementation instance. The adapter does not create worktrees,
-run later increments, close the overall run, or issue a final verdict.
+`plan`. Subsequent explicit delegations execute the next eligible Implementer
+and its dependent Verifier, one increment at a time. Rejection enables a fresh
+bounded Implementation instance. The adapter does not create worktrees, run
+increments concurrently, close the overall run, or issue a final verdict.
 
 These are Pi workflow rules, not core recording rules. Rust resolves
 configuration and preserves the reported events and opaque Pi checkpoint.
@@ -32,11 +32,11 @@ protocol. [RFC 0007](rfcs/0007-explicit-adapter-state-machines.md) defines this
 boundary and the future read-only visualization contract.
 
 The completed instance hands off a sealed Plan by artifact identity and digest.
-The first eligible root assignment starts a separate `pi.implementation` v1
-instance for its increment, with nodes `implement` and `implemented`. This flow
-freezes the assignment, accepted inputs, criteria, verification cases, model,
-Git base, and limits. It is not an extra Knowledge phase. Verification and run
-closure remain separate responsibilities. A completed Implementation hands its
+The next eligible assignment starts a separate `pi.implementation` v1 instance
+for its increment, with nodes `implement` and `implemented`. This flow freezes
+the assignment, accepted inputs, direct dependency evidence, criteria,
+verification cases, model, Git base, and limits. It is not an extra Knowledge
+phase. Verification and run closure remain separate responsibilities. A completed Implementation hands its
 exact artifact, digest, base, and resulting commit to a `pi.verification` v1
 instance with nodes `verify`, `verified`, and `rejected`. Histories retain every
 Implementation and Verification instance; only their latest positions are
@@ -108,10 +108,11 @@ prerequisites' verification. Both DAGs have deterministic topological validation
 Unordered assignments cannot share a workspace or an exclusive resource, even
 when the current concurrency limit would happen to serialize them. Workspaces
 are logical IDs made of ASCII letters, digits, `_`, and `-`; no filesystem paths
-or worktrees are allocated by Plan. The current delivery loop selects only the
-first root Implementer in the Plan's sealed array order and its unique dependent
-Verifier; later-increment scheduling must honor the remaining edges and the run
-concurrency limit.
+or worktrees are allocated by Plan. The delivery loop selects the first pending
+Implementer in the Plan's sealed array order whose explicit dependencies have
+verified evidence, then its unique dependent Verifier. Independent increments
+use the same ordering and run sequentially; no eligible assignment starts
+without an explicit delegation.
 
 This narrows Plan's semantic rules within `knowledge-v1`; its structure and
 `schemaVersion: 1` remain unchanged. Existing artifacts and history are not
@@ -121,7 +122,7 @@ Implementer handoff before sealing. Historical incompatible Plans remain
 inspectable but produce a local replan diagnostic before delivery state is
 created. See [XP-011](tasks/011-implementation-verify.md).
 
-## First implementation and verification loop
+## Sequential implementation and verification
 
 After Plan is ready, call the same `xper_delegate` tool again. The checkout must
 be the run's Git root and initially clean. With an active profile, Pi uses the
@@ -172,7 +173,11 @@ and makes a new explicitly delegated Implementation instance eligible. That
 instance starts from the rejected commit and receives both prior result artifacts;
 neither prior evidence nor consumed budgets are replaced. A new result always
 requires a new Verification instance. `verified` marks only this increment and
-does not emit `run.finished` or schedule another increment.
+does not emit `run.finished` or automatically schedule another increment. When
+called again explicitly, delegation selects the next Plan-eligible Implementer,
+requires the clean checkout at the latest verified commit, and includes direct
+dependency artifacts in its sealed inputs. Once every increment verifies, the
+open run is ready for Judgment Day; Judgment and closure remain later slices.
 
 Failures, cancellation, and timeout may be retried explicitly within both the
 remaining run budget and the assignment's `maxAttempts`, `maxTimeMs`, and

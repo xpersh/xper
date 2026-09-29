@@ -3,7 +3,7 @@
 - Status: `pending`
 - Milestone: M3
 - Entry dependency: XP-010
-- Next slice: XP-011.2
+- Next slice: XP-011.3
 
 ## Outcome and boundary
 
@@ -104,10 +104,17 @@ later slices.
 
 ## XP-011.2 — Review and verify that increment
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-011.1
 - Example: the next explicit delegation runs Verifier; rejection makes the
   Implementer eligible for a bounded retry.
+
+Implementation note: extend the existing `xper_delegate`, workflow controller,
+attempt/budget policy, artifact writer, journal, Git inspection, and child
+executor. A temporary checkout with a fake read-only child will prove that the
+host reviews the exact implementation commit, reruns the Implementer's commands
+before any additional Verifier commands, detects source mutation, and preserves
+rejection evidence for an explicitly delegated rework instance.
 
 Use one fresh read-only Verifier session for the exact implementation result.
 Keep the same checkout exclusively assigned while verifying. Record its revision
@@ -128,6 +135,32 @@ Acceptance:
 
 Stop here: no Define/Design revisit, parallel work, general workspace manager,
 or additional reviewer/tool.
+
+### Delivery evidence
+
+- The existing `xper_delegate` now advances only on explicit calls from the
+  latest `pi.implementation` v1 instance to its dependent `pi.verification` v1
+  instance. Verified completion marks only increment `s1`; no `run.finished`,
+  later-increment scheduling, public tool, Rust workflow decision, or protocol
+  method was added.
+- Verification runs in a fresh Pi child with `read` and `bash`, binds the exact
+  Implementation artifact/digest/base/result commit, reruns Implementation
+  commands before deduplicated Verifier additions, records bounded host logs,
+  and rejects agent/test mutation or `HEAD` drift without repairing the checkout.
+- Rejection is preserved as a successful domain verdict with explicit cause,
+  evidence, invalidation, and rework facts. An explicit next delegation creates
+  a new Implementation instance on the rejected commit, retains both histories,
+  freezes each role's model, and consumes cumulative assignment and run budgets.
+- Checkpoint envelope format 4 retains ordered Implementation and Verification
+  histories, migrates formats 1/2 and envelope 3 in memory, and validates unique
+  instance/attempt/artifact identities plus run, Plan, digest, commit, and rework
+  references. Recovery interrupts only active attempts and launches no child.
+- The final diff updates 31 files with 3,174 additions and 185 removals across
+  the adapter, tests, schema/fixture contracts,
+  and documentation. No dependency or JSON-RPC contract changed.
+- `npm run check` passes formatting, clippy/lint, architecture boundaries,
+  strict TypeScript, 67 Rust tests, shared JSON Schema contracts, and 157 adapter
+  tests. `git diff --check` also passes.
 
 ## XP-011.3 — Deliver remaining increments sequentially
 

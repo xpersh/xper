@@ -71,4 +71,36 @@ for (const fixture of read("fixtures/implementation-v1.json")) {
   external.output.changedFiles[0] = "../outside.ts";
   assert(!validateImplementation(external), "confine implementation source paths");
 }
+const validateVerification = ajv.compile(read("schemas/verification-v1.schema.json"));
+for (const fixture of read("fixtures/verification-v1.json")) {
+  assert(
+    validateVerification(fixture.artifact),
+    `${fixture.name}: ${ajv.errorsText(validateVerification.errors)}`,
+  );
+  assert(
+    !validateVerification({ ...fixture.artifact, schemaVersion: 2 }),
+    "reject unsupported verification artifact versions",
+  );
+  const mismatched = structuredClone(fixture.artifact);
+  mismatched.output.verdict = "rejected";
+  assert(!validateVerification(mismatched), "rejected verification needs rejection evidence");
+  const failedApproval = structuredClone(fixture.artifact);
+  failedApproval.output.tests[0].exitCode = 1;
+  assert(!validateVerification(failedApproval), "verified review cannot hide a failed host test");
+  const unsupportedCommit = structuredClone(fixture.artifact);
+  unsupportedCommit.output.evaluatedCommit = "not-a-commit";
+  assert(!validateVerification(unsupportedCommit), "reject malformed evaluated commits");
+  const blankId = structuredClone(fixture.artifact);
+  blankId.output.implementationArtifactId = " ";
+  assert(!validateVerification(blankId), "reject blank verification identities");
+  const incomplete = structuredClone(fixture.artifact);
+  incomplete.output.criteria = [];
+  assert(!validateVerification(incomplete), "require verification criterion evidence");
+  const escaped = structuredClone(fixture.artifact);
+  escaped.output.tests[0].outputPath = "../test.log";
+  assert(!validateVerification(escaped), "confine verification output references");
+  const claimed = structuredClone(fixture.artifact);
+  claimed.output.tests[0].passed = true;
+  assert(!validateVerification(claimed), "reject model-claimed verification test outcomes");
+}
 console.log("Shared protocol and adapter artifact schemas match their fixtures.");

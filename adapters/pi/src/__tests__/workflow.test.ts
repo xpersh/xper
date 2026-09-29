@@ -156,6 +156,115 @@ async function sealPlan(harness: Awaited<ReturnType<typeof setup>>, plan?: Outpu
   return planPath;
 }
 
+async function completeImplementation(
+  harness: Awaited<ReturnType<typeof setup>>,
+  resultingCommit: string,
+  fallbackModel = "provider/model",
+) {
+  const assignment = await harness.controller.startAssignment(undefined, fallbackModel);
+  assert.equal(assignment.workflow, "implementation");
+  if (assignment.workflow !== "implementation") assert.fail("implementation assignment expected");
+  assert(assignment.artifactPath);
+  const content = JSON.stringify({
+    schemaVersion: 1,
+    inputs: assignment.inputArtifacts?.map((artifact) => artifact.artifact_id),
+    output: {
+      kind: "implementation_result",
+      assignmentId: assignment.assignmentId,
+      incrementId: assignment.incrementId,
+      baseCommit: assignment.baseCommit,
+      resultingCommit,
+      changedFiles: ["src/change.ts"],
+      tests: [
+        {
+          command: "npm test",
+          exitCode: 0,
+          outputPath: `.xper/artifacts/test-output-${assignment.attemptId}-1.log`,
+        },
+      ],
+      criteria: assignment.criteria.map((criterion) => ({
+        criterionId: criterion.id,
+        evidence: "host-observed test",
+        paths: ["src/change.ts"],
+      })),
+    },
+  });
+  harness.artifacts.set(assignment.artifactPath, { content, digest: content });
+  const finished = await harness.controller.finishAttempt({
+    attemptId: assignment.attemptId,
+    outcome: "succeeded",
+    artifactPath: assignment.artifactPath,
+  });
+  assert.equal(finished.replayed, undefined);
+  if (finished.replayed) assert.fail("new implementation result expected");
+  assert(finished.artifactId);
+  return { assignment, artifactId: finished.artifactId };
+}
+
+async function completeVerification(
+  harness: Awaited<ReturnType<typeof setup>>,
+  verdict: "verified" | "rejected",
+  fallbackModel = "provider/model",
+) {
+  const assignment = await harness.controller.startAssignment(undefined, fallbackModel);
+  assert.equal(assignment.workflow, "verification");
+  if (assignment.workflow !== "verification") assert.fail("verification assignment expected");
+  assert(assignment.artifactPath);
+  const failed = verdict === "rejected";
+  const content = JSON.stringify({
+    schemaVersion: 1,
+    inputs: assignment.inputArtifacts?.map((artifact) => artifact.artifact_id),
+    output: {
+      kind: "verification_result",
+      assignmentId: assignment.assignmentId,
+      incrementId: assignment.incrementId,
+      implementationArtifactId: assignment.implementationArtifactId,
+      baseCommit: assignment.baseCommit,
+      evaluatedCommit: assignment.evaluatedCommit,
+      verdict,
+      tests: [
+        {
+          command: "npm test",
+          exitCode: 0,
+          outputPath: `.xper/artifacts/test-output-${assignment.attemptId}-1.log`,
+        },
+      ],
+      criteria: assignment.criteria.map((criterion) => ({
+        criterionId: criterion.id,
+        outcome: failed ? "failed" : "passed",
+        evidence: failed ? "The observed behavior is wrong" : "The observed behavior passes",
+        paths: ["src/change.ts"],
+      })),
+      review: {
+        regressions: { outcome: "passed", evidence: "The suite passes", paths: [] },
+        scope: { outcome: "passed", evidence: "The diff is focused", paths: ["src/change.ts"] },
+        simplicity: {
+          outcome: "passed",
+          evidence: "The implementation is direct",
+          paths: ["src/change.ts"],
+        },
+      },
+      rejection: failed
+        ? {
+            cause: "acceptance criterion failed",
+            evidence: "The exact evaluated revision returns the wrong value",
+            paths: ["src/change.ts"],
+          }
+        : null,
+    },
+  });
+  harness.artifacts.set(assignment.artifactPath, { content, digest: content });
+  const finished = await harness.controller.finishAttempt({
+    attemptId: assignment.attemptId,
+    outcome: "succeeded",
+    artifactPath: assignment.artifactPath,
+  });
+  assert.equal(finished.replayed, undefined);
+  if (finished.replayed) assert.fail("new verification result expected");
+  assert(finished.artifactId);
+  return { assignment, artifactId: finished.artifactId };
+}
+
 test("Pi owns the knowledge path and ready Plan without a workflow RPC", async () => {
   const h = await setup();
   try {
@@ -206,12 +315,184 @@ test("Pi owns the knowledge path and ready Plan without a workflow RPC", async (
       assert.equal(completed.replayed, undefined);
       if (!completed.replayed) assert.equal(completed.workflowCompleted, true);
       assert.equal((await h.controller.getRunStatus()).implementations?.s1?.nodeId, "implemented");
-      await assert.rejects(h.controller.startAssignment(undefined, "provider/model"), /Verifier/);
+      h.setWorkspace({
+        root: h.cwd,
+        head: "2222222222222222222222222222222222222222",
+        clean: true,
+        status: "",
+      });
+      const verifier = await h.controller.startAssignment(undefined, "provider/model");
+      assert.equal(verifier.workflow, "verification");
+      if (verifier.workflow === "verification") {
+        assert.equal(verifier.role, "verify.verifier");
+        assert.equal(verifier.implementationArtifactId, completed.artifactId);
+        assert.equal(verifier.evaluatedCommit, "2222222222222222222222222222222222222222");
+      }
     }
     await h.controller.waitForRecording();
     assert.equal(h.recorder.events.filter((e) => e.type === "attempt.finished").length, 6);
     assert(!h.recorder.events.some((event) => event.type === "run.finished"));
     assert(!JSON.stringify(h.recorder.events).includes("Synthetic objective"));
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("explicit delivery verifies one exact implementation without finishing the run", async () => {
+  const h = await setup();
+  try {
+    await sealPlan(h);
+    const implemented = await completeImplementation(
+      h,
+      "2222222222222222222222222222222222222222",
+      "provider/frozen-model",
+    );
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    const verified = await completeVerification(h, "verified", "provider/replacement-model");
+    assert.equal(verified.assignment.implementationArtifactId, implemented.artifactId);
+    assert.equal(verified.assignment.model, "provider/replacement-model");
+    const status = await h.controller.getRunStatus();
+    assert.equal(status.implementations?.s1?.nodeId, "implemented");
+    assert.equal(status.verifications?.s1?.nodeId, "verified");
+    assert(!status.timeline.some((event) => (event as RecordedEvent).type === "run.finished"));
+    await assert.rejects(
+      h.controller.startAssignment(undefined, "provider/model"),
+      /increment is verified; later increments are not available yet/,
+    );
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("verification admission and settlement never await an unresponsive recorder", async () => {
+  const h = await setup();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    await sealPlan(h);
+    await completeImplementation(h, "2222222222222222222222222222222222222222");
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    await h.controller.waitForRecording();
+    const append = h.recorder.appendEvents.bind(h.recorder);
+    h.recorder.appendEvents = async (events) => {
+      await held;
+      return append(events);
+    };
+    const completed = await Promise.race([
+      completeVerification(h, "verified"),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("verification awaited Rust")), 250),
+      ),
+    ]);
+    assert.equal(completed.assignment.workflow, "verification");
+    assert.equal((await h.controller.getRunStatus()).verifications?.s1?.nodeId, "verified");
+  } finally {
+    release();
+    await h.cleanup();
+  }
+});
+
+test("rejection preserves evidence and budgets while rework creates fresh instances", async () => {
+  const h = await setup();
+  try {
+    const fixturePlan = fixtures.find((fixture) => fixture.phase === "plan")?.artifact.output;
+    assert(fixturePlan?.kind === "execution_plan");
+    const plan = structuredClone(fixturePlan);
+    for (const assignment of plan.assignments) assignment.maxAttempts = 2;
+    await sealPlan(h, plan);
+    const firstImplementation = await completeImplementation(
+      h,
+      "2222222222222222222222222222222222222222",
+      "provider/frozen-implementer",
+    );
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    const firstVerification = await completeVerification(h, "rejected", "provider/frozen-verifier");
+    const rework = await h.controller.startAssignment(undefined, "provider/changed-implementer");
+    assert.equal(rework.workflow, "implementation");
+    if (rework.workflow !== "implementation") assert.fail("implementation rework expected");
+    assert.equal(rework.baseCommit, "2222222222222222222222222222222222222222");
+    assert.equal(rework.model, "provider/frozen-implementer");
+    assert.equal(rework.budget?.attempts, 0);
+    assert.deepEqual(
+      rework.inputArtifacts?.slice(-2).map((artifact) => artifact.artifact_id),
+      [firstImplementation.artifactId, firstVerification.artifactId],
+    );
+    assert(rework.artifactPath);
+    const reworkContent = JSON.stringify({
+      schemaVersion: 1,
+      inputs: rework.inputArtifacts?.map((artifact) => artifact.artifact_id),
+      output: {
+        kind: "implementation_result",
+        assignmentId: rework.assignmentId,
+        incrementId: rework.incrementId,
+        baseCommit: rework.baseCommit,
+        resultingCommit: "3333333333333333333333333333333333333333",
+        changedFiles: ["src/change.ts"],
+        tests: [
+          {
+            command: "npm test",
+            exitCode: 0,
+            outputPath: `.xper/artifacts/test-output-${rework.attemptId}-1.log`,
+          },
+        ],
+        criteria: rework.criteria.map((criterion) => ({
+          criterionId: criterion.id,
+          evidence: "rework test passes",
+          paths: ["src/change.ts"],
+        })),
+      },
+    });
+    h.artifacts.set(rework.artifactPath, { content: reworkContent, digest: reworkContent });
+    const completedRework = await h.controller.finishAttempt({
+      attemptId: rework.attemptId,
+      outcome: "succeeded",
+      artifactPath: rework.artifactPath,
+    });
+    assert.equal(completedRework.replayed, undefined);
+    if (completedRework.replayed) assert.fail("new rework result expected");
+    h.setWorkspace({
+      root: h.cwd,
+      head: "3333333333333333333333333333333333333333",
+      clean: true,
+      status: "",
+    });
+    const secondVerification = await h.controller.startAssignment(
+      undefined,
+      "provider/changed-verifier",
+    );
+    assert.equal(secondVerification.workflow, "verification");
+    if (secondVerification.workflow !== "verification") assert.fail("verification expected");
+    assert.equal(secondVerification.model, "provider/frozen-verifier");
+    assert.equal(secondVerification.implementationArtifactId, completedRework.artifactId);
+    assert.equal(secondVerification.evaluatedCommit, "3333333333333333333333333333333333333333");
+    assert.equal(secondVerification.budget?.attempts, 0);
+    assert.notEqual(secondVerification.attemptId, firstVerification.assignment.attemptId);
+    const journal = new WorkflowJournal(h.cwd, "session", h.recorder);
+    await journal.load();
+    const state = journal.state as {
+      implementations: Record<string, unknown[]>;
+      verifications: Record<string, unknown[]>;
+    };
+    assert.equal(state.implementations.s1?.length, 2);
+    assert.equal(state.verifications.s1?.length, 2);
+    await journal.close();
   } finally {
     await h.cleanup();
   }
@@ -252,6 +533,52 @@ test("implementation recovery interrupts locally and requires the frozen assignm
     if (retry.workflow === "implementation") {
       assert.equal(retry.model, "provider/frozen-model");
       assert.equal(retry.baseCommit, "1111111111111111111111111111111111111111");
+    }
+  } finally {
+    await h.cleanup();
+  }
+});
+
+test("verification recovery interrupts locally without launching another reviewer", async () => {
+  const h = await setup();
+  try {
+    const fixturePlan = fixtures.find((fixture) => fixture.phase === "plan")?.artifact.output;
+    assert(fixturePlan?.kind === "execution_plan");
+    const plan = structuredClone(fixturePlan);
+    const verifier = plan.assignments.find((assignment) => assignment.role === "verify.verifier");
+    assert(verifier);
+    verifier.maxAttempts = 2;
+    await sealPlan(h, plan);
+    await completeImplementation(h, "2222222222222222222222222222222222222222");
+    h.setWorkspace({
+      root: h.cwd,
+      head: "2222222222222222222222222222222222222222",
+      clean: true,
+      status: "",
+    });
+    const started = await h.controller.startAssignment(undefined, "provider/frozen-verifier");
+    assert.equal(started.workflow, "verification");
+    const restored = await h.restore();
+    const recovered = await restored.getRunStatus();
+    assert.equal(recovered.verifications?.s1?.status, "active");
+    assert.deepEqual(recovered.verifications?.s1?.activeAttemptIds, []);
+    assert(
+      recovered.timeline.some(
+        (event) =>
+          (event as RecordedEvent).type === "attempt.finished" &&
+          (event as RecordedEvent).data.attemptId === started.attemptId &&
+          (event as RecordedEvent).data.outcome === "interrupted",
+      ),
+    );
+    await assert.rejects(
+      restored.startAssignment(undefined, "provider/changed-verifier"),
+      /retry interrupted assignment verifier explicitly/,
+    );
+    const retry = await restored.startAssignment("verifier", "provider/changed-verifier");
+    assert.equal(retry.workflow, "verification");
+    if (retry.workflow === "verification") {
+      assert.equal(retry.model, "provider/frozen-verifier");
+      assert.equal(retry.implementationArtifactId, started.implementationArtifactId);
     }
   } finally {
     await h.cleanup();

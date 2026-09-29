@@ -1,7 +1,8 @@
 import type { BridgeOptions } from "./bridge/client.js";
 import { saveArtifact } from "./knowledge/artifacts.js";
 import { runImplementation } from "./implementation/execution.js";
-import { resolveAgent, runKnowledge } from "./knowledge/delegate.js";
+import { resolveAgent, runKnowledge, toolsForRole } from "./knowledge/delegate.js";
+import { runVerification } from "./verification/execution.js";
 import { piModelOptions } from "./knowledge/models.js";
 import type { PiExtensionAPI } from "./pi/types.js";
 import { registerPiHooks } from "./pi/hooks.js";
@@ -35,11 +36,12 @@ export function createXperExtension(
         runKnowledge(message, cwd, signal, {
           systemPrompt: resolveAgent(role).systemPrompt,
           timeoutMs: childTimeoutMs,
-          ...(role === "implementation.driver" ? { tools: ["read", "bash", "edit", "write"] } : {}),
+          tools: toolsForRole(role),
           ...modelOptions,
         });
       if (execution.workflow === "implementation")
         return runImplementation(execution, { runChild });
+      if (execution.workflow === "verification") return runVerification(execution, { runChild });
       return runChild(
         inputArtifacts?.length
           ? `${task}\n\nInput artifacts (read these files):\n${JSON.stringify(inputArtifacts)}\nRequired output: ${artifactKind}\nRemaining budget: ${JSON.stringify(budget)}`

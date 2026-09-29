@@ -23,4 +23,7 @@ the public schemas; protocol result fixtures can name a `resultSchema` to valida
 method-specific response fields as well.
 `implementation-v1.json` contains a host-observed implementation result with
 the exact Git revisions, changed paths, test command exit code and criterion
-evidence consumed by the future Verifier.
+evidence consumed by Verifier.
+`verification-v1.json` contains a verified host-constructed review bound to that
+Implementation artifact and exact commit, including criterion and
+regression/scope/simplicity evidence plus observed command output references.

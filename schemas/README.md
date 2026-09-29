@@ -111,6 +111,15 @@ log reference, and evidence for every selected criterion. The child proposes
 commands and criterion evidence; it cannot supply a trusted pass flag. This is
 an adapter artifact contract and does not add a Rust protocol method.
 
+[verification-v1.schema.json](verification-v1.schema.json) defines the
+host-constructed review of one exact Implementation artifact and commit. It
+records the accumulated base, actual host-run command exits and confined logs,
+evidence for every criterion, and separate regression, requested-scope, and
+simplicity findings. `rejected` requires a nonempty cause and evidence;
+`verified` permits no failed finding, failed command, or rejection object. The
+Verifier proposes findings and extra commands, while Pi constructs and validates
+the canonical artifact.
+
 The stable error catalog remains in
 [the Rust protocol crate](../crates/xper-protocol/src/lib.rs) and
 [the TypeScript transport](../adapters/pi/src/bridge/protocol.ts).

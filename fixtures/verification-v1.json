@@ -1,0 +1,58 @@
+[
+  {
+    "name": "one independently verified implementation",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": [
+        "brief-1",
+        "definition-1",
+        "design-1",
+        "stories-1",
+        "plan-1",
+        "implementation-1"
+      ],
+      "output": {
+        "kind": "verification_result",
+        "assignmentId": "verifier",
+        "incrementId": "s1",
+        "implementationArtifactId": "implementation-1",
+        "baseCommit": "1111111111111111111111111111111111111111",
+        "evaluatedCommit": "2222222222222222222222222222222222222222",
+        "verdict": "verified",
+        "tests": [
+          {
+            "command": "npm test -- greeting",
+            "exitCode": 0,
+            "outputPath": ".xper/artifacts/test-output-verification-1-1.log"
+          }
+        ],
+        "criteria": [
+          {
+            "criterionId": "c1",
+            "outcome": "passed",
+            "evidence": "The focused test covers the requested greeting.",
+            "paths": ["src/greeting.test.ts"]
+          }
+        ],
+        "review": {
+          "regressions": {
+            "outcome": "passed",
+            "evidence": "The existing suite remains green.",
+            "paths": ["src/greeting.test.ts"]
+          },
+          "scope": {
+            "outcome": "passed",
+            "evidence": "The diff is limited to the requested greeting behavior.",
+            "paths": ["src/greeting.ts"]
+          },
+          "simplicity": {
+            "outcome": "passed",
+            "evidence": "The implementation remains a direct pure function.",
+            "paths": ["src/greeting.ts"]
+          }
+        },
+        "rejection": null
+      }
+    }
+  }
+]

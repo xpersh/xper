@@ -10,6 +10,7 @@ import { WorkflowValidationError } from "./types.js";
 import { phases, policyFrom, type Phase, type Policy } from "./policy.js";
 import { knowledgeDefinition } from "./definition.js";
 import { decodeImplementationState, type ImplementationState } from "./implementation.js";
+import { decodeVerificationState, type VerificationState } from "./verification.js";
 
 export interface Assignment {
   id: string;
@@ -278,19 +279,131 @@ export function decodeCheckpoint(value: unknown): WorkflowState | null {
 
 /** Adapter checkpoint envelope composing independent workflow instances for one run. */
 export interface AdapterCheckpoint {
-  version: 3;
+  version: 4;
   knowledge: WorkflowState;
-  implementations: Record<string, ImplementationState>;
+  implementations: Record<string, ImplementationState[]>;
+  verifications: Record<string, VerificationState[]>;
 }
 
 /** Migrate legacy knowledge-only checkpoints without rewriting them on read. */
 export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | null {
   if (value === null) return null;
+  if (object(value) && value.version === 4) {
+    const knowledge = decodeCheckpoint(value.knowledge);
+    if (!knowledge || !object(value.implementations) || !object(value.verifications))
+      throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
+    const implementations: Record<string, ImplementationState[]> = {};
+    const verifications: Record<string, VerificationState[]> = {};
+    const instanceIds = new Set<string>([knowledge.instanceId]);
+    const attemptIds = new Set(Object.keys(knowledge.attempts));
+    const artifactIds = new Set(Object.keys(knowledge.artifacts));
+    for (const [incrementId, history] of Object.entries(value.implementations)) {
+      if (!Array.isArray(history) || !history.length)
+        throw new WorkflowValidationError("invalid implementation checkpoint history");
+      implementations[incrementId] = history.map((entry) => {
+        const decoded = decodeImplementationState(entry);
+        const plan = knowledge.artifacts[decoded.planArtifactId];
+        if (
+          decoded.incrementId !== incrementId ||
+          decoded.runId !== knowledge.run_id ||
+          knowledge.accepted.plan !== decoded.planArtifactId ||
+          !plan ||
+          plan.digest !== decoded.planDigest ||
+          instanceIds.has(decoded.instanceId)
+        )
+          throw new WorkflowValidationError("invalid implementation checkpoint identity");
+        instanceIds.add(decoded.instanceId);
+        for (const attemptId of Object.keys(decoded.attempts)) {
+          if (attemptIds.has(attemptId))
+            throw new WorkflowValidationError("duplicate delivery attempt identity");
+          attemptIds.add(attemptId);
+        }
+        for (const artifactId of Object.keys(decoded.artifacts)) {
+          if (artifactIds.has(artifactId))
+            throw new WorkflowValidationError("duplicate delivery artifact identity");
+          artifactIds.add(artifactId);
+        }
+        return decoded;
+      });
+    }
+    for (const [incrementId, history] of Object.entries(value.verifications)) {
+      if (!Array.isArray(history) || !history.length)
+        throw new WorkflowValidationError("invalid verification checkpoint history");
+      verifications[incrementId] = history.map((entry) => {
+        const decoded = decodeVerificationState(entry);
+        const plan = knowledge.artifacts[decoded.planArtifactId];
+        const implementation = implementations[incrementId]?.find(
+          (candidate) => candidate.instanceId === decoded.implementation.instanceId,
+        );
+        const artifact = implementation?.artifacts[decoded.implementation.artifactId];
+        if (
+          decoded.incrementId !== incrementId ||
+          decoded.runId !== knowledge.run_id ||
+          knowledge.accepted.plan !== decoded.planArtifactId ||
+          !plan ||
+          plan.digest !== decoded.planDigest ||
+          !implementation ||
+          implementation.lifecycle.status !== "completed" ||
+          implementation.lifecycle.artifactId !== decoded.implementation.artifactId ||
+          !artifact ||
+          artifact.digest !== decoded.implementation.digest ||
+          decoded.implementation.baseCommit !== implementations[incrementId]?.[0]?.baseCommit ||
+          (artifact.resultingCommit !== undefined &&
+            artifact.resultingCommit !== decoded.implementation.evaluatedCommit) ||
+          instanceIds.has(decoded.instanceId)
+        )
+          throw new WorkflowValidationError("invalid verification checkpoint identity");
+        instanceIds.add(decoded.instanceId);
+        for (const attemptId of Object.keys(decoded.attempts)) {
+          if (attemptIds.has(attemptId))
+            throw new WorkflowValidationError("duplicate delivery attempt identity");
+          attemptIds.add(attemptId);
+        }
+        for (const artifactId of Object.keys(decoded.artifacts)) {
+          if (artifactIds.has(artifactId))
+            throw new WorkflowValidationError("duplicate delivery artifact identity");
+          artifactIds.add(artifactId);
+        }
+        return decoded;
+      });
+    }
+    for (const [incrementId, history] of Object.entries(implementations)) {
+      const reviews = verifications[incrementId] ?? [];
+      if (reviews.length > history.length)
+        throw new WorkflowValidationError("invalid delivery checkpoint history order");
+      for (const [index, review] of reviews.entries())
+        if (review.implementation.instanceId !== history[index]?.instanceId)
+          throw new WorkflowValidationError("invalid delivery checkpoint history order");
+      for (let index = 1; index < history.length; index++) {
+        const previousImplementation = history[index - 1];
+        const previousVerification = reviews[index - 1];
+        const rework = history[index];
+        if (
+          previousImplementation?.lifecycle.status !== "completed" ||
+          previousVerification?.lifecycle.status !== "completed" ||
+          previousVerification.lifecycle.verdict !== "rejected" ||
+          !rework ||
+          rework.baseCommit !== previousVerification.implementation.evaluatedCommit ||
+          !rework.assignment.inputs.includes(previousImplementation.lifecycle.artifactId) ||
+          !rework.assignment.inputs.includes(previousVerification.lifecycle.artifactId)
+        )
+          throw new WorkflowValidationError("invalid delivery checkpoint history order");
+      }
+    }
+    for (const history of [...Object.values(implementations), ...Object.values(verifications)])
+      for (const instance of history)
+        if (instance.assignment.inputs.some((id) => !artifactIds.has(id)))
+          throw new WorkflowValidationError("invalid delivery checkpoint artifact reference");
+    return { version: 4, knowledge, implementations, verifications };
+  }
   if (object(value) && value.version === 3) {
     const knowledge = decodeCheckpoint(value.knowledge);
     if (!knowledge || !object(value.implementations))
       throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
-    const implementations: Record<string, ImplementationState> = {};
+    const implementations: Record<string, ImplementationState[]> = {};
+    const instanceIds = new Set<string>([knowledge.instanceId]);
+    const attemptIds = new Set(Object.keys(knowledge.attempts));
+    const artifactIds = new Set(Object.keys(knowledge.artifacts));
     for (const [incrementId, implementation] of Object.entries(value.implementations)) {
       const decoded = decodeImplementationState(implementation);
       const plan = knowledge.artifacts[decoded.planArtifactId];
@@ -301,13 +414,19 @@ export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | nul
         !plan ||
         plan.digest !== decoded.planDigest ||
         decoded.assignment.inputs.some((id) => !Object.hasOwn(knowledge.artifacts, id)) ||
+        instanceIds.has(decoded.instanceId) ||
+        Object.keys(decoded.attempts).some((id) => attemptIds.has(id)) ||
+        Object.keys(decoded.artifacts).some((id) => artifactIds.has(id)) ||
         implementations[incrementId]
       )
         throw new WorkflowValidationError("invalid implementation checkpoint identity");
-      implementations[incrementId] = decoded;
+      instanceIds.add(decoded.instanceId);
+      for (const id of Object.keys(decoded.attempts)) attemptIds.add(id);
+      for (const id of Object.keys(decoded.artifacts)) artifactIds.add(id);
+      implementations[incrementId] = [decoded];
     }
-    return { version: 3, knowledge, implementations };
+    return { version: 4, knowledge, implementations, verifications: {} };
   }
   const knowledge = decodeCheckpoint(value);
-  return knowledge ? { version: 3, knowledge, implementations: {} } : null;
+  return knowledge ? { version: 4, knowledge, implementations: {}, verifications: {} } : null;
 }

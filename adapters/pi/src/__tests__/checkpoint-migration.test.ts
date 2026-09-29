@@ -10,6 +10,7 @@ import {
   toRunSummary,
 } from "../workflow/state.js";
 import { WorkflowValidationError } from "../workflow/types.js";
+import { transitionImplementation } from "../workflow/implementation.js";
 
 // These historical labels intentionally do not derive from the new definition:
 // a future graph edit must not silently redefine what a version 1 file meant.
@@ -134,13 +135,14 @@ test("version 1 migration preserves identities, sealed evidence, frozen routing 
   assert.notEqual(state.attempts, legacy.attempts);
 });
 
-test("version 1 and 2 knowledge checkpoints migrate into an empty version 3 envelope", () => {
+test("version 1 and 2 knowledge checkpoints migrate into an empty version 4 envelope", () => {
   const legacy = deepFreeze(legacyCheckpoint());
   const fromOne = decodeAdapterCheckpoint(legacy);
   assert(fromOne);
-  assert.equal(fromOne.version, 3);
+  assert.equal(fromOne.version, 4);
   assert.equal(fromOne.knowledge.run_id, legacy.run_id);
   assert.deepEqual(fromOne.implementations, {});
+  assert.deepEqual(fromOne.verifications, {});
 
   const versionTwo = decodeCheckpoint(legacy);
   assert(versionTwo);
@@ -148,6 +150,86 @@ test("version 1 and 2 knowledge checkpoints migrate into an empty version 3 enve
   assert(fromTwo);
   assert.deepEqual(fromTwo.knowledge, versionTwo);
   assert.deepEqual(fromTwo.implementations, {});
+  assert.deepEqual(fromTwo.verifications, {});
+});
+
+test("version 3 wraps its existing implementation as the first immutable history entry", () => {
+  const legacy = legacyCheckpoint("plan");
+  legacy.accepted.plan = "artifact-plan";
+  legacy.ready = true;
+  const knowledge = decodeCheckpoint(legacy);
+  assert(knowledge);
+  const inputs = Object.values(knowledge.accepted);
+  const started = transitionImplementation(
+    null,
+    {
+      type: "assignment.start",
+      runId: knowledge.run_id,
+      instanceId: "implementation-s1-1",
+      attemptId: "implementation-attempt-1",
+      planArtifactId: "artifact-plan",
+      planDigest: "sealed-plan",
+      assignment: {
+        id: "driver",
+        incrementId: "s1",
+        role: "implementation.driver",
+        dependencies: [],
+        workspace: "s1",
+        resources: [],
+        maxAttempts: 2,
+        maxTimeMs: 1_000,
+        maxCostMicros: 0,
+      },
+      inputs,
+      inputArtifacts: inputs.map((id) => ({
+        artifact_id: id,
+        kind: knowledge.artifacts[id]?.kind ?? "unknown",
+        path: knowledge.artifacts[id]?.path ?? "unknown",
+        version: 1,
+      })),
+      criteria: [{ id: "c1", behavior: "Works", example: "Observed" }],
+      verification: ["run focused test"],
+      selection: null,
+      model: "synthetic/model",
+      baseCommit: "1111111111111111111111111111111111111111",
+      attemptTimeMs: 500,
+      attemptCostMicros: 0,
+      globalBudget: { attempts: 10, timeMs: 10_000, costMicros: null, concurrency: 1 },
+    },
+    2_000,
+  );
+  const versionThree = deepFreeze({
+    version: 3,
+    knowledge,
+    implementations: { s1: started.state },
+  });
+  const migrated = decodeAdapterCheckpoint(versionThree);
+  assert(migrated);
+  assert.equal(migrated.version, 4);
+  assert.deepEqual(migrated.implementations.s1, [started.state]);
+  assert.deepEqual(migrated.verifications, {});
+  assert.equal(JSON.stringify(versionThree).includes('"version":4'), false);
+
+  assert.throws(
+    () =>
+      decodeAdapterCheckpoint({
+        ...versionThree,
+        implementations: {
+          s1: { ...started.state, planDigest: "wrong-plan-digest" },
+        },
+      }),
+    /invalid implementation checkpoint identity/,
+  );
+  assert.throws(
+    () =>
+      decodeAdapterCheckpoint({
+        ...versionThree,
+        implementations: {
+          s1: { ...started.state, instanceId: knowledge.instanceId },
+        },
+      }),
+    /invalid implementation checkpoint identity/,
+  );
 });
 
 test("migration keeps unfinished attempts unfinished and decoding twice is idempotent", () => {

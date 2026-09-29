@@ -30,6 +30,7 @@ const pureWorkflowModules = new Set([
   "workflow/state.ts",
   "workflow/knowledge-machine.ts",
   "workflow/implementation.ts",
+  "workflow/verification.ts",
 ]);
 for (const sourceFile of filesWithExtension(join(adapterRoot, "src"), ".ts")) {
   const source = readFileSync(sourceFile, "utf8");

@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/myugen/xper/schemas/verification-v1.schema.json",
+  "title": "xper verification result v1",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "verification_result" },
+        "assignmentId": { "$ref": "#/$defs/id" },
+        "incrementId": { "$ref": "#/$defs/id" },
+        "implementationArtifactId": { "$ref": "#/$defs/id" },
+        "baseCommit": { "$ref": "#/$defs/commit" },
+        "evaluatedCommit": { "$ref": "#/$defs/commit" },
+        "verdict": { "enum": ["verified", "rejected"] },
+        "tests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/test" },
+          "minItems": 1
+        },
+        "criteria": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/criterionEvidence" },
+          "minItems": 1
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "regressions": { "$ref": "#/$defs/finding" },
+            "scope": { "$ref": "#/$defs/finding" },
+            "simplicity": { "$ref": "#/$defs/finding" }
+          },
+          "required": ["regressions", "scope", "simplicity"],
+          "additionalProperties": false
+        },
+        "rejection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "properties": {
+                "cause": { "type": "string", "minLength": 1 },
+                "evidence": { "type": "string", "minLength": 1 },
+                "paths": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/relativePath" }
+                }
+              },
+              "required": ["cause", "evidence", "paths"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "assignmentId",
+        "incrementId",
+        "implementationArtifactId",
+        "baseCommit",
+        "evaluatedCommit",
+        "verdict",
+        "tests",
+        "criteria",
+        "review",
+        "rejection"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "verdict": { "const": "verified" } } },
+          "then": {
+            "properties": {
+              "rejection": { "type": "null" },
+              "tests": {
+                "items": {
+                  "allOf": [
+                    { "$ref": "#/$defs/test" },
+                    { "properties": { "exitCode": { "const": 0 } } }
+                  ]
+                }
+              },
+              "criteria": {
+                "items": {
+                  "allOf": [
+                    { "$ref": "#/$defs/criterionEvidence" },
+                    { "properties": { "outcome": { "const": "passed" } } }
+                  ]
+                }
+              },
+              "review": {
+                "properties": {
+                  "regressions": {
+                    "allOf": [
+                      { "$ref": "#/$defs/finding" },
+                      { "properties": { "outcome": { "const": "passed" } } }
+                    ]
+                  },
+                  "scope": {
+                    "allOf": [
+                      { "$ref": "#/$defs/finding" },
+                      { "properties": { "outcome": { "const": "passed" } } }
+                    ]
+                  },
+                  "simplicity": {
+                    "allOf": [
+                      { "$ref": "#/$defs/finding" },
+                      { "properties": { "outcome": { "const": "passed" } } }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "verdict": { "const": "rejected" } } },
+          "then": {
+            "properties": { "rejection": { "type": "object" } },
+            "anyOf": [
+              {
+                "properties": {
+                  "tests": {
+                    "contains": { "properties": { "exitCode": { "minimum": 1 } } }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "criteria": {
+                    "contains": { "properties": { "outcome": { "const": "failed" } } }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "review": {
+                    "anyOf": [
+                      { "properties": { "regressions": { "properties": { "outcome": { "const": "failed" } } } } },
+                      { "properties": { "scope": { "properties": { "outcome": { "const": "failed" } } } } },
+                      { "properties": { "simplicity": { "properties": { "outcome": { "const": "failed" } } } } }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "required": ["schemaVersion", "inputs", "output"],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "test": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "exitCode": { "type": "integer", "minimum": 0 },
+        "outputPath": {
+          "type": "string",
+          "pattern": "^\\.xper/artifacts/[a-z0-9-]+\\.log$"
+        }
+      },
+      "required": ["command", "exitCode", "outputPath"],
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "properties": {
+        "outcome": { "enum": ["passed", "failed"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        }
+      },
+      "required": ["outcome", "evidence", "paths"],
+      "additionalProperties": false
+    },
+    "criterionEvidence": {
+      "type": "object",
+      "properties": {
+        "criterionId": { "$ref": "#/$defs/id" },
+        "outcome": { "enum": ["passed", "failed"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        }
+      },
+      "required": ["criterionId", "outcome", "evidence", "paths"],
+      "additionalProperties": false
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:[\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+"
+    }
+  }
+}

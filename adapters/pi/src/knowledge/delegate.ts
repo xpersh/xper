@@ -5,6 +5,11 @@ import type { AttemptOutcome, ModelUsage } from "../workflow/types.js";
 export type DelegateOutcome = AttemptOutcome;
 export type DelegateResult = KnowledgeExecutionResult;
 
+/** Keep review roles observational while allowing the Implementer to change its checkout. */
+export function toolsForRole(role: string): string[] {
+  return role === "implementation.driver" ? ["read", "bash", "edit", "write"] : ["read", "bash"];
+}
+
 /** Translate a neutral role to the local execution instructions. */
 export function resolveAgent(role: string): { name: string; systemPrompt: string } {
   const outputs: Record<string, string> = {
@@ -28,6 +33,12 @@ export function resolveAgent(role: string): { name: string; systemPrompt: string
       name: role,
       systemPrompt:
         "You are implementation.driver. Work only in the supplied existing checkout. Read its AGENTS.md instructions and accepted artifacts, implement the assigned increment with tests, and create a local commit containing only that work. Never clone, create a worktree, reset unrelated work, or push. Leave the checkout clean. Your final response must be only the requested JSON report; do not invent test exit statuses because the host reruns the commands.",
+    };
+  if (role === "verify.verifier")
+    return {
+      name: role,
+      systemPrompt:
+        "You are verify.verifier. Independently review the exact supplied implementation revision for behavior, regressions, unrequested scope, and unnecessary complexity. Read the accepted artifacts, implementation result, source, diff, and test logs. You must not edit, write, commit, reset, clean, or repair the checkout. Your final response must be only the requested JSON report; do not invent test exit statuses because the host runs the commands.",
     };
   const output = outputs[role];
   if (!output) throw new Error(`Unsupported xper agent: ${role}`);

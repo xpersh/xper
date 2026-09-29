@@ -67,7 +67,22 @@ export interface ImplementationAssignmentStarted extends AssignmentStartedBase {
   model?: string;
 }
 
-export type AssignmentStarted = KnowledgeAssignmentStarted | ImplementationAssignmentStarted;
+export interface VerificationAssignmentStarted extends AssignmentStartedBase {
+  workflow: "verification";
+  incrementId: string;
+  implementationArtifactId: string;
+  baseCommit: string;
+  evaluatedCommit: string;
+  implementationTestCommands: string[];
+  criteria: ImplementationCriterion[];
+  verification: string[];
+  model?: string;
+}
+
+export type AssignmentStarted =
+  | KnowledgeAssignmentStarted
+  | ImplementationAssignmentStarted
+  | VerificationAssignmentStarted;
 export type StartedAssignment = AssignmentStarted;
 
 export type FinishAttempt = { attemptId: string } & (
@@ -113,6 +128,7 @@ export interface WorkflowPosition {
 export interface RunStatus {
   workflow?: WorkflowPosition;
   implementations?: Record<string, WorkflowPosition>;
+  verifications?: Record<string, WorkflowPosition>;
   run: RunSummary | null;
   /** Locally observed facts; complete shared history is queried through XperClient. */
   timeline: unknown[];

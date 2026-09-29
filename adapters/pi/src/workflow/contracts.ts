@@ -33,6 +33,9 @@ export interface ImplementationHandoff {
   criteria: ImplementationCriterion[];
   verification: string[];
 }
+export interface VerificationHandoff extends ImplementationHandoff {
+  implementationAssignmentId: string;
+}
 export type Output =
   | {
       kind: "definition_contract";
@@ -337,6 +340,47 @@ export function selectImplementationHandoff(
   return {
     assignment: structuredClone(assignment),
     incrementId: assignment.incrementId,
+    criteria: structuredClone(criteria as ImplementationCriterion[]),
+    verification: [...story.verification],
+  };
+}
+
+/** Select the planned independent Verifier for one implemented increment. */
+export function selectVerificationHandoff(
+  output: Output,
+  upstream: Partial<Record<string, Document>>,
+  routing: RoutingSnapshot | null,
+  implementationAssignmentId: string,
+  incrementId: string,
+): VerificationHandoff {
+  demand(output.kind === "execution_plan", "a sealed execution plan is required");
+  const definition = upstream.define?.output;
+  const breakdown = upstream.breakdown?.output;
+  demand(
+    definition?.kind === "definition_contract" && breakdown?.kind === "story_map",
+    "the sealed Plan is missing accepted Definition or Breakdown evidence",
+  );
+  if (routing)
+    demand(
+      Boolean(routing.routes["verify.verifier"]?.length),
+      "active profile has no verify.verifier route",
+    );
+  const assignment = output.assignments.find(
+    (candidate) => candidate.role === "verify.verifier" && candidate.incrementId === incrementId,
+  );
+  demand(assignment, "the sealed Plan has no verifier for the implemented increment");
+  demand(
+    assignment.dependencies.includes(implementationAssignmentId),
+    "the selected verifier does not depend on the implementation assignment",
+  );
+  const story = breakdown.stories.find((candidate) => candidate.id === incrementId);
+  demand(story, "the selected verification assignment references an unknown increment");
+  const criteria = story.criteria.map((id) => definition.criteria.find((item) => item.id === id));
+  demand(criteria.every(Boolean), "the selected increment references an unknown criterion");
+  return {
+    assignment: structuredClone(assignment),
+    implementationAssignmentId,
+    incrementId,
     criteria: structuredClone(criteria as ImplementationCriterion[]),
     verification: [...story.verification],
   };

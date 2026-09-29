@@ -4,9 +4,10 @@ The Pi adapter implements the five knowledge phases introduced in XP-010.
 Each explicit delegation executes one assignment, saves its output, evaluates
 its gate locally, and reports the outcome to Rust. A ready Execution Plan
 completes the knowledge instance; compatibility status still names its phase
-`plan`. The next explicit delegation may execute only the first eligible
-Implementer assignment in that Plan. It does not create worktrees, run the
-Verifier or later increments, close the overall run, or issue a final verdict.
+`plan`. Subsequent explicit delegations may execute the first eligible
+Implementer and its dependent Verifier for one increment. Rejection enables a
+fresh bounded Implementation instance. The adapter does not create worktrees,
+run later increments, close the overall run, or issue a final verdict.
 
 These are Pi workflow rules, not core recording rules. Rust resolves
 configuration and preserves the reported events and opaque Pi checkpoint.
@@ -35,7 +36,11 @@ The first eligible root assignment starts a separate `pi.implementation` v1
 instance for its increment, with nodes `implement` and `implemented`. This flow
 freezes the assignment, accepted inputs, criteria, verification cases, model,
 Git base, and limits. It is not an extra Knowledge phase. Verification and run
-closure remain later product responsibilities.
+closure remain separate responsibilities. A completed Implementation hands its
+exact artifact, digest, base, and resulting commit to a `pi.verification` v1
+instance with nodes `verify`, `verified`, and `rejected`. Histories retain every
+Implementation and Verification instance; only their latest positions are
+projected per increment.
 
 ## Phase contracts
 
@@ -103,9 +108,10 @@ prerequisites' verification. Both DAGs have deterministic topological validation
 Unordered assignments cannot share a workspace or an exclusive resource, even
 when the current concurrency limit would happen to serialize them. Workspaces
 are logical IDs made of ASCII letters, digits, `_`, and `-`; no filesystem paths
-or worktrees are allocated by Plan. XP-011.1 selects only the first root
-Implementer in the Plan's sealed array order; later scheduling must honor the
-remaining edges and the run concurrency limit.
+or worktrees are allocated by Plan. The current delivery loop selects only the
+first root Implementer in the Plan's sealed array order and its unique dependent
+Verifier; later-increment scheduling must honor the remaining edges and the run
+concurrency limit.
 
 This narrows Plan's semantic rules within `knowledge-v1`; its structure and
 `schemaVersion: 1` remain unchanged. Existing artifacts and history are not
@@ -115,7 +121,7 @@ Implementer handoff before sealing. Historical incompatible Plans remain
 inspectable but produce a local replan diagnostic before delivery state is
 created. See [XP-011](tasks/011-implementation-verify.md).
 
-## First implementation assignment
+## First implementation and verification loop
 
 After Plan is ready, call the same `xper_delegate` tool again. The checkout must
 be the run's Git root and initially clean. With an active profile, Pi uses the
@@ -138,7 +144,35 @@ files, commands, observed exit codes, confined log references, and exact
 criterion coverage. Nonzero test exits produce a failed attempt while retaining
 that observed result as evidence. Only all-zero exits complete the implementation
 instance. The run remains open; another explicit delegation cannot start the
-Verifier in this slice.
+dependent Verifier until Implementation has completed.
+
+The next explicit delegation requires a clean checkout whose `HEAD` is the
+Implementation result's exact commit. Pi starts a fresh Verifier child with only
+`read` and `bash`. Its prompt includes all accepted artifacts, the Implementation
+result and logs, complete criteria and verification cases, and the full diff;
+it forbids edits, repairs, commits, resets, and cleanup. The child proposes strict
+JSON with criterion findings, regression/scope/simplicity findings, optional
+additional commands, and either `verified` or an evidenced `rejected` verdict.
+It does not report test exit statuses.
+
+The host runs every command recorded by Implementation, then the Verifier's
+additional commands, removing exact duplicates while preserving first order.
+Agent and commands share one deadline. After the child and after each command,
+Pi confirms both `HEAD` and the evaluated tree are unchanged. Output logs are
+bounded and confined below `.xper/artifacts/`; mutations are preserved for
+explicit recovery and are never reset or repaired automatically.
+
+The canonical [verification-v1 artifact](../schemas/verification-v1.schema.json)
+binds the review to its assignment, increment, Implementation artifact, original
+base, and evaluated commit. It records actual host-observed command exits and
+evidence for every criterion plus regressions, requested scope, and simplicity.
+A failed host command converts an approving proposal into a rejection. A valid
+rejection completes the Verification execution with domain verdict `rejected`
+and makes a new explicitly delegated Implementation instance eligible. That
+instance starts from the rejected commit and receives both prior result artifacts;
+neither prior evidence nor consumed budgets are replaced. A new result always
+requires a new Verification instance. `verified` marks only this increment and
+does not emit `run.finished` or schedule another increment.
 
 Failures, cancellation, and timeout may be retried explicitly within both the
 remaining run budget and the assignment's `maxAttempts`, `maxTimeMs`, and
@@ -189,8 +223,10 @@ The reservation must represent the operator's expected maximum invocation cost;
 this slice does not observe token prices or interrupt a provider at a billing
 threshold. Plan checks the sum of proposed assignment budgets against remaining
 attempt, wall-time, and cost limits, conservatively summing time even for parallel
-work. The Implementer additionally enforces its own cumulative assignment limits;
-the child and host-run commands share one deadline.
+work. Implementation and Verification each enforce their assignment limits
+cumulatively across all instances for that Plan assignment. The global budget
+sums Knowledge, Implementation, and Verification attempts. Each child and its
+host-run commands share one deadline.
 
 Human gates are owned by Pi. A gate first records a request naming its current
 artifact. Review the file, then explicitly run `/xper approve <artifactId>`.
@@ -209,23 +245,27 @@ After the normal checkout build:
 5. Repeat until the response says `execution plan ready`.
 6. Ensure the dedicated checkout is clean, then ask Pi to use `xper_delegate`
    once more for the first Implementer.
+7. With the resulting commit still clean and checked out, delegate again for
+   Verifier. If rejected, delegate the bounded rework and then a fresh review.
 
 `/xper status` shows the phase, outcomes, artifact count, pending approval,
-ready-plan state, and any Implementation instance position. `/xper advance`
+ready-plan state, and the latest Implementation and Verification positions. `/xper advance`
 evaluates the current gate; unlike the original
 Discovery-only slice, a second call in Define now evaluates Define rather than
 replaying Discovery's result. Repeated calls on an unchanged accepted Plan return
 `ready: true, resumed: true` without new events.
 
-Profiles must include the five Knowledge roles in the table to reach Plan and
-`implementation.driver` to execute the first increment.
+Profiles must include the five Knowledge roles in the table to reach Plan plus
+`implementation.driver` and `verify.verifier` for the first delivery loop.
 Existing Discovery-only profiles remain usable for Discovery; dispatch explains
 when the current role has no route. New runs resume from Pi's versioned
-checkpoint. Checkpoint envelope format 3 retains the unchanged Knowledge v2
-state and a map of per-increment Implementation v1 instances. Valid Knowledge
+checkpoint. Checkpoint envelope format 4 retains the unchanged Knowledge v2
+state and ordered per-increment histories of Implementation v1 and Verification
+v1 instances. Valid Knowledge
 format-1 and format-2 checkpoints migrate in memory without changing existing
-run, visit, assignment, attempt, evidence, or outbox identities; format 3 is
-written on the next local commit. Restoring a checkpoint does not repeat an
+run, visit, assignment, attempt, evidence, or outbox identities. Envelope format
+3 wraps each existing Implementation as its first history entry. Format 4 is
+written only on the next local commit. Restoring a checkpoint does not repeat an
 agent invocation. Core-owned legacy runs remain
 available for historical inspection, but cannot resume under the new architecture
 because they lack that checkpoint.
@@ -233,10 +273,11 @@ because they lack that checkpoint.
 ## Verification
 
 Pi workflow tests exercise gates, feedback, evidence, dependency validation,
-budgets, approvals, implementation recovery, and unavailable recording using
+budgets, approvals, implementation/verification recovery, and unavailable recording using
 synthetic artifacts and controlled dependencies. Real temporary Git checkout
 tests cover commits, ancestry, cleanliness, changed files, host-run commands,
-logs, failed exits, and source mutation without model credentials.
+logs, failed exits, review override, command ordering/deduplication, and source
+mutation without model credentials.
 Recording tests independently exercise session ownership, duplicate consistency,
 atomic event batches, and generic replay. Integration tests use the real Rust
 bridge and SQLite with simulated execution, without model credentials. Recording

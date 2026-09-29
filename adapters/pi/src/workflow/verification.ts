@@ -1,40 +1,53 @@
 import { object } from "../bridge/xper-client.js";
-import type { ModelSelection } from "../bridge/xper-client.js";
 import type { PlannedAssignment } from "./contracts.js";
-import { implementationDefinition } from "./definition.js";
+import { verificationDefinition } from "./definition.js";
 import type {
-  AttemptFinished,
   ArtifactInput,
+  AttemptFinished,
   FinishAttempt,
-  ImplementationAssignmentStarted,
   ImplementationCriterion,
+  ModelSelection,
   RemainingBudget,
+  VerificationAssignmentStarted,
   WorkflowPosition,
 } from "./types.js";
 import { WorkflowValidationError } from "./types.js";
 
-export interface ImplementationTestResult {
+export interface VerificationTestResult {
   command: string;
   exitCode: number;
   outputPath: string;
 }
 
-export interface ImplementationResult {
+export interface VerificationFinding {
+  outcome: "passed" | "failed";
+  evidence: string;
+  paths: string[];
+}
+
+export interface VerificationResult {
   schemaVersion: 1;
   inputs: string[];
   output: {
-    kind: "implementation_result";
+    kind: "verification_result";
     assignmentId: string;
     incrementId: string;
+    implementationArtifactId: string;
     baseCommit: string;
-    resultingCommit: string;
-    changedFiles: string[];
-    tests: ImplementationTestResult[];
-    criteria: Array<{ criterionId: string; evidence: string; paths: string[] }>;
+    evaluatedCommit: string;
+    verdict: "verified" | "rejected";
+    tests: VerificationTestResult[];
+    criteria: Array<VerificationFinding & { criterionId: string }>;
+    review: {
+      regressions: VerificationFinding;
+      scope: VerificationFinding;
+      simplicity: VerificationFinding;
+    };
+    rejection: null | { cause: string; evidence: string; paths: string[] };
   };
 }
 
-export interface ImplementationAttempt {
+export interface VerificationAttempt {
   startedAt: number;
   timeoutMs: number;
   outcome: FinishAttempt["outcome"] | "interrupted" | null;
@@ -44,19 +57,19 @@ export interface ImplementationAttempt {
   model: string | null;
 }
 
-export interface ImplementationArtifact {
+export interface VerificationArtifact {
   artifact_id: string;
   attemptId: string;
-  kind: "implementation_result";
+  kind: "verification_result";
   path: string;
   version: 1;
   digest: string;
   inputs: string[];
-  /** Added in checkpoint format 4; older format-3 instances omit it. */
-  resultingCommit?: string;
+  verdict: "verified" | "rejected";
+  evaluatedCommit: string;
 }
 
-export interface ImplementationState {
+export interface VerificationState {
   version: 1;
   revision: number;
   runId: string;
@@ -66,7 +79,14 @@ export interface ImplementationState {
   planArtifactId: string;
   planDigest: string;
   startedAt: number;
-  baseCommit: string;
+  implementation: {
+    instanceId: string;
+    artifactId: string;
+    digest: string;
+    baseCommit: string;
+    evaluatedCommit: string;
+    testCommands: string[];
+  };
   assignment: PlannedAssignment & {
     inputs: string[];
     criteria: ImplementationCriterion[];
@@ -77,22 +97,24 @@ export interface ImplementationState {
   };
   attemptTimeMs: number;
   attemptCostMicros: number;
-  attempts: Record<string, ImplementationAttempt>;
-  artifacts: Record<string, ImplementationArtifact>;
-  lifecycle: { status: "active" } | { status: "completed"; artifactId: string };
+  attempts: Record<string, VerificationAttempt>;
+  artifacts: Record<string, VerificationArtifact>;
+  lifecycle:
+    | { status: "active" }
+    | { status: "completed"; artifactId: string; verdict: "verified" | "rejected" };
 }
 
-export interface ImplementationFact {
-  type: string;
-  data: Record<string, unknown>;
-}
-
-export interface ImplementationEvidence {
+export interface VerificationEvidence {
   content: string;
   digest: string;
 }
 
-export type ImplementationEvent =
+export interface VerificationFact {
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export type VerificationEvent =
   | {
       type: "assignment.start";
       runId: string;
@@ -101,6 +123,7 @@ export type ImplementationEvent =
       assignmentId?: string;
       planArtifactId: string;
       planDigest: string;
+      implementation: VerificationState["implementation"];
       assignment: PlannedAssignment;
       inputs: string[];
       inputArtifacts: ArtifactInput[];
@@ -108,29 +131,28 @@ export type ImplementationEvent =
       verification: string[];
       selection: ModelSelection | null;
       model: string | null;
-      baseCommit: string;
       attemptTimeMs: number;
       attemptCostMicros: number;
-      assignmentBudget?: RemainingBudget;
+      assignmentBudget: RemainingBudget;
       globalBudget: RemainingBudget;
     }
   | {
       type: "attempt.finish";
       result: FinishAttempt;
       artifactId: string;
-      evidence?: ImplementationEvidence;
+      evidence?: VerificationEvidence;
     }
   | { type: "session.recover" };
 
-type ImplementationResultByEvent = {
-  "assignment.start": ImplementationAssignmentStarted;
+type Results = {
+  "assignment.start": VerificationAssignmentStarted;
   "attempt.finish": AttemptFinished;
   "session.recover": undefined;
 };
 
-export interface ImplementationTransition<Result> {
-  state: ImplementationState;
-  facts: ImplementationFact[];
+export interface VerificationTransition<Result> {
+  state: VerificationState;
+  facts: VerificationFact[];
   result: Result;
 }
 
@@ -144,68 +166,75 @@ const selection = (value: unknown): value is ModelSelection | null =>
   (object(value) && [value.context, value.provider, value.model, value.thinking].every(text));
 const sha = (value: unknown): value is string =>
   typeof value === "string" && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(value);
-const artifactPath = (value: unknown): value is string =>
-  typeof value === "string" && /^\.xper\/artifacts\/[a-z0-9-]+\.(json|log)$/.test(value);
 const relativePath = (value: unknown): value is string =>
   text(value) &&
   !value.startsWith("/") &&
   !value.startsWith("\\") &&
-  !/^[a-zA-Z]:[\\/]/.test(value) &&
+  !/^[A-Za-z]:[\\/]/.test(value) &&
   !value.split(/[\\/]/).includes("..");
+const artifactPath = (value: unknown): value is string =>
+  typeof value === "string" && /^\.xper\/artifacts\/[a-z0-9-]+\.(json|log)$/.test(value);
 const exactKeys = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 function invalid(message: string): never {
   throw new WorkflowValidationError(message);
 }
 
-export function parseImplementationResult(
+function parseFinding(value: unknown): VerificationFinding {
+  if (
+    !object(value) ||
+    !exactKeys(value, ["outcome", "evidence", "paths"]) ||
+    !["passed", "failed"].includes(String(value.outcome)) ||
+    !text(value.evidence) ||
+    !Array.isArray(value.paths) ||
+    !value.paths.every(relativePath)
+  )
+    invalid("verification result has invalid review evidence");
+  return value as unknown as VerificationFinding;
+}
+
+export function parseVerificationResult(
   content: string,
-  expected: Pick<
-    ImplementationState,
-    "incrementId" | "baseCommit" | "planArtifactId" | "assignment"
-  >,
-): ImplementationResult {
+  expected: VerificationState,
+): VerificationResult {
   let value: unknown;
   try {
     value = JSON.parse(content);
   } catch {
-    invalid("structured implementation result required");
+    invalid("structured verification result required");
   }
   if (
     !object(value) ||
     !exactKeys(value, ["schemaVersion", "inputs", "output"]) ||
     value.schemaVersion !== 1 ||
-    !Array.isArray(value.inputs) ||
-    !value.inputs.every(text) ||
+    !strings(value.inputs) ||
     new Set(value.inputs).size !== value.inputs.length ||
+    [...value.inputs].sort().join("\n") !== [...expected.assignment.inputs].sort().join("\n") ||
     !object(value.output)
   )
-    invalid("structured implementation result required");
-  const inputs = [...expected.assignment.inputs].sort();
-  if ([...value.inputs].sort().join("\n") !== inputs.join("\n"))
-    invalid("implementation result input references do not match the sealed handoff");
+    invalid("structured verification result required");
   const output = value.output;
   if (
     !exactKeys(output, [
       "kind",
       "assignmentId",
       "incrementId",
+      "implementationArtifactId",
       "baseCommit",
-      "resultingCommit",
-      "changedFiles",
+      "evaluatedCommit",
+      "verdict",
       "tests",
       "criteria",
+      "review",
+      "rejection",
     ]) ||
-    output.kind !== "implementation_result" ||
+    output.kind !== "verification_result" ||
     output.assignmentId !== expected.assignment.id ||
     output.incrementId !== expected.incrementId ||
-    output.baseCommit !== expected.baseCommit ||
-    !sha(output.resultingCommit) ||
-    output.resultingCommit === expected.baseCommit ||
-    !Array.isArray(output.changedFiles) ||
-    !output.changedFiles.length ||
-    !output.changedFiles.every(relativePath) ||
-    new Set(output.changedFiles).size !== output.changedFiles.length ||
+    output.implementationArtifactId !== expected.implementation.artifactId ||
+    output.baseCommit !== expected.implementation.baseCommit ||
+    output.evaluatedCommit !== expected.implementation.evaluatedCommit ||
+    !["verified", "rejected"].includes(String(output.verdict)) ||
     !Array.isArray(output.tests) ||
     !output.tests.length ||
     !output.tests.every(
@@ -216,39 +245,72 @@ export function parseImplementationResult(
         integer(test.exitCode) &&
         artifactPath(test.outputPath),
     ) ||
-    !Array.isArray(output.criteria)
+    !Array.isArray(output.criteria) ||
+    !object(output.review) ||
+    !exactKeys(output.review, ["regressions", "scope", "simplicity"])
   )
-    invalid("implementation result does not satisfy its contract");
+    invalid("verification result does not satisfy its contract");
   const expectedCriteria = new Set(expected.assignment.criteria.map((criterion) => criterion.id));
   const actualCriteria = new Set<string>();
-  for (const criterion of output.criteria) {
+  const criteria = output.criteria.map((criterion) => {
     if (
       !object(criterion) ||
-      !exactKeys(criterion, ["criterionId", "evidence", "paths"]) ||
+      !exactKeys(criterion, ["criterionId", "outcome", "evidence", "paths"]) ||
       !text(criterion.criterionId) ||
-      !text(criterion.evidence) ||
-      !Array.isArray(criterion.paths) ||
-      !criterion.paths.every(relativePath) ||
       actualCriteria.has(criterion.criterionId)
     )
-      invalid("implementation result needs unique evidence for every criterion");
+      invalid("verification result needs unique evidence for every criterion");
     actualCriteria.add(criterion.criterionId);
-  }
+    return {
+      criterionId: criterion.criterionId,
+      ...parseFinding({
+        outcome: criterion.outcome,
+        evidence: criterion.evidence,
+        paths: criterion.paths,
+      }),
+    };
+  });
   if (
     actualCriteria.size !== expectedCriteria.size ||
     [...expectedCriteria].some((id) => !actualCriteria.has(id))
   )
-    invalid("implementation result needs evidence for every selected criterion");
-  return value as unknown as ImplementationResult;
+    invalid("verification result needs evidence for every selected criterion");
+  const review = {
+    regressions: parseFinding(output.review.regressions),
+    scope: parseFinding(output.review.scope),
+    simplicity: parseFinding(output.review.simplicity),
+  };
+  const failures = [
+    ...criteria.map((criterion) => criterion.outcome),
+    ...Object.values(review).map((finding) => finding.outcome),
+    ...output.tests.map((test) => (test.exitCode === 0 ? "passed" : "failed")),
+  ].some((outcome) => outcome === "failed");
+  const rejection = output.rejection;
+  const validRejection =
+    rejection === null ||
+    (object(rejection) &&
+      exactKeys(rejection, ["cause", "evidence", "paths"]) &&
+      text(rejection.cause) &&
+      text(rejection.evidence) &&
+      Array.isArray(rejection.paths) &&
+      rejection.paths.every(relativePath));
+  if (
+    !validRejection ||
+    (output.verdict === "verified" && (failures || rejection !== null)) ||
+    (output.verdict === "rejected" && (!failures || rejection === null))
+  )
+    invalid("verification verdict is inconsistent with its evidence");
+  return value as unknown as VerificationResult;
 }
 
-export function implementationPosition(state: ImplementationState): WorkflowPosition {
+export function verificationPosition(state: VerificationState): WorkflowPosition {
+  const verdict = state.lifecycle.status === "completed" ? state.lifecycle.verdict : null;
   return {
     definitionId: state.definition.id,
     definitionVersion: state.definition.version,
     instanceId: state.instanceId,
-    nodeId: state.lifecycle.status === "completed" ? "implemented" : "implement",
-    phase: "implementation",
+    nodeId: verdict ?? "verify",
+    phase: "verification",
     visitId: state.instanceId,
     status: state.lifecycle.status === "completed" ? "completed" : "active",
     activeAttemptIds: Object.entries(state.attempts)
@@ -258,7 +320,7 @@ export function implementationPosition(state: ImplementationState): WorkflowPosi
   };
 }
 
-function remainingLocal(state: ImplementationState, now: number): RemainingBudget {
+function remainingLocal(state: VerificationState, now: number): RemainingBudget {
   const attempts = Object.keys(state.attempts).length;
   return {
     attempts: Math.max(0, state.assignment.maxAttempts - attempts),
@@ -268,32 +330,41 @@ function remainingLocal(state: ImplementationState, now: number): RemainingBudge
   };
 }
 
-export function transitionImplementation<E extends ImplementationEvent>(
-  previous: ImplementationState | null,
+function requireBudget(
+  budget: RemainingBudget,
+  cost: number,
+  label: "verification" | "assignment" | "run",
+): void {
+  if (!budget.attempts) invalid(`${label} attempt budget exhausted`);
+  if (!budget.timeMs) invalid(`${label} time budget exhausted`);
+  if (budget.costMicros !== null && budget.costMicros < cost)
+    invalid(`${label} cost budget exhausted`);
+}
+
+export function transitionVerification<E extends VerificationEvent>(
+  previous: VerificationState | null,
   event: E,
   now: number,
-): ImplementationTransition<ImplementationResultByEvent[E["type"]]> {
-  const facts: ImplementationFact[] = [];
+): VerificationTransition<Results[E["type"]]> {
+  const facts: VerificationFact[] = [];
   const fact = (type: string, data: Record<string, unknown>) => facts.push({ type, data });
   let state = previous ? structuredClone(previous) : null;
   if (
     state &&
-    (state.definition.id !== implementationDefinition.id ||
-      state.definition.version !== implementationDefinition.version)
+    (state.definition.id !== verificationDefinition.id ||
+      state.definition.version !== verificationDefinition.version)
   )
-    invalid("unsupported implementation definition");
-  const finish = (
-    result: ImplementationResultByEvent[ImplementationEvent["type"]],
-  ): ImplementationTransition<ImplementationResultByEvent[E["type"]]> => {
-    if (!state) invalid("start an implementation flow first");
+    invalid("unsupported verification definition");
+  const finish = (result: Results[VerificationEvent["type"]]) => {
+    if (!state) invalid("start a verification flow first");
     if (facts.length) {
       state.revision++;
-      fact("workflow.position", { ...implementationPosition(state) });
+      fact("workflow.position", { ...verificationPosition(state) });
     }
     return {
       state,
       facts,
-      result: structuredClone(result) as ImplementationResultByEvent[E["type"]],
+      result: structuredClone(result) as Results[E["type"]],
     };
   };
   if (event.type === "assignment.start") {
@@ -302,16 +373,13 @@ export function transitionImplementation<E extends ImplementationEvent>(
         version: 1,
         revision: 0,
         runId: event.runId,
-        definition: {
-          id: implementationDefinition.id,
-          version: implementationDefinition.version,
-        },
+        definition: { id: verificationDefinition.id, version: verificationDefinition.version },
         instanceId: event.instanceId,
         incrementId: event.assignment.incrementId,
         planArtifactId: event.planArtifactId,
         planDigest: event.planDigest,
         startedAt: now,
-        baseCommit: event.baseCommit,
+        implementation: structuredClone(event.implementation),
         assignment: {
           ...structuredClone(event.assignment),
           inputs: [...event.inputs],
@@ -327,11 +395,11 @@ export function transitionImplementation<E extends ImplementationEvent>(
         artifacts: {},
         lifecycle: { status: "active" },
       };
-      fact("implementation.started", {
+      fact("verification.started", {
         incrementId: state.incrementId,
         assignmentId: state.assignment.id,
-        planArtifactId: state.planArtifactId,
-        baseCommit: state.baseCommit,
+        implementationArtifactId: state.implementation.artifactId,
+        evaluatedCommit: state.implementation.evaluatedCommit,
       });
       fact("assignment.created", {
         assignmentId: state.assignment.id,
@@ -340,53 +408,27 @@ export function transitionImplementation<E extends ImplementationEvent>(
         inputs: state.assignment.inputs,
       });
     }
-    if (state.lifecycle.status === "completed")
-      invalid("Verifier execution is not available yet; the increment is implemented");
+    if (state.lifecycle.status === "completed") invalid("the verification is already complete");
     if (Object.values(state.attempts).some((attempt) => attempt.outcome === null))
-      invalid("an implementation attempt is already running");
+      invalid("a verification attempt is already running");
     const lastId = state.assignment.attemptIds.at(-1);
     const last = lastId ? state.attempts[lastId] : undefined;
     if (last?.outcome === "interrupted" && event.assignmentId !== state.assignment.id)
       invalid(`retry interrupted assignment ${state.assignment.id} explicitly`);
     if (event.assignmentId && event.assignmentId !== state.assignment.id)
-      invalid("the requested implementation assignment is not eligible");
+      invalid("the requested verification assignment is not eligible");
     const local = remainingLocal(state, now);
-    if (!local.attempts) invalid("implementation attempt budget exhausted");
-    if (!local.timeMs) invalid("implementation time budget exhausted");
-    if (local.costMicros !== null && local.costMicros < state.attemptCostMicros)
-      invalid("implementation cost budget exhausted");
-    if (!event.globalBudget.attempts) invalid("run attempt budget exhausted");
-    if (!event.globalBudget.timeMs) invalid("run time budget exhausted");
-    if (
-      event.globalBudget.costMicros !== null &&
-      event.globalBudget.costMicros < state.attemptCostMicros
-    )
-      invalid("run cost budget exhausted");
-    if (event.assignmentBudget) {
-      if (!event.assignmentBudget.attempts)
-        invalid("implementation assignment attempt budget exhausted");
-      if (!event.assignmentBudget.timeMs)
-        invalid("implementation assignment time budget exhausted");
-      if (
-        event.assignmentBudget.costMicros !== null &&
-        event.assignmentBudget.costMicros < state.attemptCostMicros
-      )
-        invalid("implementation assignment cost budget exhausted");
-    }
+    requireBudget(local, state.attemptCostMicros, "verification");
+    requireBudget(event.assignmentBudget, state.attemptCostMicros, "assignment");
+    requireBudget(event.globalBudget, state.attemptCostMicros, "run");
     if (state.attempts[event.attemptId]) invalid("attempt ID already exists");
     const timeoutMs = Math.min(
       state.attemptTimeMs,
       local.timeMs,
-      event.assignmentBudget?.timeMs ?? Number.POSITIVE_INFINITY,
+      event.assignmentBudget.timeMs,
       event.globalBudget.timeMs,
     );
-    const resultPath = `.xper/artifacts/implementation-result-${event.attemptId}.json`;
-    const reservedCost = state.attemptCostMicros;
-    const admissionBudgets = [
-      local,
-      ...(event.assignmentBudget ? [event.assignmentBudget] : []),
-      event.globalBudget,
-    ];
+    const resultPath = `.xper/artifacts/verification-result-${event.attemptId}.json`;
     state.attempts[event.attemptId] = {
       startedAt: now,
       timeoutMs,
@@ -406,8 +448,16 @@ export function transitionImplementation<E extends ImplementationEvent>(
       model: state.assignment.model,
       timeoutMs,
     });
+    const attemptCostMicros = state.attemptCostMicros;
+    const remainingCost = (budget: RemainingBudget) =>
+      budget.costMicros === null ? null : Math.max(0, budget.costMicros - attemptCostMicros);
+    const costs = [
+      remainingCost(local),
+      remainingCost(event.assignmentBudget),
+      remainingCost(event.globalBudget),
+    ];
     return finish({
-      workflow: "implementation",
+      workflow: "verification",
       runId: state.runId,
       assignmentId: state.assignment.id,
       attemptId: event.attemptId,
@@ -415,27 +465,31 @@ export function transitionImplementation<E extends ImplementationEvent>(
       selection: state.assignment.selection,
       ...(state.assignment.model ? { model: state.assignment.model } : {}),
       incrementId: state.incrementId,
-      baseCommit: state.baseCommit,
+      implementationArtifactId: state.implementation.artifactId,
+      baseCommit: state.implementation.baseCommit,
+      evaluatedCommit: state.implementation.evaluatedCommit,
+      implementationTestCommands: [...state.implementation.testCommands],
       criteria: structuredClone(state.assignment.criteria),
       verification: [...state.assignment.verification],
-      artifactKind: "implementation_result",
+      artifactKind: "verification_result",
       artifactPath: resultPath,
       inputArtifacts: structuredClone(event.inputArtifacts),
       timeoutMs,
       budget: {
-        attempts: Math.min(...admissionBudgets.map((budget) => budget.attempts - 1)),
-        timeMs: timeoutMs,
-        costMicros: Math.min(
-          ...admissionBudgets
-            .map((budget) => budget.costMicros)
-            .filter((cost): cost is number => cost !== null)
-            .map((cost) => Math.max(0, cost - reservedCost)),
+        attempts: Math.min(
+          local.attempts - 1,
+          event.assignmentBudget.attempts - 1,
+          event.globalBudget.attempts - 1,
         ),
+        timeMs: timeoutMs,
+        costMicros: costs.includes(null)
+          ? Math.min(...costs.filter((cost): cost is number => cost !== null))
+          : Math.min(...(costs as number[])),
         concurrency: 1,
       },
     });
   }
-  if (!state) invalid("start an implementation flow first");
+  if (!state) invalid("start a verification flow first");
   if (event.type === "attempt.finish") {
     const attempt = state.attempts[event.result.attemptId];
     if (!attempt) invalid("attempt is not registered");
@@ -454,37 +508,34 @@ export function transitionImplementation<E extends ImplementationEvent>(
     const late =
       event.result.outcome === "succeeded" && now - attempt.startedAt >= attempt.timeoutMs;
     const outcome = late ? "timed_out" : event.result.outcome;
-    let report: ImplementationResult | undefined;
+    let report: VerificationResult | undefined;
     if (event.evidence) {
       if (!("artifactPath" in event.result) || event.result.artifactPath !== attempt.artifactPath)
-        invalid("artifact path does not match the implementation assignment");
-      report = parseImplementationResult(event.evidence.content, state);
+        invalid("artifact path does not match the verification assignment");
+      report = parseVerificationResult(event.evidence.content, state);
       if (state.artifacts[event.artifactId]) invalid("artifact ID already exists");
       state.artifacts[event.artifactId] = {
         artifact_id: event.artifactId,
         attemptId: event.result.attemptId,
-        kind: "implementation_result",
+        kind: "verification_result",
         path: event.result.artifactPath,
         version: 1,
         digest: event.evidence.digest,
         inputs: [...state.assignment.inputs],
-        resultingCommit: report.output.resultingCommit,
+        verdict: report.output.verdict,
+        evaluatedCommit: report.output.evaluatedCommit,
       };
       attempt.artifactId = event.artifactId;
       fact("artifact.registered", {
         artifactId: event.artifactId,
         attemptId: event.result.attemptId,
-        kind: "implementation_result",
+        kind: "verification_result",
         path: event.result.artifactPath,
         digest: event.evidence.digest,
         inputs: state.assignment.inputs,
       });
     }
-    if (outcome === "succeeded") {
-      if (!report) invalid("implementation result evidence is required");
-      if (report.output.tests.some((test) => test.exitCode !== 0))
-        invalid("host-run implementation tests did not pass");
-    }
+    if (outcome === "succeeded" && !report) invalid("verification result evidence is required");
     attempt.outcome = outcome;
     fact("attempt.finished", {
       attemptId: event.result.attemptId,
@@ -492,24 +543,42 @@ export function transitionImplementation<E extends ImplementationEvent>(
       outcome,
       durationMs: Math.max(0, now - attempt.startedAt),
     });
-    if (outcome === "succeeded" && attempt.artifactId) {
-      state.lifecycle = { status: "completed", artifactId: attempt.artifactId };
-      fact("gate.passed", {
-        phase: "implementation",
+    if (outcome === "succeeded" && attempt.artifactId && report) {
+      const verdict = report.output.verdict;
+      state.lifecycle = { status: "completed", artifactId: attempt.artifactId, verdict };
+      fact(verdict === "verified" ? "gate.passed" : "gate.rejected", {
+        phase: "verification",
         incrementId: state.incrementId,
         artifactId: attempt.artifactId,
+        implementationArtifactId: state.implementation.artifactId,
+        evaluatedCommit: state.implementation.evaluatedCommit,
+        ...(report.output.rejection ? { rejection: report.output.rejection } : {}),
       });
+      if (verdict === "rejected") {
+        fact("artifact.invalidated", {
+          artifactId: state.implementation.artifactId,
+          reasonArtifactId: attempt.artifactId,
+        });
+        fact("implementation.rework_requested", {
+          incrementId: state.incrementId,
+          implementationArtifactId: state.implementation.artifactId,
+          verificationArtifactId: attempt.artifactId,
+          cause: report.output.rejection?.cause,
+          evidence: report.output.rejection?.evidence,
+        });
+      }
       fact("workflow.transition", {
-        transitionId: "implementation.accepted",
-        from: "implement",
-        to: "implemented",
+        transitionId: verdict === "verified" ? "verification.accepted" : "verification.rejected",
+        from: "verify",
+        to: verdict,
         fromVisitId: state.instanceId,
         toVisitId: state.instanceId,
       });
       fact("workflow.completed", {
         incrementId: state.incrementId,
         artifactId: attempt.artifactId,
-        outputKind: "implementation_result",
+        outputKind: "verification_result",
+        verdict,
       });
     }
     return finish({
@@ -531,25 +600,33 @@ export function transitionImplementation<E extends ImplementationEvent>(
   return finish(undefined);
 }
 
-/** Validate implementation state restored from the adapter-owned checkpoint. */
-export function decodeImplementationState(value: unknown): ImplementationState {
+/** Validate verification state restored from the adapter-owned checkpoint. */
+export function decodeVerificationState(value: unknown): VerificationState {
   if (
     !object(value) ||
     value.version !== 1 ||
     !integer(value.revision) ||
     !text(value.runId) ||
     !object(value.definition) ||
-    value.definition.id !== implementationDefinition.id ||
-    value.definition.version !== implementationDefinition.version ||
+    value.definition.id !== verificationDefinition.id ||
+    value.definition.version !== verificationDefinition.version ||
     !text(value.instanceId) ||
     !text(value.incrementId) ||
     !text(value.planArtifactId) ||
     !text(value.planDigest) ||
     !integer(value.startedAt) ||
-    !sha(value.baseCommit) ||
+    !object(value.implementation) ||
+    !text(value.implementation.instanceId) ||
+    !text(value.implementation.artifactId) ||
+    !text(value.implementation.digest) ||
+    !sha(value.implementation.baseCommit) ||
+    !sha(value.implementation.evaluatedCommit) ||
+    value.implementation.baseCommit === value.implementation.evaluatedCommit ||
+    !strings(value.implementation.testCommands) ||
+    !value.implementation.testCommands.length ||
     !object(value.assignment) ||
     !text(value.assignment.id) ||
-    value.assignment.role !== "implementation.driver" ||
+    value.assignment.role !== "verify.verifier" ||
     value.assignment.incrementId !== value.incrementId ||
     !strings(value.assignment.dependencies) ||
     !text(value.assignment.workspace) ||
@@ -576,7 +653,6 @@ export function decodeImplementationState(value: unknown): ImplementationState {
     !(value.assignment.model === null || text(value.assignment.model)) ||
     (value.assignment.selection === null) === (value.assignment.model === null) ||
     !strings(value.assignment.attemptIds) ||
-    new Set(value.assignment.attemptIds).size !== value.assignment.attemptIds.length ||
     !integer(value.attemptTimeMs) ||
     value.attemptTimeMs < 1 ||
     !integer(value.attemptCostMicros) ||
@@ -585,14 +661,16 @@ export function decodeImplementationState(value: unknown): ImplementationState {
     !object(value.lifecycle) ||
     !["active", "completed"].includes(String(value.lifecycle.status))
   )
-    invalid("unsupported implementation checkpoint");
-  const state = value as unknown as ImplementationState;
+    invalid("unsupported verification checkpoint");
+  const state = value as unknown as VerificationState;
   const completedArtifactId =
     state.lifecycle.status === "completed" ? state.lifecycle.artifactId : null;
+  const completedVerdict = state.lifecycle.status === "completed" ? state.lifecycle.verdict : null;
   if (
     new Set(state.assignment.inputs).size !== state.assignment.inputs.length ||
     new Set(state.assignment.criteria.map((criterion) => criterion.id)).size !==
       state.assignment.criteria.length ||
+    new Set(state.assignment.attemptIds).size !== state.assignment.attemptIds.length ||
     Object.keys(state.attempts).length !== state.assignment.attemptIds.length ||
     !state.assignment.attemptIds.every((id) => Object.hasOwn(state.attempts, id)) ||
     !Object.entries(state.attempts).every(
@@ -609,30 +687,31 @@ export function decodeImplementationState(value: unknown): ImplementationState {
         selection(attempt.selection) &&
         JSON.stringify(attempt.selection) === JSON.stringify(state.assignment.selection) &&
         attempt.model === state.assignment.model &&
-        (attempt.artifactId === null || Object.hasOwn(state.artifacts, attempt.artifactId)) &&
-        state.assignment.attemptIds.includes(attemptId),
+        (attempt.artifactId === null || Object.hasOwn(state.artifacts, attempt.artifactId)),
     ) ||
     !Object.entries(state.artifacts).every(
       ([artifactId, artifact]) =>
         artifact.artifact_id === artifactId &&
         Object.hasOwn(state.attempts, artifact.attemptId) &&
         state.attempts[artifact.attemptId]?.artifactId === artifactId &&
-        artifact.kind === "implementation_result" &&
+        artifact.kind === "verification_result" &&
         artifact.version === 1 &&
         artifactPath(artifact.path) &&
         text(artifact.digest) &&
         JSON.stringify(artifact.inputs) === JSON.stringify(state.assignment.inputs) &&
-        (artifact.resultingCommit === undefined || sha(artifact.resultingCommit)),
+        ["verified", "rejected"].includes(artifact.verdict) &&
+        artifact.evaluatedCommit === state.implementation.evaluatedCommit,
     ) ||
     (completedArtifactId === null &&
       Object.values(state.attempts).some((attempt) => attempt.outcome === "succeeded")) ||
     (completedArtifactId !== null &&
       (!Object.hasOwn(state.artifacts, completedArtifactId) ||
+        state.artifacts[completedArtifactId]?.verdict !== completedVerdict ||
         !Object.values(state.attempts).some(
           (attempt) =>
             attempt.outcome === "succeeded" && attempt.artifactId === completedArtifactId,
         )))
   )
-    invalid("invalid implementation checkpoint references");
+    invalid("invalid verification checkpoint references");
   return structuredClone(state);
 }

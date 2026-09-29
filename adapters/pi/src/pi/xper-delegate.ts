@@ -11,7 +11,7 @@ export function registerXperDelegate(
     name: "xper_delegate",
     label: "Xper assignment",
     description:
-      "Execute the current xper assignment from sealed artifacts and evaluate its local gate. Supports Knowledge through the first Implementer assignment. Start a run with /xper first.",
+      "Execute the current xper assignment from sealed artifacts and evaluate its local gate. Supports Knowledge and the first Implementer/Verifier delivery loop. Start a run with /xper first.",
     parameters: {
       type: "object",
       properties: {

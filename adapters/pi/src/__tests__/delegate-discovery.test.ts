@@ -9,6 +9,7 @@ import {
   type KnowledgeExecutionResult,
 } from "../actions/delegate-knowledge.js";
 import type { FinishAttempt, ModelSelection, RunAdvanced } from "../workflow/types.js";
+import { resolveAgent, toolsForRole } from "../knowledge/delegate.js";
 
 function fixture() {
   const calls: string[] = [];
@@ -90,6 +91,13 @@ function fixture() {
     failure,
   };
 }
+
+test("Verifier instructions and tools prohibit repairs", () => {
+  assert.deepEqual(toolsForRole("verify.verifier"), ["read", "bash"]);
+  assert.deepEqual(toolsForRole("implementation.driver"), ["read", "bash", "edit", "write"]);
+  const prompt = resolveAgent("verify.verifier").systemPrompt;
+  assert.match(prompt, /must not edit, write, commit, reset, clean, or repair/);
+});
 
 test("delegation saves evidence before settling and returns the phase decided by Pi", async () => {
   const f = fixture();
@@ -356,6 +364,73 @@ test("the same delegation action executes an Implementer without launching Verif
       },
     ],
   );
+});
+
+test("the same explicit delegation executes only the selected Verifier", async () => {
+  const f = fixture();
+  f.dependencies.workflow.startAssignment = async () => ({
+    workflow: "verification",
+    runId: "r",
+    assignmentId: "verifier",
+    attemptId: "verification-attempt",
+    role: "verify.verifier",
+    selection: null,
+    model: "frozen/verifier-model",
+    incrementId: "s1",
+    implementationArtifactId: "implementation-result",
+    baseCommit: "1111111111111111111111111111111111111111",
+    evaluatedCommit: "2222222222222222222222222222222222222222",
+    implementationTestCommands: ["npm test"],
+    criteria: [{ id: "c1", behavior: "Works", example: "Observed" }],
+    verification: ["run focused test"],
+    artifactKind: "verification_result",
+    artifactPath: ".xper/artifacts/verification-result-verification-attempt.json",
+    inputArtifacts: [
+      {
+        artifact_id: "implementation-result",
+        kind: "implementation_result",
+        path: ".xper/artifacts/implementation-result.json",
+        version: 1,
+      },
+    ],
+    timeoutMs: 1000,
+  });
+  f.state.execution = { outcome: "succeeded", brief: '{"verification":true}' };
+  f.dependencies.saveBrief = async (_cwd, _attempt, _content, path) => {
+    assert(path);
+    return path;
+  };
+  const result = await delegateKnowledge(f.request, f.dependencies);
+  assert.equal(result.phase, "verification");
+  assert.equal(result.gate, undefined);
+  assert.equal(f.calls.includes("advance"), false);
+  assert.deepEqual(f.executions[0], {
+    task: f.request.task,
+    cwd: "/workspace",
+    role: "verify.verifier",
+    signal: f.controller.signal,
+    timeoutMs: 1000,
+    inputArtifacts: [
+      {
+        artifact_id: "implementation-result",
+        kind: "implementation_result",
+        path: ".xper/artifacts/implementation-result.json",
+        version: 1,
+      },
+    ],
+    artifactKind: "verification_result",
+    attemptId: "verification-attempt",
+    workflow: "verification",
+    assignmentId: "verifier",
+    incrementId: "s1",
+    baseCommit: "1111111111111111111111111111111111111111",
+    criteria: [{ id: "c1", behavior: "Works", example: "Observed" }],
+    verification: ["run focused test"],
+    evaluatedCommit: "2222222222222222222222222222222222222222",
+    implementationArtifactId: "implementation-result",
+    implementationTestCommands: ["npm test"],
+    model: "frozen/verifier-model",
+  });
 });
 
 test("invalid failed-attempt evidence is dropped while the implementation attempt still settles", async () => {

@@ -1,9 +1,9 @@
 # XP-011: Sequential Implementation and Verify
 
-- Status: `pending`
+- Status: `review`
 - Milestone: M3
 - Entry dependency: XP-010
-- Next slice: XP-011.4
+- Next slice: none; the group is ready for review
 
 ## Outcome and boundary
 
@@ -212,10 +212,18 @@ optimization. Serial execution does not remove future instance boundaries.
 
 ## XP-011.4 — Return a concrete problem to Knowledge
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-011.3
 - Example: Verify identifies an ambiguous criterion, records evidence, and
   returns control to Define before more implementation can be delegated.
+
+Implementation note: extend the existing Verifier result, Knowledge reducer,
+workflow controller, checkpoint envelope, local command surface, artifact
+contracts, journal, and Git inspection. A rejected review with structured
+`ambiguous_criteria` feedback will prove the exact Verification attempt and Plan
+revision are persisted before one idempotent revisit; controller and migration
+tests will then prove a revised Plan cannot dispatch until `/xper resume <commit>`
+accepts the clean checkout revision, while old evidence and budgets remain.
 
 Request a Define or Design revisit with the source attempt, increment, Plan
 revision, reason, and evidence. Use Knowledge transitions to invalidate affected
@@ -233,6 +241,40 @@ Acceptance:
 
 Stop here: no selective preservation of completed increments, simultaneous
 feedback aggregation, or general reconciliation engine.
+
+### Delivery evidence
+
+- `verification-v1` now distinguishes ordinary Implementation rework from
+  `ambiguous_criteria` and `infeasible_design` feedback while accepting historical
+  v1 rejections that omit the additive field. Host-observed failure always clears
+  a proposed Knowledge classification.
+- Verification persists the rejected review and complete
+  `knowledge.feedback_requested` metadata before the controller imports that exact
+  artifact into Knowledge. The pure Knowledge v2 feedback edges reopen Define or
+  Design once, invalidate downstream acceptance, and recover an unfinished
+  handoff locally without agent execution or Rust.
+- Knowledge state v3 and checkpoint envelope format 5 retain historical Plan-bound
+  delivery flows, imported evidence, the authorized Plan, and sequential
+  reconciliations. A revised Plan invalidates every previous approval while
+  preserving evidence and cumulative global and assignment budgets.
+- `/xper resume <commit>` validates full 40- or 64-character hashes, a clean
+  checkout, exact `HEAD`, state, and repeat identity without changing Git.
+  `/xper status` and `xper_delegate` expose the required action; stale Plans cannot
+  start Implementation or Verification, and the revised Plan requires fresh
+  cycles from the selected commit.
+- Contract, reducer, execution, controller, migration, command, recovery, and
+  unavailable-recorder tests cover both feedback destinations, durable ordering,
+  invalid forms, conservative invalidation, all resume failures, fresh evidence,
+  and the persisted-feedback crash boundary. `npm run check` passes 67 Rust tests,
+  shared JSON Schema fixtures, and 177 adapter tests; `git diff --check` also
+  passes.
+- The final diff updates 29 files with 960 production, 494 adapter-test, and 330
+  documentation/contract additions (1,784 total; 348 removed). It adds no
+  dependency, Rust or JSON-RPC change, automatic Git action,
+  selective preservation, feedback aggregation, or general reconciliation
+  engine. The handwritten and production additions exceed the roadmap size alarm;
+  review should evaluate this inseparable contract, migration, recovery, control,
+  and documentation scope explicitly.
 
 ## Deferred work, not acceptance criteria for this group
 

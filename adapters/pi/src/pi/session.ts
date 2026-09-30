@@ -106,17 +106,19 @@ export class XperSession {
     const routing = run.routing ? `profile ${run.routing.profile}` : "Pi model";
     const outcomes = Object.values(run.attempts).map((attempt) => attempt.outcome ?? "running");
     const gate =
-      implementation?.nodeId === "implement"
-        ? `; implementation ${implementation.status}`
-        : verification
-          ? `; verification ${verification.nodeId}`
-          : implementation
-            ? `; implementation ${implementation.status}`
-            : run.human_input
-              ? `; awaiting approval: /xper approve ${run.human_input[1]}`
-              : run.accepted?.plan
-                ? "; execution plan ready"
-                : "";
+      this.lastRun?.reconciliation?.status === "awaiting_resume"
+        ? "; revised plan ready: /xper resume <commit>"
+        : implementation?.nodeId === "implement"
+          ? `; implementation ${implementation.status}`
+          : verification
+            ? `; verification ${verification.nodeId}`
+            : implementation
+              ? `; implementation ${implementation.status}`
+              : run.human_input
+                ? `; awaiting approval: /xper approve ${run.human_input[1]}`
+                : run.accepted?.plan
+                  ? "; execution plan ready"
+                  : "";
     return `; run ${run.run_id}; phase ${phase}; run configuration: ${routing}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}${telemetry}`;
   }
   async refreshRun(): Promise<void> {

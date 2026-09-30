@@ -25,6 +25,16 @@ export interface VerificationFinding {
   paths: string[];
 }
 
+export type KnowledgeFeedbackReason = "ambiguous_criteria" | "infeasible_design";
+
+export interface VerificationRejection {
+  cause: string;
+  evidence: string;
+  paths: string[];
+  /** Optional for backwards-compatible verification-v1 artifacts. */
+  knowledgeFeedback?: { reason: KnowledgeFeedbackReason } | null;
+}
+
 export interface VerificationResult {
   schemaVersion: 1;
   inputs: string[];
@@ -43,7 +53,7 @@ export interface VerificationResult {
       scope: VerificationFinding;
       simplicity: VerificationFinding;
     };
-    rejection: null | { cause: string; evidence: string; paths: string[] };
+    rejection: null | VerificationRejection;
   };
 }
 
@@ -67,6 +77,7 @@ export interface VerificationArtifact {
   inputs: string[];
   verdict: "verified" | "rejected";
   evaluatedCommit: string;
+  knowledgeFeedbackReason?: KnowledgeFeedbackReason;
 }
 
 export interface VerificationState {
@@ -176,6 +187,8 @@ const artifactPath = (value: unknown): value is string =>
   typeof value === "string" && /^\.xper\/artifacts\/[a-z0-9-]+\.(json|log)$/.test(value);
 const exactKeys = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+const knowledgeFeedbackReason = (value: unknown): value is KnowledgeFeedbackReason =>
+  value === "ambiguous_criteria" || value === "infeasible_design";
 function invalid(message: string): never {
   throw new WorkflowValidationError(message);
 }
@@ -289,11 +302,17 @@ export function parseVerificationResult(
   const validRejection =
     rejection === null ||
     (object(rejection) &&
-      exactKeys(rejection, ["cause", "evidence", "paths"]) &&
+      (exactKeys(rejection, ["cause", "evidence", "paths"]) ||
+        exactKeys(rejection, ["cause", "evidence", "paths", "knowledgeFeedback"])) &&
       text(rejection.cause) &&
       text(rejection.evidence) &&
       Array.isArray(rejection.paths) &&
-      rejection.paths.every(relativePath));
+      rejection.paths.every(relativePath) &&
+      (rejection.knowledgeFeedback === undefined ||
+        rejection.knowledgeFeedback === null ||
+        (object(rejection.knowledgeFeedback) &&
+          exactKeys(rejection.knowledgeFeedback, ["reason"]) &&
+          knowledgeFeedbackReason(rejection.knowledgeFeedback.reason))));
   if (
     !validRejection ||
     (output.verdict === "verified" && (failures || rejection !== null)) ||
@@ -524,6 +543,9 @@ export function transitionVerification<E extends VerificationEvent>(
         inputs: [...state.assignment.inputs],
         verdict: report.output.verdict,
         evaluatedCommit: report.output.evaluatedCommit,
+        ...(report.output.rejection?.knowledgeFeedback
+          ? { knowledgeFeedbackReason: report.output.rejection.knowledgeFeedback.reason }
+          : {}),
       };
       attempt.artifactId = event.artifactId;
       fact("artifact.registered", {
@@ -559,13 +581,27 @@ export function transitionVerification<E extends VerificationEvent>(
           artifactId: state.implementation.artifactId,
           reasonArtifactId: attempt.artifactId,
         });
-        fact("implementation.rework_requested", {
-          incrementId: state.incrementId,
-          implementationArtifactId: state.implementation.artifactId,
-          verificationArtifactId: attempt.artifactId,
-          cause: report.output.rejection?.cause,
-          evidence: report.output.rejection?.evidence,
-        });
+        const feedback = report.output.rejection?.knowledgeFeedback;
+        if (feedback) {
+          fact("knowledge.feedback_requested", {
+            sourceAttemptId: event.result.attemptId,
+            incrementId: state.incrementId,
+            planArtifactId: state.planArtifactId,
+            planDigest: state.planDigest,
+            verificationArtifactId: attempt.artifactId,
+            reason: feedback.reason,
+            evidence: report.output.rejection?.evidence,
+            paths: report.output.rejection?.paths,
+          });
+        } else {
+          fact("implementation.rework_requested", {
+            incrementId: state.incrementId,
+            implementationArtifactId: state.implementation.artifactId,
+            verificationArtifactId: attempt.artifactId,
+            cause: report.output.rejection?.cause,
+            evidence: report.output.rejection?.evidence,
+          });
+        }
       }
       fact("workflow.transition", {
         transitionId: verdict === "verified" ? "verification.accepted" : "verification.rejected",
@@ -700,7 +736,10 @@ export function decodeVerificationState(value: unknown): VerificationState {
         text(artifact.digest) &&
         JSON.stringify(artifact.inputs) === JSON.stringify(state.assignment.inputs) &&
         ["verified", "rejected"].includes(artifact.verdict) &&
-        artifact.evaluatedCommit === state.implementation.evaluatedCommit,
+        artifact.evaluatedCommit === state.implementation.evaluatedCommit &&
+        (artifact.knowledgeFeedbackReason === undefined ||
+          (artifact.verdict === "rejected" &&
+            knowledgeFeedbackReason(artifact.knowledgeFeedbackReason))),
     ) ||
     (completedArtifactId === null &&
       Object.values(state.attempts).some((attempt) => attempt.outcome === "succeeded")) ||

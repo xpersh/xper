@@ -116,8 +116,8 @@ test("version 1 migration preserves identities, sealed evidence, frozen routing 
   const original = JSON.stringify(legacy);
   const state = decodeCheckpoint(legacy);
   assert(state);
-  assert.equal(state.version, 2);
-  assert.deepEqual(state.definition, { id: "pi.knowledge", version: 1 });
+  assert.equal(state.version, 3);
+  assert.deepEqual(state.definition, { id: "pi.knowledge", version: 2 });
   assert.equal(state.instanceId, legacy.run_id);
   assert.deepEqual(state.lifecycle, { status: "active" });
   const { version: _version, ready: _ready, human_input: _humanInput, ...historical } = legacy;
@@ -125,6 +125,7 @@ test("version 1 migration preserves identities, sealed evidence, frozen routing 
     version: _nextVersion,
     definition: _definition,
     instanceId: _instance,
+    imports: _imports,
     lifecycle: _lifecycle,
     ...preserved
   } = state;
@@ -135,14 +136,16 @@ test("version 1 migration preserves identities, sealed evidence, frozen routing 
   assert.notEqual(state.attempts, legacy.attempts);
 });
 
-test("version 1 and 2 knowledge checkpoints migrate into an empty version 4 envelope", () => {
+test("version 1 and 2 knowledge checkpoints migrate into an empty version 5 envelope", () => {
   const legacy = deepFreeze(legacyCheckpoint());
   const fromOne = decodeAdapterCheckpoint(legacy);
   assert(fromOne);
-  assert.equal(fromOne.version, 4);
+  assert.equal(fromOne.version, 5);
   assert.equal(fromOne.knowledge.run_id, legacy.run_id);
   assert.deepEqual(fromOne.implementations, {});
   assert.deepEqual(fromOne.verifications, {});
+  assert.equal(fromOne.authorizedPlan, null);
+  assert.deepEqual(fromOne.reconciliations, []);
 
   const versionTwo = decodeCheckpoint(legacy);
   assert(versionTwo);
@@ -205,7 +208,7 @@ test("version 3 wraps its existing implementation as the first immutable history
   });
   const migrated = decodeAdapterCheckpoint(versionThree);
   assert(migrated);
-  assert.equal(migrated.version, 4);
+  assert.equal(migrated.version, 5);
   assert.deepEqual(migrated.implementations.s1, [started.state]);
   assert.deepEqual(migrated.verifications, {});
   assert.equal(JSON.stringify(versionThree).includes('"version":4'), false);

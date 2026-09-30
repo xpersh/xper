@@ -12,7 +12,12 @@ import {
   phasesInvalidatedBy,
 } from "./definition.js";
 import { admit, budgetRemaining, contracts, policyFrom } from "./policy.js";
-import { currentVisit, type Assignment, type WorkflowState } from "./state.js";
+import {
+  currentVisit,
+  type Assignment,
+  type ImportedArtifact,
+  type WorkflowState,
+} from "./state.js";
 import { WorkflowValidationError } from "./types.js";
 import type {
   KnowledgeAssignmentStarted,
@@ -53,6 +58,18 @@ export type KnowledgeEvent =
       nextVisitId: string;
       evidence: GateEvidence;
     }
+  | {
+      type: "delivery.feedback";
+      nextVisitId: string;
+      sourceAttemptId: string;
+      incrementId: string;
+      planArtifactId: string;
+      planDigest: string;
+      reason: "ambiguous_criteria" | "infeasible_design";
+      evidence: string;
+      paths: string[];
+      artifact: ImportedArtifact;
+    }
   | { type: "session.recover" }
   | { type: "usage.record"; attemptId: string; usage: ModelUsage };
 
@@ -61,6 +78,7 @@ interface Results {
   "assignment.start": KnowledgeAssignmentStarted;
   "attempt.finish": AttemptFinished;
   "gate.evaluate": RunAdvanced;
+  "delivery.feedback": RunAdvanced;
   "session.recover": undefined;
   "usage.record": undefined;
 }
@@ -160,7 +178,7 @@ export function transitionKnowledge<E extends KnowledgeEvent>(
     const initial = knowledgeDefinition.initial;
     if (initial === "ready") invalid("knowledge initial state must be an activity");
     state = {
-      version: 2,
+      version: 3,
       revision: 0,
       run_id: event.runId,
       instanceId: event.instanceId,
@@ -172,6 +190,7 @@ export function transitionKnowledge<E extends KnowledgeEvent>(
       assignments: {},
       attempts: {},
       artifacts: {},
+      imports: {},
       accepted: {},
       feedback: null,
       lifecycle: { status: "active" },
@@ -278,7 +297,7 @@ export function transitionKnowledge<E extends KnowledgeEvent>(
         artifactKind: contracts[phase].kind,
         artifactPath,
         inputArtifacts: assignment.inputs.map((id) => {
-          const artifact = state?.artifacts[id];
+          const artifact = state?.artifacts[id] ?? state?.imports[id];
           if (!artifact) invalid("input artifact unavailable");
           return {
             artifact_id: artifact.artifact_id,
@@ -360,6 +379,74 @@ export function transitionKnowledge<E extends KnowledgeEvent>(
       });
       return finish({ attemptId: result.attemptId, outcome, artifactId: attempt.artifactId });
     }
+    case "delivery.feedback": {
+      const target = event.reason === "ambiguous_criteria" ? "define" : "design";
+      if (state.imports[event.artifact.artifact_id])
+        return finish({ advanced: true, phase: currentVisit(state).phase, resumed: true });
+      if (state.lifecycle.status !== "completed")
+        invalid("finish the current Knowledge revisit before accepting another feedback request");
+      const planId = state.accepted.plan;
+      const plan = planId ? state.artifacts[planId] : undefined;
+      if (
+        !plan ||
+        planId !== event.planArtifactId ||
+        plan.digest !== event.planDigest ||
+        state.lifecycle.artifactId !== planId
+      )
+        invalid("knowledge feedback does not match the sealed Plan revision");
+      if (
+        !event.sourceAttemptId.trim() ||
+        !event.incrementId.trim() ||
+        !event.evidence.trim() ||
+        !event.artifact.digest.trim() ||
+        event.artifact.kind !== "verification_result" ||
+        event.artifact.version !== 1
+      )
+        invalid("knowledge feedback request is incomplete");
+      if (
+        state.artifacts[event.artifact.artifact_id] ||
+        state.visits.some((candidate) => candidate.id === event.nextVisitId)
+      )
+        invalid("knowledge feedback identity already exists");
+      const edge = feedbackTransition("ready", event.reason);
+      if (!edge || edge.to !== target) invalid("knowledge feedback target is not defined");
+      state.imports[event.artifact.artifact_id] = structuredClone(event.artifact);
+      for (const invalidated of phasesInvalidatedBy(target)) {
+        const artifactId = state.accepted[invalidated];
+        if (!artifactId) continue;
+        delete state.accepted[invalidated];
+        fact("artifact.invalidated", {
+          artifactId,
+          reasonArtifactId: event.artifact.artifact_id,
+          sourceAttemptId: event.sourceAttemptId,
+        });
+      }
+      state.feedback = event.artifact.artifact_id;
+      state.lifecycle = { status: "active" };
+      state.visits.push({ id: event.nextVisitId, phase: target });
+      fact("phase.exited", { phase, visitId: visit.id });
+      fact("phase.revisited", {
+        phase: target,
+        from: "ready",
+        reason: event.reason,
+        evidence: event.evidence,
+        paths: event.paths,
+        artifactId: event.artifact.artifact_id,
+        sourceAttemptId: event.sourceAttemptId,
+        incrementId: event.incrementId,
+        planArtifactId: event.planArtifactId,
+        planDigest: event.planDigest,
+      });
+      fact("phase.entered", { phase: target, visitId: event.nextVisitId });
+      fact("workflow.transition", {
+        transitionId: edge.id,
+        from: edge.from,
+        to: edge.to,
+        fromVisitId: visit.id,
+        toVisitId: event.nextVisitId,
+      });
+      return finish({ advanced: true, phase: target });
+    }
     case "gate.evaluate": {
       const blocked = (reason: string): Transition<Results[E["type"]]> => {
         fact("gate.failed", { phase, visitId: visit.id, reason });
@@ -383,7 +470,7 @@ export function transitionKnowledge<E extends KnowledgeEvent>(
       if ("error" in event.evidence) return blocked(event.evidence.error);
       const evidence = event.evidence.artifacts;
       const content = (id: string): string => {
-        const registered = state?.artifacts[id],
+        const registered = state?.artifacts[id] ?? state?.imports[id],
           observed = evidence[id];
         if (!registered || !observed) throw new Error("artifact unavailable");
         if (registered.digest !== observed.digest)

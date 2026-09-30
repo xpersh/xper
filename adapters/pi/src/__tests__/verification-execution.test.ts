@@ -63,7 +63,11 @@ function request(
   };
 }
 
-function proposal(verdict: "verified" | "rejected" = "verified", testCommands: string[] = []) {
+function proposal(
+  verdict: "verified" | "rejected" = "verified",
+  testCommands: string[] = [],
+  knowledgeFeedback?: "ambiguous_criteria" | "infeasible_design",
+) {
   const failed = verdict === "rejected";
   return JSON.stringify({
     schemaVersion: 1,
@@ -83,7 +87,12 @@ function proposal(verdict: "verified" | "rejected" = "verified", testCommands: s
       simplicity: { outcome: "passed", evidence: "Change is direct", paths: ["tracked.txt"] },
     },
     rejection: failed
-      ? { cause: "criterion failed", evidence: "Observed wrong value", paths: ["tracked.txt"] }
+      ? {
+          cause: "criterion failed",
+          evidence: "Observed wrong value",
+          paths: ["tracked.txt"],
+          knowledgeFeedback: knowledgeFeedback ? { reason: knowledgeFeedback } : null,
+        }
       : null,
   });
 }
@@ -137,11 +146,37 @@ test("a failing host test overrides an approving Verifier with rejection evidenc
     assert.equal(result.outcome, "succeeded");
     assert(result.brief);
     const artifact = JSON.parse(result.brief) as {
-      output: { verdict: string; rejection: { cause: string }; tests: Array<{ exitCode: number }> };
+      output: {
+        verdict: string;
+        rejection: { cause: string; knowledgeFeedback: unknown };
+        tests: Array<{ exitCode: number }>;
+      };
     };
     assert.equal(artifact.output.verdict, "rejected");
     assert.equal(artifact.output.rejection.cause, "host test failed");
+    assert.equal(artifact.output.rejection.knowledgeFeedback, null);
     assert.equal(artifact.output.tests[0]?.exitCode, 7);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a Verifier can request structured Knowledge feedback when host tests pass", async () => {
+  const { cwd, base, evaluated } = await checkout();
+  try {
+    const command = 'node -e "process.exit(0)"';
+    const result = await runVerification(request(cwd, base, evaluated, [command]), {
+      runChild: async () => ({
+        outcome: "succeeded",
+        brief: proposal("rejected", [], "infeasible_design"),
+      }),
+    });
+    assert.equal(result.outcome, "succeeded");
+    assert(result.brief);
+    const artifact = JSON.parse(result.brief) as {
+      output: { rejection: { knowledgeFeedback: { reason: string } } };
+    };
+    assert.equal(artifact.output.rejection.knowledgeFeedback.reason, "infeasible_design");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

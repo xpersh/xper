@@ -118,7 +118,11 @@ evidence for every criterion, and separate regression, requested-scope, and
 simplicity findings. `rejected` requires a nonempty cause and evidence;
 `verified` permits no failed finding, failed command, or rejection object. The
 Verifier proposes findings and extra commands, while Pi constructs and validates
-the canonical artifact.
+the canonical artifact. A rejection may add `knowledgeFeedback: null` or one
+reason: `ambiguous_criteria` for Define or `infeasible_design` for Design. The
+field is optional so historical v1 artifacts remain valid. Host-observed command
+failure removes any proposed Knowledge classification and remains Implementation
+rework.
 
 The stable error catalog remains in
 [the Rust protocol crate](../crates/xper-protocol/src/lib.rs) and

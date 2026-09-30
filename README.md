@@ -10,8 +10,10 @@ and makes the execution history available for inspection and metrics.
 > sealed Plan, explicit delegations deliver every increment sequentially in
 > dependency-aware Plan order. Pi independently checks each Implementer's Git
 > commit and tests, then runs a read-only Verifier against that exact revision.
-> Rejection preserves evidence and enables bounded rework. Final judgment is
-> still under development.
+> Rejection preserves evidence and either enables bounded implementation rework
+> or returns a concrete criteria/design problem to Knowledge. A revised Plan
+> requires an explicit `/xper resume <commit>` decision before fresh delivery.
+> Final judgment is still under development.
 > Basic event and usage summaries are available; full metric comparison and a
 > dashboard remain future work.
 
@@ -90,9 +92,12 @@ with versioned graphs shared by execution and future inspection. Its runtime
 performs artifact and process effects outside the transition functions. The
 knowledge instance completes with a sealed Plan; `pi.implementation` and
 `pi.verification` instances then deliver each increment sequentially under the
-same open run. Rejection creates a fresh Implementation instance with the prior
-evidence. Completion of every increment makes the run eligible for Judgment Day
-without closing it. Judgment, closure, and a read-only graph UI remain backlog work.
+same open run. An ordinary rejection creates a fresh Implementation instance
+with the prior evidence. A structured criteria or design rejection reopens the
+same Knowledge instance, invalidates the obsolete Plan, and conservatively
+requires fresh delivery evidence after an explicit checkout-resumption decision.
+Completion of every increment makes the run eligible for Judgment Day without
+closing it. Judgment, closure, and a read-only graph UI remain backlog work.
 
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
@@ -122,9 +127,11 @@ Start a workflow in the Pi session:
 Bare `/xper` asks for the objective in an interactive session. The explicit
 `/xper start <objective>` form also works. `/xper status` shows versions,
 connection, phase, and attempt outcomes; `/xper advance` asks the Pi workflow to
-evaluate the current gate. Starting a run displays its phase and next action;
-it does not automatically call a model or execute every phase. No `/agent xper`
-activation is needed.
+evaluate the current gate. After a Knowledge revisit seals a revised Plan,
+`/xper resume <commit>` authorizes that Plan only when the dedicated checkout is
+clean and already at the named full Git hash. Starting or resuming displays the
+next action; it does not automatically call a model, change Git, or execute a
+phase. No `/agent xper` activation is needed.
 
 The extension in `.pi/extensions` uses `target/debug/xper` when available and
 allows selecting another binary with `XPER_BRIDGE_COMMAND`. It starts and
@@ -141,9 +148,13 @@ Implementer must leave a clean local commit; the adapter verifies its ancestry,
 changed files, and declared tests without committing, pushing, resetting, or
 cleaning the checkout. The Verifier receives only read and shell tools; the host
 runs the Implementer's commands before deduplicated review commands and rejects
-mutated or failing evidence. Verification marks only that increment; another
-explicit delegation may start the next Plan-eligible increment. Verifying them
-all makes Judgment Day eligible without closing the run. The
+mutated or failing evidence. When host checks pass, the Verifier may classify a
+rejection as ambiguous criteria or infeasible design; Pi persists that review
+before reopening Define or Design. The old Plan cannot dispatch, and a revised
+Plan invalidates all prior increment approvals until `/xper resume <commit>`.
+Verification otherwise marks only that increment; another explicit delegation
+may start the next Plan-eligible increment. Verifying them all makes Judgment
+Day eligible without closing the run. The
 [workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection
 and timeline from SQLite. This shared history can lag the live Pi workflow.

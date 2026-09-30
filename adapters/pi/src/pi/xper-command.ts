@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION } from "../bridge/protocol.js";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
 
 const USAGE =
-  "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance | /xper approve <artifactId>";
+  "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance | /xper approve <artifactId> | /xper resume <commit>";
 
 export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): void {
   pi.registerCommand("xper", {
@@ -11,7 +11,7 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
     handler: async (args, ctx) => {
       const input = args.trim();
       const [first] = input.split(/\s+/);
-      const action = ["status", "advance", "approve", "help"].includes(first ?? "")
+      const action = ["status", "advance", "approve", "resume", "help"].includes(first ?? "")
         ? first
         : "start";
       let objective = first === "start" ? input.slice("start".length).trim() : input;
@@ -29,7 +29,12 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
         ctx.ui.notify(USAGE, "info");
         return;
       }
-      if (action === "start" || action === "advance" || action === "approve") {
+      if (
+        action === "start" ||
+        action === "advance" ||
+        action === "approve" ||
+        action === "resume"
+      ) {
         if (!workflow) {
           ctx.ui.notify(`xper: local workflow is not initialized`, "warning");
           return;
@@ -60,6 +65,12 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
               message += " Ask Pi to delegate Discovery with xper_delegate.";
             }
             if (!result.resumed) message += ` Configuration: ${prepared}.`;
+          } else if (action === "resume") {
+            const revision = input.slice("resume".length).trim();
+            if (!revision || /\s/.test(revision))
+              throw new Error("Provide the clean checkout commit to resume delivery");
+            const result = await workflow.resumeDelivery(revision);
+            message = JSON.stringify(result);
           } else {
             const artifactId =
               action === "approve" ? input.slice("approve".length).trim() : undefined;

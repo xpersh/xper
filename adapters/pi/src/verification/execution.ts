@@ -16,7 +16,12 @@ interface Proposal {
   testCommands: string[];
   criteria: Array<Finding & { criterionId: string }>;
   review: { regressions: Finding; scope: Finding; simplicity: Finding };
-  rejection: null | { cause: string; evidence: string; paths: string[] };
+  rejection: null | {
+    cause: string;
+    evidence: string;
+    paths: string[];
+    knowledgeFeedback?: { reason: "ambiguous_criteria" | "infeasible_design" } | null;
+  };
 }
 
 const text = (value: unknown): value is string =>
@@ -103,11 +108,19 @@ function parseProposal(
   if (
     rejection !== null &&
     (!object(rejection) ||
-      !exactKeys(rejection, ["cause", "evidence", "paths"]) ||
+      (!exactKeys(rejection, ["cause", "evidence", "paths"]) &&
+        !exactKeys(rejection, ["cause", "evidence", "paths", "knowledgeFeedback"])) ||
       !text(rejection.cause) ||
       !text(rejection.evidence) ||
       !Array.isArray(rejection.paths) ||
-      !rejection.paths.every(relativePath))
+      !rejection.paths.every(relativePath) ||
+      (rejection.knowledgeFeedback !== undefined &&
+        rejection.knowledgeFeedback !== null &&
+        (!object(rejection.knowledgeFeedback) ||
+          !exactKeys(rejection.knowledgeFeedback, ["reason"]) ||
+          !["ambiguous_criteria", "infeasible_design"].includes(
+            String(rejection.knowledgeFeedback.reason),
+          ))))
   )
     throw new Error("Verifier rejection needs a cause and evidence");
   const failed = [
@@ -127,7 +140,15 @@ function parseProposal(
     testCommands: value.testCommands as string[],
     criteria: criterionFindings,
     review,
-    rejection: rejection as Proposal["rejection"],
+    rejection:
+      rejection === null
+        ? null
+        : ({
+            cause: rejection.cause,
+            evidence: rejection.evidence,
+            paths: rejection.paths,
+            knowledgeFeedback: rejection.knowledgeFeedback ?? null,
+          } as Proposal["rejection"]),
   };
 }
 
@@ -185,7 +206,7 @@ export async function runVerification(
     criteria,
     verification,
     inputArtifacts,
-  })}\n\nRead AGENTS.md, every supplied artifact, the referenced test logs, and the complete Git diff from baseCommit to evaluatedCommit. Independently check behavior, regressions, unrequested scope, and unnecessary complexity. Do not edit, write, commit, reset, clean, or repair anything. Return only JSON: {"schemaVersion":1,"verdict":"verified"|"rejected","testCommands":["additional exact command"],"criteria":[{"criterionId":"...","outcome":"passed"|"failed","evidence":"...","paths":["relative/path"]}],"review":{"regressions":{"outcome":"passed"|"failed","evidence":"...","paths":[]},"scope":{"outcome":"passed"|"failed","evidence":"...","paths":[]},"simplicity":{"outcome":"passed"|"failed","evidence":"...","paths":[]}},"rejection":null|{"cause":"...","evidence":"...","paths":[]}}. Do not report test exit statuses; the host runs the Implementer's commands first, then your additional commands.`;
+  })}\n\nRead AGENTS.md, every supplied artifact, the referenced test logs, and the complete Git diff from baseCommit to evaluatedCommit. Independently check behavior, regressions, unrequested scope, and unnecessary complexity. Do not edit, write, commit, reset, clean, or repair anything. Return only JSON: {"schemaVersion":1,"verdict":"verified"|"rejected","testCommands":["additional exact command"],"criteria":[{"criterionId":"...","outcome":"passed"|"failed","evidence":"...","paths":["relative/path"]}],"review":{"regressions":{"outcome":"passed"|"failed","evidence":"...","paths":[]},"scope":{"outcome":"passed"|"failed","evidence":"...","paths":[]},"simplicity":{"outcome":"passed"|"failed","evidence":"...","paths":[]}},"rejection":null|{"cause":"...","evidence":"...","paths":[],"knowledgeFeedback":null|{"reason":"ambiguous_criteria"|"infeasible_design"}}}. Use knowledgeFeedback only when the defect belongs to Define or Design; otherwise use null for implementation rework. Do not report test exit statuses; the host runs the Implementer's commands first, then your additional commands.`;
   const child = await dependencies.runChild(childTask, request.timeoutMs);
   if (child.outcome !== "succeeded") return child;
   if (request.signal.aborted) return { outcome: "cancelled", usage: child.usage };
@@ -254,6 +275,7 @@ export async function runVerification(
           .map((test) => `${test.command} exited ${test.exitCode}; see ${test.outputPath}`)
           .join("; "),
         paths: failedTests.map((test) => test.outputPath),
+        knowledgeFeedback: null,
       }
     : proposal.rejection;
   const brief = JSON.stringify({

@@ -63,8 +63,8 @@ export function validateWorkflowDefinition<StateId extends string>(
     edges.add(edge.id);
     if (!nodes.has(edge.from) || !nodes.has(edge.to))
       throw new Error("workflow edge references an unknown state");
-    if (nodes.get(edge.from)?.kind === "terminal")
-      throw new Error("terminal workflow states cannot have outgoing edges");
+    if (nodes.get(edge.from)?.kind === "terminal" && edge.kind !== "feedback")
+      throw new Error("terminal workflow states may only have feedback edges");
     if (
       !text(edge.event) ||
       !["forward", "feedback", "completion"].includes(edge.kind) ||
@@ -176,7 +176,7 @@ const feedbackGuards = [
 export const knowledgeDefinition = defineWorkflow<KnowledgeNodeId>({
   schemaVersion: 1,
   id: "pi.knowledge",
-  version: 1,
+  version: 2,
   initial: "discovery",
   nodes: knowledgeNodes,
   edges: [
@@ -310,6 +310,24 @@ export const knowledgeDefinition = defineWorkflow<KnowledgeNodeId>({
       reason: "oversized_story",
       guards: feedbackGuards,
     },
+    {
+      id: "feedback.ready.ambiguous-criteria",
+      from: "ready",
+      to: "define",
+      event: "feedback",
+      kind: "feedback",
+      reason: "ambiguous_criteria",
+      guards: feedbackGuards,
+    },
+    {
+      id: "feedback.ready.infeasible-design",
+      from: "ready",
+      to: "design",
+      event: "feedback",
+      kind: "feedback",
+      reason: "infeasible_design",
+      guards: feedbackGuards,
+    },
   ],
 });
 
@@ -413,7 +431,7 @@ export function nextPhase(phase: Phase): Phase | undefined {
 }
 
 export function feedbackTransition(
-  phase: Phase,
+  phase: KnowledgeNodeId,
   reason: string,
 ): WorkflowEdge<KnowledgeNodeId> | undefined {
   const transitions = outgoingTransitions(knowledgeDefinition, phase, "feedback").filter(

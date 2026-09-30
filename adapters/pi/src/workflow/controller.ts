@@ -40,11 +40,13 @@ import {
   toRunSummary,
   verifiedDeliveryTip,
   type AdapterCheckpoint,
+  type DeliveryReconciliation,
   type WorkflowState,
 } from "./state.js";
 import { WorkflowValidationError } from "./types.js";
 import type {
   AttemptFinished,
+  DeliveryResumed,
   FinishAttempt,
   ModelUsage,
   RoutingSnapshot,
@@ -57,6 +59,7 @@ import type {
   RemainingBudget,
 } from "./types.js";
 import {
+  parseVerificationResult,
   transitionVerification,
   verificationPosition,
   type VerificationState,
@@ -220,11 +223,30 @@ export class PiWorkflow implements WorkflowClient {
     if (this.state) this.state.knowledge = transition.state;
     else
       this.state = {
-        version: 4,
+        version: 5,
         knowledge: transition.state,
         implementations: {},
         verifications: {},
+        authorizedPlan: null,
+        reconciliations: [],
       };
+    const checkpoint = this.requireRun();
+    if (
+      transition.state.lifecycle.status === "completed" &&
+      checkpoint.authorizedPlan === null &&
+      checkpoint.reconciliations.length === 0 &&
+      !Object.keys(checkpoint.implementations).length &&
+      !Object.keys(checkpoint.verifications).length
+    ) {
+      const planId = transition.state.lifecycle.artifactId;
+      const plan = transition.state.artifacts[planId];
+      if (!plan) invalid("sealed Plan artifact is unavailable");
+      checkpoint.authorizedPlan = {
+        artifactId: planId,
+        digest: plan.digest,
+        baseCommit: null,
+      };
+    }
     if (!transition.facts.length) return structuredClone(transition.result);
     return this.persist(transition.facts, transition.result, now, knowledgeDefinition, {
       runId: transition.state.run_id,
@@ -291,6 +313,8 @@ export class PiWorkflow implements WorkflowClient {
             transitionVerification(verification, { type: "session.recover" }, now),
             now,
           );
+      await this.recoverKnowledgeFeedback(now);
+      await this.markReconciliationAwaiting(now);
     }
     this.journal.flush();
   }
@@ -300,6 +324,139 @@ export class PiWorkflow implements WorkflowClient {
   }
   private knowledge(): WorkflowState {
     return this.requireRun().knowledge;
+  }
+  private verificationFeedback(verification: VerificationState) {
+    if (verification.lifecycle.status !== "completed") return null;
+    const artifact = verification.artifacts[verification.lifecycle.artifactId];
+    if (!artifact?.knowledgeFeedbackReason) return null;
+    const attempt = verification.attempts[artifact.attemptId];
+    if (attempt?.outcome !== "succeeded")
+      invalid("knowledge feedback has no successful source attempt");
+    return { artifact, attemptId: artifact.attemptId, reason: artifact.knowledgeFeedbackReason };
+  }
+  private async applyKnowledgeFeedback(
+    verification: VerificationState,
+    now: number,
+  ): Promise<RunAdvanced | null> {
+    const feedback = this.verificationFeedback(verification);
+    if (!feedback) return null;
+    const checkpoint = this.requireRun();
+    const existing = checkpoint.reconciliations.find(
+      (candidate) => candidate.verificationArtifactId === feedback.artifact.artifact_id,
+    );
+    if (existing && checkpoint.knowledge.imports[feedback.artifact.artifact_id])
+      return {
+        advanced: true,
+        phase: feedback.reason === "ambiguous_criteria" ? "define" : "design",
+        resumed: true,
+      };
+    const evidence = await this.artifact(feedback.artifact.artifact_id);
+    const report = parseVerificationResult(evidence.content, verification);
+    const rejection = report.output.rejection;
+    if (!rejection?.knowledgeFeedback || rejection.knowledgeFeedback.reason !== feedback.reason)
+      invalid("verification feedback metadata does not match its artifact");
+    const transition = transitionKnowledge(
+      checkpoint.knowledge,
+      {
+        type: "delivery.feedback",
+        nextVisitId: this.id(),
+        sourceAttemptId: feedback.attemptId,
+        incrementId: verification.incrementId,
+        planArtifactId: verification.planArtifactId,
+        planDigest: verification.planDigest,
+        reason: feedback.reason,
+        evidence: rejection.evidence,
+        paths: rejection.paths,
+        artifact: {
+          artifact_id: feedback.artifact.artifact_id,
+          kind: feedback.artifact.kind,
+          path: feedback.artifact.path,
+          version: feedback.artifact.version,
+          digest: feedback.artifact.digest,
+        },
+      },
+      now,
+    );
+    if (!existing) {
+      checkpoint.reconciliations.push({
+        verificationArtifactId: feedback.artifact.artifact_id,
+        sourceAttemptId: feedback.attemptId,
+        incrementId: verification.incrementId,
+        reason: feedback.reason,
+        previousPlanArtifactId: verification.planArtifactId,
+        previousPlanDigest: verification.planDigest,
+        revisedPlanArtifactId: null,
+        invalidatedVerificationArtifactIds: [],
+        status: "revisiting",
+        resumeCommit: null,
+      });
+    }
+    return this.commitKnowledge(transition, now);
+  }
+  private async recoverKnowledgeFeedback(now: number): Promise<void> {
+    const checkpoint = this.requireRun();
+    for (const history of Object.values(checkpoint.verifications)) {
+      for (const verification of history) {
+        const feedback = this.verificationFeedback(verification);
+        if (!feedback || checkpoint.knowledge.imports[feedback.artifact.artifact_id]) continue;
+        await this.applyKnowledgeFeedback(verification, now);
+      }
+    }
+  }
+  private currentReconciliation(): DeliveryReconciliation | undefined {
+    return this.requireRun().reconciliations.findLast(
+      (candidate) => candidate.status !== "resumed",
+    );
+  }
+  private verifiedArtifactsForPlan(planArtifactId: string): string[] {
+    return Object.values(this.requireRun().verifications)
+      .flat()
+      .filter(
+        (verification) =>
+          verification.planArtifactId === planArtifactId &&
+          verification.lifecycle.status === "completed" &&
+          verification.lifecycle.verdict === "verified",
+      )
+      .map((verification) =>
+        verification.lifecycle.status === "completed" ? verification.lifecycle.artifactId : "",
+      );
+  }
+  private async markReconciliationAwaiting(now: number): Promise<boolean> {
+    const checkpoint = this.requireRun();
+    const reconciliation = this.currentReconciliation();
+    const knowledge = checkpoint.knowledge;
+    if (reconciliation?.status !== "revisiting") return false;
+    if (knowledge.lifecycle.status !== "completed") return false;
+    const revisedPlanArtifactId = knowledge.lifecycle.artifactId;
+    if (revisedPlanArtifactId === reconciliation.previousPlanArtifactId)
+      invalid("a Knowledge revisit must seal a new Plan artifact");
+    const invalidated = this.verifiedArtifactsForPlan(reconciliation.previousPlanArtifactId);
+    reconciliation.revisedPlanArtifactId = revisedPlanArtifactId;
+    reconciliation.invalidatedVerificationArtifactIds = invalidated;
+    reconciliation.status = "awaiting_resume";
+    const facts = [
+      ...invalidated.map((artifactId) => ({
+        type: "artifact.invalidated",
+        data: {
+          artifactId,
+          reasonArtifactId: reconciliation.verificationArtifactId,
+          reason: "revised Plan requires fresh delivery evidence",
+        },
+      })),
+      {
+        type: "delivery.reconciliation_required",
+        data: {
+          verificationArtifactId: reconciliation.verificationArtifactId,
+          previousPlanArtifactId: reconciliation.previousPlanArtifactId,
+          revisedPlanArtifactId,
+        },
+      },
+    ];
+    await this.persist(facts, undefined, now, knowledgeDefinition, {
+      runId: knowledge.run_id,
+      instanceId: knowledge.instanceId,
+    });
+    return true;
   }
   inspectProfile(): Promise<RoutingSnapshot | null> {
     return this.serial(async () =>
@@ -376,18 +533,39 @@ export class PiWorkflow implements WorkflowClient {
       concurrency: 1,
     };
   }
+  private assignmentHistory(
+    assignment: PlannedAssignment,
+    kind: "implementation" | "verification",
+  ): Array<ImplementationState | VerificationState> {
+    const histories =
+      kind === "implementation"
+        ? this.requireRun().implementations
+        : this.requireRun().verifications;
+    return Object.values(histories)
+      .flat()
+      .filter(
+        (state) =>
+          state.assignment.id === assignment.id && state.assignment.role === assignment.role,
+      );
+  }
   private deliveryFrontier(): DeliveryFrontier | null {
     const checkpoint = this.requireRun();
+    const planArtifactId = checkpoint.authorizedPlan?.artifactId;
+    if (!planArtifactId) return null;
     const frontiers: DeliveryFrontier[] = [];
     for (const [incrementId, history] of Object.entries(checkpoint.implementations)) {
-      const implementation = history.at(-1);
-      if (!implementation) invalid("implementation history is empty");
+      const implementation = history.findLast(
+        (candidate) => candidate.planArtifactId === planArtifactId,
+      );
+      if (!implementation) continue;
       if (implementation.lifecycle.status === "active") {
         frontiers.push({ kind: "implementation", implementation });
         continue;
       }
       const verification = (checkpoint.verifications[incrementId] ?? []).findLast(
-        (candidate) => candidate.implementation.instanceId === implementation.instanceId,
+        (candidate) =>
+          candidate.planArtifactId === planArtifactId &&
+          candidate.implementation.instanceId === implementation.instanceId,
       );
       if (!verification || verification.lifecycle.status === "active") {
         frontiers.push({
@@ -398,20 +576,27 @@ export class PiWorkflow implements WorkflowClient {
         continue;
       }
       if (verification.lifecycle.verdict === "rejected")
-        frontiers.push({ kind: "implementation", implementation, rejected: verification });
+        if (!this.verificationFeedback(verification))
+          frontiers.push({ kind: "implementation", implementation, rejected: verification });
     }
     if (frontiers.length > 1) invalid("delivery checkpoint has overlapping increment frontiers");
     return frontiers[0] ?? null;
   }
   private satisfiedAssignmentArtifacts(): Map<string, string> {
     const checkpoint = this.requireRun();
+    const planArtifactId = checkpoint.authorizedPlan?.artifactId;
     const satisfied = new Map<string, string>();
+    if (!planArtifactId) return satisfied;
     for (const [incrementId, history] of Object.entries(checkpoint.implementations)) {
-      const implementation = history.at(-1);
+      const implementation = history.findLast(
+        (candidate) => candidate.planArtifactId === planArtifactId,
+      );
       if (implementation?.lifecycle.status !== "completed") continue;
       satisfied.set(implementation.assignment.id, implementation.lifecycle.artifactId);
       const verification = (checkpoint.verifications[incrementId] ?? []).findLast(
-        (candidate) => candidate.implementation.instanceId === implementation.instanceId,
+        (candidate) =>
+          candidate.planArtifactId === planArtifactId &&
+          candidate.implementation.instanceId === implementation.instanceId,
       );
       if (verification?.lifecycle.status !== "completed") continue;
       if (verification.lifecycle.verdict !== "verified") continue;
@@ -422,6 +607,9 @@ export class PiWorkflow implements WorkflowClient {
   private async implementationHandoff(now: number) {
     const knowledge = this.knowledge();
     if (knowledge.lifecycle.status !== "completed") invalid("the execution Plan is not sealed");
+    const authorized = this.requireRun().authorizedPlan;
+    if (!authorized || knowledge.accepted.plan !== authorized.artifactId)
+      invalid("the revised Plan requires /xper resume <commit> before delivery");
     const documents: Partial<Record<string, ReturnType<typeof parseDocument>>> = {};
     for (const [phase, id] of Object.entries(knowledge.accepted)) {
       const artifact = knowledge.artifacts[id];
@@ -467,10 +655,12 @@ export class PiWorkflow implements WorkflowClient {
         planArtifact,
         inputs,
         inputArtifacts: inputs.map((id) => this.artifactInput(id)),
-        expectedBaseCommit: verifiedDeliveryTip(
-          this.requireRun().implementations,
-          this.requireRun().verifications,
-        ),
+        expectedBaseCommit:
+          verifiedDeliveryTip(
+            this.requireRun().implementations,
+            this.requireRun().verifications,
+            planArtifact.artifact_id,
+          ) ?? authorized.baseCommit,
       };
     } catch (error) {
       if (
@@ -489,6 +679,8 @@ export class PiWorkflow implements WorkflowClient {
     if (knowledge.lifecycle.status !== "completed") invalid("the execution Plan is not sealed");
     if (implementation.lifecycle.status !== "completed")
       invalid("the increment has not produced an implementation result");
+    if (implementation.planArtifactId !== this.requireRun().authorizedPlan?.artifactId)
+      invalid("verification cannot use an implementation from a stale Plan");
     const documents: Partial<Record<string, ReturnType<typeof parseDocument>>> = {};
     for (const [phase, id] of Object.entries(knowledge.accepted)) {
       const artifact = knowledge.artifacts[id];
@@ -526,8 +718,9 @@ export class PiWorkflow implements WorkflowClient {
       if (!planArtifact) invalid("sealed Plan artifact is unavailable");
       const inputs = [...new Set([...implementation.assignment.inputs, implementationArtifactId])];
       const rootBaseCommit =
-        this.requireRun().implementations[implementation.incrementId]?.[0]?.baseCommit ??
-        implementation.baseCommit;
+        this.requireRun().implementations[implementation.incrementId]?.find(
+          (candidate) => candidate.planArtifactId === implementation.planArtifactId,
+        )?.baseCommit ?? implementation.baseCommit;
       return {
         ...handoff,
         planArtifact,
@@ -553,12 +746,20 @@ export class PiWorkflow implements WorkflowClient {
       const knowledge = this.knowledge();
       if (knowledge.lifecycle.status === "completed") {
         const checkpoint = this.requireRun();
+        const acceptedPlanId = knowledge.accepted.plan;
+        if (!checkpoint.authorizedPlan || checkpoint.authorizedPlan.artifactId !== acceptedPlanId)
+          invalid("the revised Plan requires /xper resume <commit> before delivery");
+        if (this.currentReconciliation()?.status === "awaiting_resume")
+          invalid("the revised Plan requires /xper resume <commit> before delivery");
+        const activePlanId = checkpoint.authorizedPlan.artifactId;
         const nowBeforeEvidence = this.now();
         const frontier = this.deliveryFrontier();
 
         if (frontier?.kind === "verification") {
           const { implementation, verification: verificationForLatest } = frontier;
-          const verificationHistory = checkpoint.verifications[implementation.incrementId] ?? [];
+          const verificationHistory = (
+            checkpoint.verifications[implementation.incrementId] ?? []
+          ).filter((candidate) => candidate.planArtifactId === activePlanId);
           const handoff = verificationForLatest
             ? {
                 assignment: verificationForLatest.assignment,
@@ -608,7 +809,7 @@ export class PiWorkflow implements WorkflowClient {
                 attemptCostMicros: knowledge.policy.attemptCostMicros,
                 assignmentBudget: this.assignmentBudget(
                   handoff.assignment,
-                  verificationHistory,
+                  this.assignmentHistory(handoff.assignment, "verification"),
                   now,
                 ),
                 globalBudget: this.runBudget(now),
@@ -631,7 +832,9 @@ export class PiWorkflow implements WorkflowClient {
           : null;
         const incrementId = initialHandoff?.incrementId ?? latestImplementation?.incrementId;
         if (!incrementId) invalid("implementation increment is unavailable");
-        const implementationHistory = checkpoint.implementations[incrementId] ?? [];
+        const implementationHistory = (checkpoint.implementations[incrementId] ?? []).filter(
+          (candidate) => candidate.planArtifactId === activePlanId,
+        );
         const planArtifact =
           initialHandoff?.planArtifact ??
           knowledge.artifacts[
@@ -713,7 +916,7 @@ export class PiWorkflow implements WorkflowClient {
               attemptCostMicros: knowledge.policy.attemptCostMicros,
               assignmentBudget: this.assignmentBudget(
                 plannedAssignment,
-                implementationHistory,
+                this.assignmentHistory(plannedAssignment, "implementation"),
                 now,
               ),
               globalBudget: this.runBudget(now),
@@ -746,6 +949,8 @@ export class PiWorkflow implements WorkflowClient {
     const checkpoint = this.requireRun();
     const knowledge = checkpoint.knowledge.artifacts[id];
     if (knowledge) return knowledge;
+    const imported = checkpoint.knowledge.imports[id];
+    if (imported) return imported;
     for (const history of Object.values(checkpoint.implementations))
       for (const implementation of history) {
         const artifact = implementation.artifacts[id];
@@ -793,19 +998,23 @@ export class PiWorkflow implements WorkflowClient {
             invalid(error instanceof Error ? error.message : "invalid verification evidence");
           }
         }
-        return this.commitVerification(
-          transitionVerification(
-            verification,
-            {
-              type: "attempt.finish",
-              result,
-              artifactId: this.id(),
-              ...(evidence ? { evidence } : {}),
-            },
-            now,
-          ),
+        const transition = transitionVerification(
+          verification,
+          {
+            type: "attempt.finish",
+            result,
+            artifactId: this.id(),
+            ...(evidence ? { evidence } : {}),
+          },
           now,
         );
+        const settled = await this.commitVerification(transition, now);
+        const handoff = await this.applyKnowledgeFeedback(transition.state, now);
+        const handoffPhase =
+          handoff?.phase === "define" || handoff?.phase === "design" ? handoff.phase : undefined;
+        return handoffPhase && settled.outcome === "succeeded"
+          ? { ...settled, handoffPhase }
+          : settled;
       }
       if (implementation) {
         let evidence: Evidence | undefined;
@@ -880,7 +1089,7 @@ export class PiWorkflow implements WorkflowClient {
       const state = this.knowledge();
       const evidence = await this.gateEvidence(state);
       const now = this.now();
-      return this.commitKnowledge(
+      const result = await this.commitKnowledge(
         transitionKnowledge(
           state,
           {
@@ -892,6 +1101,71 @@ export class PiWorkflow implements WorkflowClient {
           now,
         ),
         now,
+      );
+      const resumeRequired = await this.markReconciliationAwaiting(now);
+      return resumeRequired ? { ...result, resumeRequired: true } : result;
+    });
+  }
+  resumeDelivery(revision: string): Promise<DeliveryResumed> {
+    return this.serial(async () => {
+      if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(revision))
+        invalid("provide a full lowercase Git commit hash");
+      const checkpoint = this.requireRun();
+      const reconciliation = checkpoint.reconciliations.at(-1);
+      if (!reconciliation) invalid("there is no revised Plan awaiting resumption");
+      if (reconciliation.status === "resumed") {
+        if (reconciliation.resumeCommit !== revision)
+          invalid("delivery has already resumed from a different checkout revision");
+        return {
+          planArtifactId: reconciliation.revisedPlanArtifactId as string,
+          checkoutRevision: revision,
+          replayed: true,
+        };
+      }
+      if (
+        reconciliation.status !== "awaiting_resume" ||
+        !reconciliation.revisedPlanArtifactId ||
+        checkpoint.knowledge.lifecycle.status !== "completed" ||
+        checkpoint.knowledge.lifecycle.artifactId !== reconciliation.revisedPlanArtifactId
+      )
+        invalid("finish and seal the Knowledge revisit before resuming delivery");
+      const workspace = await this.inspectWorkspace(this.cwd);
+      if (!workspace.clean) invalid("delivery resumption requires a clean dedicated checkout");
+      if (workspace.head !== revision)
+        invalid("delivery resumption revision does not match the checkout HEAD");
+      const plan = checkpoint.knowledge.artifacts[reconciliation.revisedPlanArtifactId];
+      if (!plan) invalid("revised Plan artifact is unavailable");
+      reconciliation.status = "resumed";
+      reconciliation.resumeCommit = revision;
+      checkpoint.authorizedPlan = {
+        artifactId: reconciliation.revisedPlanArtifactId,
+        digest: plan.digest,
+        baseCommit: revision,
+      };
+      const now = this.now();
+      return this.persist(
+        [
+          {
+            type: "delivery.resumed",
+            data: {
+              verificationArtifactId: reconciliation.verificationArtifactId,
+              previousPlanArtifactId: reconciliation.previousPlanArtifactId,
+              planArtifactId: reconciliation.revisedPlanArtifactId,
+              checkoutRevision: revision,
+            },
+          },
+        ],
+        {
+          planArtifactId: reconciliation.revisedPlanArtifactId,
+          checkoutRevision: revision,
+          replayed: false,
+        },
+        now,
+        knowledgeDefinition,
+        {
+          runId: checkpoint.knowledge.run_id,
+          instanceId: checkpoint.knowledge.instanceId,
+        },
       );
     });
   }
@@ -963,6 +1237,7 @@ export class PiWorkflow implements WorkflowClient {
   getRunStatus(): Promise<RunStatus> {
     return this.serial(async () => {
       this.journal.flush();
+      const reconciliation = this.state?.reconciliations.at(-1);
       return {
         run: this.state ? toRunSummary(this.state.knowledge) : null,
         ...(this.state ? { workflow: workflowPosition(this.state.knowledge) } : {}),
@@ -990,6 +1265,22 @@ export class PiWorkflow implements WorkflowClient {
           : {}),
         timeline: structuredClone(this.timeline),
         durability: this.journal.durability,
+        ...(reconciliation
+          ? {
+              reconciliation: {
+                status: reconciliation.status,
+                reason: reconciliation.reason,
+                verificationArtifactId: reconciliation.verificationArtifactId,
+                previousPlanArtifactId: reconciliation.previousPlanArtifactId,
+                ...(reconciliation.revisedPlanArtifactId
+                  ? { revisedPlanArtifactId: reconciliation.revisedPlanArtifactId }
+                  : {}),
+                ...(reconciliation.resumeCommit
+                  ? { resumeCommit: reconciliation.resumeCommit }
+                  : {}),
+              },
+            }
+          : {}),
         ...(this.journal.problem ? { degradedReason: this.journal.problem } : {}),
       };
     });

@@ -81,12 +81,27 @@ for (const fixture of read("fixtures/verification-v1.json")) {
     !validateVerification({ ...fixture.artifact, schemaVersion: 2 }),
     "reject unsupported verification artifact versions",
   );
-  const mismatched = structuredClone(fixture.artifact);
-  mismatched.output.verdict = "rejected";
-  assert(!validateVerification(mismatched), "rejected verification needs rejection evidence");
-  const failedApproval = structuredClone(fixture.artifact);
-  failedApproval.output.tests[0].exitCode = 1;
-  assert(!validateVerification(failedApproval), "verified review cannot hide a failed host test");
+  if (fixture.artifact.output.verdict === "verified") {
+    const mismatched = structuredClone(fixture.artifact);
+    mismatched.output.verdict = "rejected";
+    assert(!validateVerification(mismatched), "rejected verification needs rejection evidence");
+    const failedApproval = structuredClone(fixture.artifact);
+    failedApproval.output.tests[0].exitCode = 1;
+    assert(!validateVerification(failedApproval), "verified review cannot hide a failed host test");
+  } else if (fixture.artifact.output.rejection?.knowledgeFeedback) {
+    const historical = structuredClone(fixture.artifact);
+    delete historical.output.rejection.knowledgeFeedback;
+    assert(validateVerification(historical), "accept historical verification-v1 rejection");
+    const unknownFeedback = structuredClone(fixture.artifact);
+    unknownFeedback.output.rejection.knowledgeFeedback.reason = "missing_context";
+    assert(!validateVerification(unknownFeedback), "reject unsupported delivery feedback target");
+    const malformedFeedback = structuredClone(fixture.artifact);
+    malformedFeedback.output.rejection.knowledgeFeedback = "ambiguous_criteria";
+    assert(!validateVerification(malformedFeedback), "reject non-object delivery feedback");
+    const extendedFeedback = structuredClone(fixture.artifact);
+    extendedFeedback.output.rejection.knowledgeFeedback.extra = true;
+    assert(!validateVerification(extendedFeedback), "reject unknown delivery feedback fields");
+  }
   const unsupportedCommit = structuredClone(fixture.artifact);
   unsupportedCommit.output.evaluatedCommit = "not-a-commit";
   assert(!validateVerification(unsupportedCommit), "reject malformed evaluated commits");

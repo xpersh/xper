@@ -74,12 +74,13 @@ pure transition function. Each reducer owns its state changes and decisions and
 returns the next state, result, and facts. Local persistence and agent execution
 stay outside them; neither reducer nor its guards consult Rust.
 
-The `pi.knowledge` definition at version 1 declares the five knowledge nodes
-and a terminal ready node, with stable IDs and explicit edges. Execution reads
-those edges; phase-array order is not a second transition rule. Domain guards
-still validate budgets, approvals, and evidence before taking an edge. The JSON
-definition describes possible paths, not an executable replacement for those
-rules.
+The `pi.knowledge` definition at version 2 declares the five knowledge nodes
+and a terminal ready node, with stable IDs and explicit edges. Its only outgoing
+terminal edges are delivery feedback from `ready` to Define or Design. Execution
+reads those edges; phase-array order is not a second transition rule. Domain
+guards still validate budgets, approvals, and evidence before taking an edge.
+The JSON definition describes possible paths, not an executable replacement for
+those rules.
 
 State carries a definition reference and workflow instance ID. New runs generate
 a separate instance ID; migrated format-1 checkpoints retain the run ID as their
@@ -87,7 +88,10 @@ instance ID for historical stability. Its lifecycle is
 `active`, `awaiting_approval` with the exact visit and artifact, or `completed`
 with the sealed Plan artifact. Phase visits and per-attempt outcomes remain
 separate. Compatibility fields such as `human_input` and `ready` are derived for
-presentation, not independent mutable state.
+presentation, not independent mutable state. Knowledge state version 3 adds
+imported references to artifacts owned by another flow; these references make a
+Verification result a stable revisit input without copying it into Knowledge's
+artifact registry.
 
 Knowledge completion hands off the sealed Plan to a separate
 `pi.implementation` definition at version 1. Each instance is keyed by increment
@@ -95,10 +99,12 @@ and transitions from `implement` to terminal `implemented` only after host-owned
 Git and test checks pass. This composition does not expand the Knowledge phase
 enum or imply product acceptance. Its exact result then hands off to a
 `pi.verification` v1 instance, which transitions from `verify` to terminal
-`verified` or `rejected`. Rejection makes a fresh Implementation instance
-eligible while retaining both histories and consumed budgets. Verification does
-not close the run. After a verified result, another explicit delegation selects
-the next Plan-eligible increment; verifying them all makes Judgment Day eligible.
+`verified` or `rejected`. An ordinary rejection makes a fresh Implementation
+instance eligible while retaining both histories and consumed budgets. Structured
+criteria/design feedback instead reopens the same Knowledge instance and starts
+a reconciliation between its historical and revised Plans. Verification does not
+close the run. After a verified result, another explicit delegation selects the
+next Plan-eligible increment; verifying them all makes Judgment Day eligible.
 [XP-015](../../../docs/tasks/015-workflow-visualization.md) tracks a read-only UI
 combining the versioned graph with reported positions and history, including
 incomplete recording. Rust preserves those facts without running the machine.
@@ -123,10 +129,10 @@ node `ready` while retaining the final `plan` phase and visit; it does not creat
 a sixth phase visit. The compatibility `run.status` value `ready` likewise does
 not claim final acceptance or run closure.
 
-Local `getRunStatus()` exposes Knowledge in `workflow` and the latest Implementation
+Local `getRunStatus()` exposes Knowledge in `workflow`, the latest Implementation
 and Verification positions in the increment-keyed `implementations` and
-`verifications` maps, alongside the derived
-compatibility run fields. Rust retains these observations as
+`verifications` maps, and the current reconciliation status, alongside the
+derived compatibility run fields. Rust retains these observations as
 opaque data; a future consumer resolves the exact definition reference and edge
 IDs. Repeated definition reports are not new workflow versions. Existing history
 may lack these facts, and a read-only inspection does not backfill them.
@@ -146,7 +152,10 @@ public delivery tool exists.
 Pi validates the artifact and evaluates the owning gate after success.
 `/xper advance` reevaluates the gate; `/xper approve <artifactId>` supplies an
 explicit user decision for a pending human gate. The delegation tool never
-grants human approval.
+grants human approval. After a revised Plan is sealed, `/xper resume <commit>`
+records the explicit delivery base only if the dedicated checkout is clean and
+already at that full 40- or 64-character Git hash. It does not modify Git, and
+`xper_delegate` never makes this decision implicitly.
 
 Discovery retains its Markdown Brief. Define through Plan use versioned JSON
 artifacts. Feedback can revisit the responsible phase; accepted evidence is
@@ -180,11 +189,31 @@ The verification runner executes Implementation commands first and deduplicated
 Verifier additions second. It records real exit codes and bounded logs and
 checks the evaluated tree and `HEAD` after both the agent and each command under
 one deadline. Mutation fails the attempt without cleanup. Host failures can
-override a proposed approval to the canonical `rejected` verdict. A domain
-rejection is a successfully executed review: the reducer records its cause,
-evidence, invalidated Implementation artifact, and rework request. A later
+override a proposed approval or Knowledge classification to the canonical
+Implementation `rejected` verdict. A domain rejection is a successfully executed
+review: the reducer records its cause, evidence, and invalidated Implementation
+artifact. Without Knowledge feedback it also emits a rework request, and a later
 explicit delegation creates a new Implementation instance based on the rejected
-commit; a new review targets only its new artifact and commit.
+commit. A new review targets only its new artifact and commit.
+
+When host checks pass, rejection may instead contain exactly one
+`knowledgeFeedback.reason`: `ambiguous_criteria` or `infeasible_design`. The
+Verification commit and `knowledge.feedback_requested` fact are persisted first.
+The controller then supplies a pure `delivery.feedback` event to Knowledge, which
+imports the Verification artifact reference, invalidates accepted evidence from
+Define or Design, creates one revisit, and traverses the declared v2 edge. The
+artifact identity makes replay idempotent; recovery completes only a missing
+handoff and never invokes an agent or Rust. While revisiting, no delivery against
+the old Plan is admitted.
+
+Sealing the revised Plan records an `awaiting_resume` reconciliation and emits
+one invalidation for every previously verified artifact from the old Plan. Those
+histories remain inspectable, but only the currently authorized Plan contributes
+to delivery frontier, dependencies, or the sequential commit tip. Resumption
+authorizes the revised Plan at the chosen existing checkout commit; all
+Implementation and Verification evidence must then be produced again. Global
+budgets and historical attempts for an unchanged assignment ID and role remain
+cumulative.
 
 After verification succeeds, the next explicit delegation starts another
 eligible increment in the same checkout. Its inputs include accepted Knowledge
@@ -257,16 +286,18 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
-Checkpoint envelope format 4 contains the unchanged Knowledge v2 state and
-increment-keyed ordered histories of Implementation v1 and Verification v1
-instances. Pi migrates valid Knowledge
-format-1 and format-2 checkpoints in memory, preserving identities, evidence,
-and pending events. Envelope format 3 wraps each Implementation as its first
-history entry. Reading alone does not rewrite the checkpoint; the next local
-commit with facts writes format 4. Unknown definitions, duplicate identities,
-or inconsistent run, Plan, artifact, digest, base, commit, history, sequential
-commit chain, or single-frontier references are rejected rather than guessed.
-This envelope change does not change an existing workflow definition version.
+Checkpoint envelope format 5 contains Knowledge v3, increment-keyed ordered
+histories of Implementation v1 and Verification v1 instances, the currently
+authorized Plan, and sequential delivery reconciliations. Each historical flow
+is validated against the Plan identity and digest that created it. Only the
+authorized Plan contributes to current frontier, dependency satisfaction, and
+the sequential commit tip. Pi migrates valid Knowledge v1/v2 states and envelope
+formats 1 through 4 in memory, preserving identities, visits, attempts, artifacts,
+budgets, and pending events. Reading alone does not rewrite the checkpoint; the
+next local commit with facts writes format 5. Unknown definitions, duplicate
+identities, or inconsistent run, Plan, artifact, digest, base, commit, history,
+reconciliation, sequential commit chain, or single-frontier references are
+rejected rather than guessed.
 
 A checkpoint is metadata-only adapter state. It excludes prompts and artifact
 contents; those artifacts remain files. Small checkpoints use `adapter.state`.
@@ -294,7 +325,9 @@ this means their execution outcome is unknown. The core never manufactures
 that outcome merely by reopening SQLite. Implementation and Verification
 recovery preserve the checkout and require the matching assignment ID before
 retry, reusing the frozen model, Plan, inputs, Git revision, and cumulative
-budgets. Recovery never launches a child automatically.
+budgets. Recovery also finishes a persisted Verification-to-Knowledge handoff,
+retains an active revisit, and preserves `awaiting_resume` or an applied resume
+decision. Recovery never launches a child automatically or consults Rust.
 
 Legacy core-owned runs lack a Pi checkpoint. They remain inspectable through
 `xper status`, but do not resume as a local Pi workflow. A new local run does

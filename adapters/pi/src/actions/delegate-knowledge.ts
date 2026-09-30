@@ -175,7 +175,11 @@ export async function delegateKnowledge(
       .then(() => workflow.recordUsage?.(attemptId, usage))
       .catch(() => observe({ type: "recording.failed", attemptId }));
   }
-  const phase = gate?.phase ?? started.phase ?? (delivery ? started.workflow : "discovery");
+  const phase =
+    settled.handoffPhase ??
+    gate?.phase ??
+    started.phase ??
+    (delivery ? started.workflow : "discovery");
   return {
     attemptId,
     outcome: settled.outcome,

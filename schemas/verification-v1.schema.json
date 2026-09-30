@@ -52,6 +52,12 @@
                 "paths": {
                   "type": "array",
                   "items": { "$ref": "#/$defs/relativePath" }
+                },
+                "knowledgeFeedback": {
+                  "oneOf": [
+                    { "type": "null" },
+                    { "$ref": "#/$defs/knowledgeFeedback" }
+                  ]
                 }
               },
               "required": ["cause", "evidence", "paths"],
@@ -207,6 +213,16 @@
         }
       },
       "required": ["criterionId", "outcome", "evidence", "paths"],
+      "additionalProperties": false
+    },
+    "knowledgeFeedback": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "enum": ["ambiguous_criteria", "infeasible_design"]
+        }
+      },
+      "required": ["reason"],
       "additionalProperties": false
     },
     "relativePath": {

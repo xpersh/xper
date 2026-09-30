@@ -62,7 +62,10 @@ function startEvent(
   };
 }
 
-function report(verdict: "verified" | "rejected" = "verified") {
+function report(
+  verdict: "verified" | "rejected" = "verified",
+  knowledgeFeedback?: "ambiguous_criteria" | "infeasible_design",
+) {
   const failed = verdict === "rejected";
   return {
     content: JSON.stringify({
@@ -101,7 +104,12 @@ function report(verdict: "verified" | "rejected" = "verified") {
           },
         },
         rejection: failed
-          ? { cause: "criterion failed", evidence: "Observed mismatch", paths: ["src/change.ts"] }
+          ? {
+              cause: "criterion failed",
+              evidence: "Observed mismatch",
+              paths: ["src/change.ts"],
+              ...(knowledgeFeedback ? { knowledgeFeedback: { reason: knowledgeFeedback } } : {}),
+            }
           : null,
       },
     }),
@@ -176,6 +184,37 @@ test("a valid rejection completes review and records explicit rework evidence", 
   assert.deepEqual(decodeVerificationState(finished.state), finished.state);
 });
 
+test("a Knowledge rejection records its exact source without requesting implementation rework", () => {
+  const started = transitionVerification(null, startEvent(), 100);
+  const finished = transitionVerification(
+    started.state,
+    {
+      type: "attempt.finish",
+      result: { attemptId: "v1", outcome: "succeeded", artifactPath },
+      artifactId: "knowledge-feedback",
+      evidence: report("rejected", "ambiguous_criteria"),
+    },
+    200,
+  );
+  assert.equal(
+    finished.state.artifacts["knowledge-feedback"]?.knowledgeFeedbackReason,
+    "ambiguous_criteria",
+  );
+  const request = finished.facts.find((fact) => fact.type === "knowledge.feedback_requested");
+  assert.deepEqual(request?.data, {
+    sourceAttemptId: "v1",
+    incrementId: "s1",
+    planArtifactId: "plan",
+    planDigest: "sealed-plan",
+    verificationArtifactId: "knowledge-feedback",
+    reason: "ambiguous_criteria",
+    evidence: "Observed mismatch",
+    paths: ["src/change.ts"],
+  });
+  assert(!finished.facts.some((fact) => fact.type === "implementation.rework_requested"));
+  assert.deepEqual(decodeVerificationState(finished.state), finished.state);
+});
+
 test("malformed or inconsistent verification evidence cannot complete a gate", () => {
   const started = transitionVerification(null, startEvent(), 100);
   const inconsistent = report();
@@ -191,6 +230,27 @@ test("malformed or inconsistent verification evidence cannot complete a gate", (
           result: { attemptId: "v1", outcome: "succeeded", artifactPath },
           artifactId: "invalid",
           evidence: inconsistent,
+        },
+        200,
+      ),
+    /inconsistent/,
+  );
+
+  const unsupported = report("rejected", "ambiguous_criteria");
+  const unsupportedDocument = JSON.parse(unsupported.content) as {
+    output: { rejection: { knowledgeFeedback: { reason: string } } };
+  };
+  unsupportedDocument.output.rejection.knowledgeFeedback.reason = "missing_context";
+  unsupported.content = JSON.stringify(unsupportedDocument);
+  assert.throws(
+    () =>
+      transitionVerification(
+        started.state,
+        {
+          type: "attempt.finish",
+          result: { attemptId: "v1", outcome: "succeeded", artifactPath },
+          artifactId: "unsupported-feedback",
+          evidence: unsupported,
         },
         200,
       ),

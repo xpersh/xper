@@ -425,3 +425,73 @@ test("approval and feedback transitions follow the published graph and preserve 
   assert.equal(position.data.instanceId, "gates-knowledge");
   assert.equal(position.data.nodeId, "discovery");
 });
+
+test("delivery feedback reopens ready Knowledge exactly once and invalidates downstream acceptance", async (t) => {
+  for (const [reason, target, retained] of [
+    ["ambiguous_criteria", "define", ["discovery"]],
+    ["infeasible_design", "design", ["discovery", "define"]],
+  ] as const) {
+    await t.test(`${reason} reopens ${target}`, () => {
+      const ready = start(`delivery-${target}`);
+      ready.visits.push({ id: `${target}-plan`, phase: "plan" });
+      for (const phase of ["discovery", "define", "design", "breakdown", "plan"] as const) {
+        const artifactId = `${target}-${phase}-artifact`;
+        ready.artifacts[artifactId] = {
+          artifact_id: artifactId,
+          attemptId: `${target}-${phase}-attempt`,
+          kind: phase === "plan" ? "execution_plan" : `${phase}_artifact`,
+          path: `.xper/artifacts/${phase}-${target}.json`,
+          version: 1,
+          digest: `${phase}-${target}-digest`,
+          inputs: [],
+        };
+        ready.accepted[phase] = artifactId;
+      }
+      const planId = ready.accepted.plan;
+      assert(planId);
+      ready.lifecycle = { status: "completed", artifactId: planId };
+      const event = {
+        type: "delivery.feedback" as const,
+        nextVisitId: `${target}-revisit`,
+        sourceAttemptId: `${target}-verification-attempt`,
+        incrementId: "s1",
+        planArtifactId: planId,
+        planDigest: ready.artifacts[planId]?.digest ?? "",
+        reason,
+        evidence: "The sealed contract cannot be verified as written",
+        paths: ["src/change.ts"],
+        artifact: {
+          artifact_id: `${target}-verification-artifact`,
+          kind: "verification_result",
+          path: `.xper/artifacts/verification-result-${target}.json`,
+          version: 1,
+          digest: `${target}-verification-digest`,
+        },
+      };
+      const revisited = transitionKnowledge(ready, event, 500);
+      assertEdge(revisited.facts, "ready", target);
+      assert.equal(revisited.state.feedback, event.artifact.artifact_id);
+      assert.equal(revisited.state.visits.at(-1)?.phase, target);
+      assert.deepEqual(Object.keys(revisited.state.accepted), retained);
+      assert.equal(
+        revisited.facts.filter((fact) => fact.type === "artifact.invalidated").length,
+        target === "define" ? 4 : 3,
+      );
+      const replay = transitionKnowledge(revisited.state, event, 510);
+      assert.equal(replay.facts.length, 0);
+      assert.throws(
+        () =>
+          transitionKnowledge(
+            revisited.state,
+            {
+              ...event,
+              nextVisitId: `${target}-other-revisit`,
+              artifact: { ...event.artifact, artifact_id: `${target}-other-feedback` },
+            },
+            520,
+          ),
+        /finish the current Knowledge revisit/,
+      );
+    });
+  }
+});

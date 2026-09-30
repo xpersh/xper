@@ -94,9 +94,15 @@ export type FinishAttempt = { attemptId: string } & (
 export type AttemptFinished = { attemptId: string; outcome: AttemptOutcome } & (
   | { replayed: true }
   | { replayed?: false; artifactId: string | null; workflowCompleted?: boolean }
-);
+) & {
+    handoffPhase?: "define" | "design";
+  };
 
-export type RunAdvanced = { ready?: boolean; humanArtifactId?: string } & (
+export type RunAdvanced = {
+  ready?: boolean;
+  humanArtifactId?: string;
+  resumeRequired?: boolean;
+} & (
   | { advanced: true; phase: string; resumed?: boolean }
   | { advanced: false; phase: string; reason: string }
 );
@@ -134,6 +140,20 @@ export interface RunStatus {
   timeline: unknown[];
   durability: "persistent" | "volatile";
   degradedReason?: string | null;
+  reconciliation?: {
+    status: "revisiting" | "awaiting_resume" | "resumed";
+    reason: "ambiguous_criteria" | "infeasible_design";
+    verificationArtifactId: string;
+    previousPlanArtifactId: string;
+    revisedPlanArtifactId?: string;
+    resumeCommit?: string;
+  };
+}
+
+export interface DeliveryResumed {
+  planArtifactId: string;
+  checkoutRevision: string;
+  replayed: boolean;
 }
 
 /** Workflow operations available to adapter actions, independent of the transport. */
@@ -144,6 +164,7 @@ export interface WorkflowClient {
   startAssignment(assignmentId?: string, fallbackModel?: string): Promise<StartedAssignment>;
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;
   advanceRun(approvedArtifactId?: string): Promise<RunAdvanced>;
+  resumeDelivery(revision: string): Promise<DeliveryResumed>;
   getRunStatus(): Promise<RunStatus>;
 }
 

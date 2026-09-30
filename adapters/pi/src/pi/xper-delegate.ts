@@ -47,7 +47,7 @@ export function registerXperDelegate(
         content: [
           {
             type: "text",
-            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
+            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.resumeRequired ? "; resume revised delivery with /xper resume <commit>" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
           },
         ],
         details: { attemptId, outcome, phase, incrementId, artifactId },

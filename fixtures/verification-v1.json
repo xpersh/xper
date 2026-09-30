@@ -54,5 +54,89 @@
         "rejection": null
       }
     }
+  },
+  {
+    "name": "ambiguous criterion returns to Define",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": ["plan-1", "implementation-1"],
+      "output": {
+        "kind": "verification_result",
+        "assignmentId": "verifier",
+        "incrementId": "s1",
+        "implementationArtifactId": "implementation-1",
+        "baseCommit": "1111111111111111111111111111111111111111",
+        "evaluatedCommit": "2222222222222222222222222222222222222222",
+        "verdict": "rejected",
+        "tests": [
+          {
+            "command": "npm test -- greeting",
+            "exitCode": 0,
+            "outputPath": ".xper/artifacts/test-output-verification-define-1.log"
+          }
+        ],
+        "criteria": [
+          {
+            "criterionId": "c1",
+            "outcome": "failed",
+            "evidence": "The expected greeting is ambiguous.",
+            "paths": ["src/greeting.test.ts"]
+          }
+        ],
+        "review": {
+          "regressions": { "outcome": "passed", "evidence": "The suite passes.", "paths": [] },
+          "scope": { "outcome": "passed", "evidence": "The diff is focused.", "paths": ["src/greeting.ts"] },
+          "simplicity": { "outcome": "passed", "evidence": "The change is direct.", "paths": ["src/greeting.ts"] }
+        },
+        "rejection": {
+          "cause": "criterion cannot be interpreted uniquely",
+          "evidence": "Two outputs satisfy the current wording.",
+          "paths": ["src/greeting.test.ts"],
+          "knowledgeFeedback": { "reason": "ambiguous_criteria" }
+        }
+      }
+    }
+  },
+  {
+    "name": "infeasible design returns to Design",
+    "artifact": {
+      "schemaVersion": 1,
+      "inputs": ["plan-1", "implementation-1"],
+      "output": {
+        "kind": "verification_result",
+        "assignmentId": "verifier",
+        "incrementId": "s1",
+        "implementationArtifactId": "implementation-1",
+        "baseCommit": "1111111111111111111111111111111111111111",
+        "evaluatedCommit": "2222222222222222222222222222222222222222",
+        "verdict": "rejected",
+        "tests": [
+          {
+            "command": "npm test -- greeting",
+            "exitCode": 0,
+            "outputPath": ".xper/artifacts/test-output-verification-design-1.log"
+          }
+        ],
+        "criteria": [
+          {
+            "criterionId": "c1",
+            "outcome": "failed",
+            "evidence": "The selected interface cannot expose the required behavior.",
+            "paths": ["src/greeting.ts"]
+          }
+        ],
+        "review": {
+          "regressions": { "outcome": "passed", "evidence": "The suite passes.", "paths": [] },
+          "scope": { "outcome": "passed", "evidence": "The diff is focused.", "paths": ["src/greeting.ts"] },
+          "simplicity": { "outcome": "passed", "evidence": "The change is direct.", "paths": ["src/greeting.ts"] }
+        },
+        "rejection": {
+          "cause": "the selected interface is infeasible",
+          "evidence": "The required data is unavailable at that boundary.",
+          "paths": ["src/greeting.ts"],
+          "knowledgeFeedback": { "reason": "infeasible_design" }
+        }
+      }
+    }
   }
 ]

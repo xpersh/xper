@@ -198,6 +198,7 @@ test("topology validation rejects ambiguous identities, dangling references and 
 
 test("knowledge runtime helpers return the exact topology edges exported to inspection", () => {
   assert.equal(knowledgeDefinition.initial, "discovery");
+  assert.equal(knowledgeDefinition.version, 2);
   let phase: KnowledgeNodeId = knowledgeDefinition.initial;
   const visited = new Set<string>();
   while (isKnowledgePhase(phase)) {
@@ -222,7 +223,7 @@ test("knowledge runtime helpers return the exact topology edges exported to insp
     ),
   );
   for (const edge of knowledgeDefinition.edges.filter((edge) => edge.kind === "feedback")) {
-    assert(isKnowledgePhase(edge.from));
+    assert(isKnowledgePhase(edge.from) || edge.from === "ready");
     assert(edge.reason);
     assert.equal(feedbackTransition(edge.from, edge.reason), edge);
   }

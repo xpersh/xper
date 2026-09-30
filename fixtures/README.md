@@ -24,6 +24,7 @@ method-specific response fields as well.
 `implementation-v1.json` contains a host-observed implementation result with
 the exact Git revisions, changed paths, test command exit code and criterion
 evidence consumed by Verifier.
-`verification-v1.json` contains a verified host-constructed review bound to that
-Implementation artifact and exact commit, including criterion and
+`verification-v1.json` contains a verified host-constructed review plus rejected
+reviews that request a Define or Design revisit. Every example is bound to its
+Implementation artifact and exact commit and includes criterion and
 regression/scope/simplicity evidence plus observed command output references.

@@ -1,5 +1,6 @@
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { closeRun } from "../delivery/closure.js";
+import { reopenJudgment } from "../delivery/judgment-feedback.js";
 import { closureSummary } from "../delivery/summary.js";
 import { parseJudgmentReport } from "../judgment/contract.js";
 import { invalid, object } from "../validation.js";
@@ -20,6 +21,10 @@ export async function prepareClosure(
   if (report.output.verdict !== judgment.report.verdict)
     invalid("Judge verdict does not match registration");
   await checkEvaluation(judgment.evaluation, effects);
+  if (report.output.verdict !== "ACCEPT" && report.output.verdict !== "REJECT") {
+    const now = effects.now();
+    return { now, change: reopenJudgment(checkpoint, report, effects.id(), now) };
+  }
   const path = `.xper/artifacts/run-summary-${reportId}.md`;
   const content = closureSummary(
     checkpoint.knowledge.run_id,

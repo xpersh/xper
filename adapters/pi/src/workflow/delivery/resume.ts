@@ -68,7 +68,9 @@ export function resumeChange(
       {
         type: "delivery.resumed",
         data: {
-          verificationArtifactId: reconciliation.verificationArtifactId,
+          ...(reconciliation.judgmentArtifactId
+            ? { judgmentArtifactId: reconciliation.judgmentArtifactId }
+            : { verificationArtifactId: reconciliation.verificationArtifactId }),
           previousPlanArtifactId: reconciliation.previousPlanArtifactId,
           planArtifactId: reconciliation.revisedPlanArtifactId,
           checkoutRevision: revision,

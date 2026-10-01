@@ -25,7 +25,7 @@ export function transitionImplementation<E extends ImplementationEvent>(
   if (
     state &&
     (state.definition.id !== implementationDefinition.id ||
-      state.definition.version !== implementationDefinition.version)
+      ![1, 2].includes(state.definition.version))
   )
     invalid("unsupported implementation definition");
   const finish = (decision: {

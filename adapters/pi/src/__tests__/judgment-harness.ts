@@ -11,10 +11,10 @@ function required<T>(value: T | null | undefined): T {
   assert(value !== null && value !== undefined);
   return value;
 }
-export async function ready(routing: RoutingSnapshot | null = null) {
+export async function ready(routing: RoutingSnapshot | null = null, maxAttempts = 1) {
   const h = await setup({}, undefined, routing);
   try {
-    await sealTwoIncrementPlan(h);
+    await sealTwoIncrementPlan(h, true, maxAttempts);
     for (const digit of ["2", "3"]) {
       await completeImplementation(h, digit.repeat(40));
       h.setWorkspace({ root: h.cwd, head: digit.repeat(40), clean: true, status: "" });

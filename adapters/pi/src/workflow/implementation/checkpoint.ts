@@ -11,7 +11,10 @@ export function decodeImplementationState(value: unknown): ImplementationState {
     !text(value.runId) ||
     !object(value.definition) ||
     value.definition.id !== implementationDefinition.id ||
-    value.definition.version !== implementationDefinition.version ||
+    !(value.definition.version === 1 || value.definition.version === 2) ||
+    (value.definition.version === 1
+      ? value.reworkReportId !== undefined
+      : !text(value.reworkReportId)) ||
     !text(value.instanceId) ||
     !text(value.incrementId) ||
     !text(value.planArtifactId) ||

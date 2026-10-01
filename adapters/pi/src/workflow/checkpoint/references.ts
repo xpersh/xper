@@ -1,3 +1,4 @@
+import type { AdapterCheckpoint } from "./types.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { WorkflowState } from "../knowledge/state.js";
 import { WorkflowValidationError } from "../types.js";
@@ -7,6 +8,7 @@ export function validateHistoryReferences(
   implementations: Record<string, ImplementationState[]>,
   verifications: Record<string, VerificationState[]>,
   artifactIds: Set<string>,
+  judgments: AdapterCheckpoint["judgmentHistory"] = [],
 ): void {
   for (const [incrementId, history] of Object.entries(implementations)) {
     const reviews = verifications[incrementId] ?? [];
@@ -19,6 +21,7 @@ export function validateHistoryReferences(
         if (review.implementation.instanceId !== planHistory[index]?.instanceId)
           throw new WorkflowValidationError("invalid delivery checkpoint history order");
       for (let index = 1; index < planHistory.length; index++) {
+        if (planHistory[index]?.reworkReportId !== planHistory[index - 1]?.reworkReportId) continue;
         const previousImplementation = planHistory[index - 1];
         const previousVerification = planReviews[index - 1];
         const rework = planHistory[index];
@@ -42,10 +45,12 @@ export function validateHistoryReferences(
       if (instance.assignment.inputs.some((id) => !artifactIds.has(id)))
         throw new WorkflowValidationError("invalid delivery checkpoint artifact reference");
   for (const [id, imported] of Object.entries(knowledge.imports)) {
-    const owner = Object.values(verifications)
-      .flat()
-      .map((state) => state.artifacts[id])
-      .find(Boolean);
+    const owner =
+      judgments.find((entry) => entry.state.report?.artifact_id === id)?.state.report ??
+      Object.values(verifications)
+        .flat()
+        .map((state) => state.artifacts[id])
+        .find(Boolean);
     if (
       !owner ||
       owner.artifact_id !== imported.artifact_id ||

@@ -325,10 +325,15 @@ export class PiWorkflow implements WorkflowClient {
   getRunStatus(): Promise<RunStatus> {
     return this.serial(async () => {
       this.journal.flush();
-      return projectRunStatus(this.state, this.timeline, {
-        durability: this.journal.durability,
-        problem: this.journal.problem,
-      });
+      return projectRunStatus(
+        this.state,
+        this.timeline,
+        {
+          durability: this.journal.durability,
+          problem: this.journal.problem,
+        },
+        this.now(),
+      );
     });
   }
 }

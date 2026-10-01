@@ -243,7 +243,13 @@ async function completeImplementation(
       incrementId: assignment.incrementId,
       baseCommit: assignment.baseCommit,
       resultingCommit,
-      changedFiles: ["src/change.ts"],
+      changedFiles:
+        assignment.reworkReportId && resultingCommit === assignment.baseCommit
+          ? []
+          : ["src/change.ts"],
+      ...(assignment.reworkReportId && resultingCommit === assignment.baseCommit
+        ? { revalidationOf: assignment.reworkReportId }
+        : {}),
       tests: [
         {
           command: "npm test",

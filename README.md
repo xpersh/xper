@@ -15,7 +15,9 @@ and makes the execution history available for inspection and metrics.
 > requires an explicit `/xper resume <commit>` decision before fresh delivery.
 > An explicit read-only Judge delegation records a recommendation for the verified
 > Plan. `/xper approve <reportId> <commit>` applies ACCEPT or REJECT, saves a
-> linked summary, and closes that exact run. Other verdict handling remains pending.
+> linked summary, and closes that exact run. The same explicit approval applies
+> implementation rework or a Define/Design revisit while retaining the open run.
+> Debt and human-decision handling remain pending.
 > Basic event and usage summaries are available; full metric comparison and a
 > dashboard remain future work.
 
@@ -100,8 +102,9 @@ same Knowledge instance, invalidates the obsolete Plan, and conservatively
 requires fresh delivery evidence after an explicit checkout-resumption decision.
 Completion of every increment makes the run eligible for Judgment Day without
 closing it. The next explicit delegation obtains an independent Judge recommendation.
-An explicit approval applies ACCEPT or REJECT and closes the run. Other verdict
-handling and a read-only graph UI remain backlog work.
+An explicit approval applies ACCEPT or REJECT and closes the run, or applies
+Judge feedback to reopen delivery, Define, or Design. Every next role remains
+explicitly delegated. Debt/human decisions and a read-only graph UI remain backlog work.
 
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
@@ -167,7 +170,13 @@ all frozen evidence, and the clean checkout before closing. The command and
 status link a deterministic Markdown summary in `.xper/artifacts`. Repeating
 the same decision returns the historical closure even if the checkout later
 changes. A closed run cannot resume execution; use a new Pi session for another
-objective. Other recommendations remain pending. Closure uses no model call and
+objective. Approving REWORK_IMPLEMENTATION instead invalidates every current
+increment verification and permits fresh sequential delivery from the evaluated
+commit. Judge-authorized rework may revalidate an unchanged increment with fresh
+host tests and independent Verification. REVISIT_DESIGN and REDEFINE reuse the
+Knowledge revisit and revised-Plan resume path. Reports, decisions, and consumed
+budgets survive every round; exhausted budgets leave the run unresolved. Debt
+and human-decision recommendations remain pending. Closure uses no model call and
 does not merge, push, deploy, or publish. The
 [workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection

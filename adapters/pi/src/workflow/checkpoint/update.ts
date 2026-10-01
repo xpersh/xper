@@ -1,6 +1,9 @@
 import { judgmentDefinition } from "../judgment/definition.js";
 import type { JudgmentTransition } from "../judgment/machine.js";
-import { implementationDefinition } from "../implementation/definition.js";
+import {
+  implementationDefinition,
+  definitionForImplementation,
+} from "../implementation/definition.js";
 import { knowledgeDefinition } from "../knowledge/definition.js";
 import type { Transition } from "../knowledge/events.js";
 import { invalid } from "../validation.js";
@@ -28,7 +31,8 @@ export function knowledgeChange<Result>(
   if (checkpoint) checkpoint.knowledge = transition.state;
   else
     checkpoint = {
-      version: 7,
+      version: 8,
+      judgmentHistory: [],
       closure: null,
       judgment: null,
       knowledge: transition.state,
@@ -81,7 +85,7 @@ export function implementationChange<Result>(
     state: checkpoint,
     facts: transition.facts,
     result: transition.result,
-    definition: implementationDefinition,
+    definition: definitionForImplementation(transition.state.definition.version),
     context: { runId: transition.state.runId, instanceId: transition.state.instanceId },
   };
 }

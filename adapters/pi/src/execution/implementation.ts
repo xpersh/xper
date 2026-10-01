@@ -40,7 +40,7 @@ export async function runImplementation(
     criteria,
     verification,
     inputArtifacts,
-  })}\n\nRead AGENTS.md and every supplied artifact. Implement only this increment in the current checkout. Run useful tests, commit all intended changes locally, leave the checkout clean, and never push. Return only JSON: {"schemaVersion":1,"testCommands":["exact command to rerun"],"criteria":[{"criterionId":"...","evidence":"...","paths":["relative/path"]}]}. Do not report exit statuses; the host reruns every command.`;
+  })}\n\nRead AGENTS.md and every supplied artifact. Implement only this increment in the current checkout. Run useful tests, commit all intended changes locally, leave the checkout clean, and never push. ${request.reworkReportId ? "Judge-authorized rework: if this increment already satisfies its criteria and Judge feedback, leave the revision unchanged and supply fresh tests and criterion evidence. Never create an empty commit." : "A new commit with actual changes is required."} Return only JSON: {"schemaVersion":1,"testCommands":["exact command to rerun"],"criteria":[{"criterionId":"...","evidence":"...","paths":["relative/path"]}]}. Do not report exit statuses; the host reruns every command.`;
   const child = await dependencies.runChild(childTask, request.timeoutMs);
   if (child.outcome !== "succeeded") return child;
   if (request.signal.aborted) return { outcome: "cancelled", usage: child.usage };
@@ -71,20 +71,21 @@ export async function runImplementation(
       reason: "Implementer left uncommitted or untracked files in the checkout",
       usage: child.usage,
     };
-  if (afterChild.head === baseCommit)
+  const revalidation = afterChild.head === baseCommit && request.reworkReportId;
+  if (afterChild.head === baseCommit && !revalidation)
     return {
       outcome: "failed",
       reason: "Implementer did not create a resulting commit",
       usage: child.usage,
     };
-  if (!(await isDescendant(request.cwd, baseCommit, afterChild.head)))
+  if (!revalidation && !(await isDescendant(request.cwd, baseCommit, afterChild.head)))
     return {
       outcome: "failed",
       reason: "resulting commit does not descend from the recorded base",
       usage: child.usage,
     };
   const files = await changedFiles(request.cwd, baseCommit, afterChild.head);
-  if (!files.length)
+  if (!files.length && !revalidation)
     return {
       outcome: "failed",
       reason: "resulting commit contains no local change",
@@ -136,6 +137,7 @@ export async function runImplementation(
       baseCommit,
       resultingCommit: afterChild.head,
       changedFiles: files,
+      ...(revalidation ? { revalidationOf: request.reworkReportId } : {}),
       tests,
       criteria: proposal.criteria,
     },

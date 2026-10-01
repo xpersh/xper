@@ -1,3 +1,4 @@
+import { feedbackArtifactId } from "./cycle.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { knowledgeChange, type CheckpointChange } from "../checkpoint/update.js";
 import { knowledgeDefinition } from "../knowledge/definition.js";
@@ -107,14 +108,16 @@ export function reconciliationAwaitingChange(
       type: "artifact.invalidated",
       data: {
         artifactId,
-        reasonArtifactId: reconciliation.verificationArtifactId,
+        reasonArtifactId: feedbackArtifactId(reconciliation),
         reason: "revised Plan requires fresh delivery evidence",
       },
     })),
     {
       type: "delivery.reconciliation_required",
       data: {
-        verificationArtifactId: reconciliation.verificationArtifactId,
+        ...(reconciliation.judgmentArtifactId
+          ? { judgmentArtifactId: reconciliation.judgmentArtifactId }
+          : { verificationArtifactId: reconciliation.verificationArtifactId }),
         previousPlanArtifactId: reconciliation.previousPlanArtifactId,
         revisedPlanArtifactId,
       },

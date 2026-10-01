@@ -108,6 +108,44 @@ test("a real checkout records the child commit and host-run test output", async 
   }
 });
 
+test("Judge-authorized unchanged revisions still require fresh host tests and a clean checkout", async () => {
+  for (const command of [
+    `node -e "process.stdout.write('fresh revalidation')"`,
+    `node -e "process.exit(7)"`,
+    `node -e "require('node:fs').writeFileSync('tracked.txt','mutation')"`,
+  ]) {
+    const cwd = await checkout();
+    try {
+      const execution = { ...request(cwd, command), reworkReportId: "judge-rework" };
+      const result = await runImplementation(execution, {
+        runChild: async (task) => {
+          assert.match(task, /leave the revision unchanged/);
+          return { outcome: "succeeded", brief: proposal(command) };
+        },
+      });
+      assert.equal(git(cwd, "rev-parse", "HEAD"), execution.baseCommit);
+      if (command.includes("mutation")) {
+        assert.equal(result.outcome, "failed");
+        assert.match(result.reason ?? "", /tests changed/);
+      } else {
+        assert.equal(result.outcome, command.includes("exit(7)") ? "failed" : "succeeded");
+        assert(result.brief);
+        const { output } = JSON.parse(result.brief);
+        assert.equal(output.revalidationOf, "judge-rework");
+        assert.equal(output.resultingCommit, execution.baseCommit);
+        assert.deepEqual(output.changedFiles, []);
+        assert.equal(output.tests[0].exitCode, command.includes("exit(7)") ? 7 : 0);
+        assert.match(
+          await readFile(join(cwd, output.tests[0].outputPath), "utf8"),
+          command.includes("exit(7)") ? /^$/ : /fresh revalidation/,
+        );
+      }
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
 test("a model report cannot turn a failing local command into success", async () => {
   const cwd = await checkout();
   try {

@@ -25,6 +25,7 @@ export type {
   RunStatus,
   RunClosure,
   JudgmentApplied,
+  JudgmentReopened,
 } from "./workflow/types.js";
 export { createXperExtension } from "./extension.js";
 export type { AdapterManifest, BridgeHandshake, BridgeOptions } from "./bridge/client.js";
@@ -49,7 +50,10 @@ export { PiWorkflow } from "./workflow/controller.js";
 export type { RecorderClient, RecordedEvent, RecordedStatus } from "./bridge/xper-client.js";
 
 // The same versioned definition drives Pi transitions and future read-only views.
-export { implementationDefinition } from "./workflow/implementation/definition.js";
+export {
+  implementationDefinition,
+  implementationReworkDefinition,
+} from "./workflow/implementation/definition.js";
 export { knowledgeDefinition } from "./workflow/knowledge/definition.js";
 export { verificationDefinition } from "./workflow/verification/definition.js";
 export type { WorkflowDefinition, WorkflowNode, WorkflowEdge } from "./workflow/graph.js";

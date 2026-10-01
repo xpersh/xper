@@ -18,6 +18,7 @@ export interface ImplementationResult {
     baseCommit: string;
     resultingCommit: string;
     changedFiles: string[];
+    revalidationOf?: string;
     tests: ImplementationTestResult[];
     criteria: Array<{ criterionId: string; evidence: string; paths: string[] }>;
   };
@@ -27,7 +28,7 @@ export function parseImplementationResult(
   content: string,
   expected: Pick<
     ImplementationState,
-    "incrementId" | "baseCommit" | "planArtifactId" | "assignment"
+    "incrementId" | "baseCommit" | "planArtifactId" | "assignment" | "reworkReportId"
   >,
 ): ImplementationResult {
   let value: unknown;
@@ -50,8 +51,10 @@ export function parseImplementationResult(
   if ([...value.inputs].sort().join("\n") !== inputs.join("\n"))
     invalid("implementation result input references do not match the sealed handoff");
   const output = value.output;
+  const revalidation = output.revalidationOf !== undefined;
   if (
     !exactKeys(output, [
+      ...(revalidation ? ["revalidationOf"] : []),
       "kind",
       "assignmentId",
       "incrementId",
@@ -66,9 +69,13 @@ export function parseImplementationResult(
     output.incrementId !== expected.incrementId ||
     output.baseCommit !== expected.baseCommit ||
     !sha(output.resultingCommit) ||
-    output.resultingCommit === expected.baseCommit ||
+    (revalidation
+      ? !expected.reworkReportId ||
+        output.revalidationOf !== expected.reworkReportId ||
+        output.resultingCommit !== expected.baseCommit
+      : output.resultingCommit === expected.baseCommit) ||
     !Array.isArray(output.changedFiles) ||
-    !output.changedFiles.length ||
+    (revalidation ? output.changedFiles.length !== 0 : !output.changedFiles.length) ||
     !output.changedFiles.every(relativePath) ||
     new Set(output.changedFiles).size !== output.changedFiles.length ||
     !Array.isArray(output.tests) ||

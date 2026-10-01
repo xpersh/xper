@@ -110,7 +110,7 @@ export class XperSession {
     const gate = closure
       ? `; closed: ${closure.status}; report ${closure.reportId}; evaluated ${closure.evaluatedCommit}; [Run summary](${closure.summary.path})`
       : judgment
-        ? `; judgment ${judgment.verdict ?? judgment.status}; evaluated ${judgment.evaluatedCommit}; ${judgment.artifactId ? `report ${judgment.artifactId} (${judgment.artifactPath}); recommendation not applied; ${["ACCEPT", "REJECT"].includes(judgment.verdict ?? "") ? `apply with /xper approve ${judgment.artifactId} ${judgment.evaluatedCommit}` : "handling this verdict is unsupported; pending"}` : `retry with assignmentId ${judgment.assignmentId}`}`
+        ? `; judgment ${judgment.verdict ?? judgment.status}; evaluated ${judgment.evaluatedCommit}; ${judgment.artifactId ? `report ${judgment.artifactId} (${judgment.artifactPath}); recommendation not applied; ${["ACCEPT", "REJECT", "REWORK_IMPLEMENTATION", "REVISIT_DESIGN", "REDEFINE"].includes(judgment.verdict ?? "") ? `apply with /xper approve ${judgment.artifactId} ${judgment.evaluatedCommit}` : "handling this verdict is unsupported; pending"}` : `retry with assignmentId ${judgment.assignmentId}`}`
         : this.lastRun?.reconciliation?.status === "awaiting_resume"
           ? "; revised plan ready: /xper resume <commit>"
           : implementation?.nodeId === "implement"
@@ -124,7 +124,7 @@ export class XperSession {
                   : run.accepted?.plan
                     ? "; execution plan ready"
                     : "";
-    return `; run ${run.run_id}; phase ${phase}; run configuration: ${routing}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}${telemetry}`;
+    return `; run ${run.run_id}; phase ${phase}; run configuration: ${routing}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}${this.lastRun?.feedback && !closure ? `; feedback applied: ${this.lastRun.feedback.verdict}; report ${this.lastRun.feedback.reportId}; reopened ${this.lastRun.feedback.phase}` : ""}${this.lastRun?.unresolvedReason ? `; unresolved: ${this.lastRun.unresolvedReason}` : ""}${telemetry}`;
   }
   async refreshRun(): Promise<void> {
     if (this.localWorkflow) this.lastRun = await this.localWorkflow.getRunStatus();

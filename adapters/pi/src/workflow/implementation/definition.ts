@@ -34,3 +34,19 @@ export const implementationDefinition = defineWorkflow<ImplementationNodeId>({
     },
   ],
 });
+
+export const implementationReworkDefinition = defineWorkflow<ImplementationNodeId>({
+  ...implementationDefinition,
+  version: 2,
+  edges: implementationDefinition.edges.map((edge) => ({
+    ...edge,
+    guards: [
+      "The result is a descendant change or an unchanged revision authorized by the applied Judge report",
+      "The checkout is clean and every host-run test passed",
+      "Every increment criterion has concrete evidence",
+    ],
+  })),
+});
+export function definitionForImplementation(version: number) {
+  return version === 2 ? implementationReworkDefinition : implementationDefinition;
+}

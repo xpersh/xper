@@ -35,6 +35,7 @@ export interface ImplementationState {
   planDigest: string;
   startedAt: number;
   baseCommit: string;
+  reworkReportId?: string;
   assignment: PlannedAssignment & {
     inputs: string[];
     criteria: ImplementationCriterion[];

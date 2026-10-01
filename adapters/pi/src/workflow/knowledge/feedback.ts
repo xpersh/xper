@@ -26,10 +26,10 @@ export function receiveDeliveryFeedback(
     invalid("knowledge feedback does not match the sealed Plan revision");
   if (
     !event.sourceAttemptId.trim() ||
-    !event.incrementId.trim() ||
+    !(event.incrementId?.trim() || event.incrementIds?.length) ||
     !event.evidence.trim() ||
     !event.artifact.digest.trim() ||
-    event.artifact.kind !== "verification_result" ||
+    !["verification_result", "judgment_verdict"].includes(event.artifact.kind) ||
     event.artifact.version !== 1
   )
     invalid("knowledge feedback request is incomplete");
@@ -63,7 +63,9 @@ export function receiveDeliveryFeedback(
     paths: event.paths,
     artifactId: event.artifact.artifact_id,
     sourceAttemptId: event.sourceAttemptId,
-    incrementId: event.incrementId,
+    ...(event.incrementId
+      ? { incrementId: event.incrementId }
+      : { incrementIds: event.incrementIds }),
     planArtifactId: event.planArtifactId,
     planDigest: event.planDigest,
   });

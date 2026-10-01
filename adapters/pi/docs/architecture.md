@@ -100,8 +100,12 @@ Only `PiWorkflow` owns the serialization queue and applies changes to live state
 Its single commit path records Verification before a separate Knowledge handoff;
 recovery finishes only the missing handoff. This reorganization preserves all
 existing flow definitions. Judgment has its own definition; applying its report
-closes the composed run through delivery coordination, without changing any flow
-graph. The composed checkpoint is format 7.
+closes or reopens the composed run through delivery coordination. Judge feedback
+application and its invalidation/handoff share one local checkpoint commit; the
+report is already durable before the explicit decision. The composed checkpoint
+is format 8, retaining each applied Judge's state, decision, and frozen Plan
+context separately from the current Judge. Historical reports validate against
+their original evidence, not the current Plan.
 
 The `pi.knowledge` definition at version 2 declares the five knowledge nodes
 and a terminal ready node, with stable IDs and explicit edges. Its only outgoing
@@ -119,11 +123,13 @@ with the sealed Plan artifact. Phase visits and per-attempt outcomes remain
 separate. Compatibility fields such as `human_input` and `ready` are derived for
 presentation, not independent mutable state. Knowledge state version 3 adds
 imported references to artifacts owned by another flow; these references make a
-Verification result a stable revisit input without copying it into Knowledge's
-artifact registry.
+Verification or Judge result a stable revisit input without copying it into
+Knowledge's artifact registry.
 
 Knowledge completion hands off the sealed Plan to a separate
-`pi.implementation` definition at version 1. Each instance is keyed by increment
+`pi.implementation` definition at version 1. Judge-authorized rework uses
+version 2: a host-checked unchanged revision may complete with fresh test and
+criterion evidence. Existing v1 instances retain their original commit gate. Each instance is keyed by increment
 and transitions from `implement` to terminal `implemented` only after host-owned
 Git and test checks pass. This composition does not expand the Knowledge phase
 enum or imply product acceptance. Its exact result then hands off to a
@@ -271,8 +277,8 @@ The reducer validates every criterion and citation, and emits `judgment.reported
 and the declared `judge` to `reported` transition. It emits no acceptance,
 feedback or run closure. Status and delegation expose the exact report/revision
 and its unapplied recommendation. Judge attempts consume the existing run budget;
-there is no Judge-specific configuration or Plan role. Successful evaluation
-cannot be repeated. Interrupted evaluation requires the exact assignment ID,
+there is no Judge-specific configuration or Plan role. Successful evaluation cannot be repeated until applied feedback has produced
+fresh verified delivery. Interrupted evaluation requires the exact assignment ID,
 frozen inputs and route, and another explicit delegation.
 
 `/xper approve <reportId> <commit>` applies an exact ACCEPT or REJECT report.
@@ -290,8 +296,9 @@ can be reused only if its bytes match; existing evidence is never overwritten.
 The same report/commit returns the saved decision without rereading files or Git,
 even after later checkout changes. Other identities cannot replace it. Closed
 runs reject start, delegation, advance and delivery resumption. Closure requires
-no execution budget or Rust acknowledgement. Other verdicts remain pending;
-feedback, debt handling, publication and reopening closed runs are not implemented.
+no execution budget or Rust acknowledgement. REWORK_IMPLEMENTATION, REVISIT_DESIGN
+and REDEFINE use the feedback paths below. Debt handling, publication and
+reopening closed runs remain outside this slice.
 
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
@@ -356,18 +363,19 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
-Checkpoint envelope format 7 contains Knowledge v3, increment-keyed ordered
-histories of Implementation v1 and Verification v1 instances, the currently
+Checkpoint envelope format 8 contains Knowledge v3, increment-keyed ordered
+histories of Implementation v1/v2 and Verification v1 instances, the currently
 authorized Plan, sequential delivery reconciliations, and nullable Judgment v1
-state with its frozen references and report metadata, plus a nullable run closure
+state with its frozen references and report metadata, historical applied Judges
+with frozen Plan contexts, plus a nullable run closure
 with the exact decision, covered increments, time and summary reference/digest.
 The summary contents remain an artifact, outside the checkpoint. Each historical flow
 is validated against the Plan identity and digest that created it. Only the
-authorized Plan contributes to current frontier, dependency satisfaction, and
+authorized Plan and its current rework report contribute to current frontier, dependency satisfaction, and
 the sequential commit tip. Pi migrates valid Knowledge v1/v2 states and envelope
-formats 1 through 6 in memory with no closure, preserving identities, visits, attempts, artifacts,
+formats 1 through 7 in memory, preserving existing closures, identities, visits, attempts, artifacts,
 budgets, and pending events. Reading alone does not rewrite the checkpoint; the
-next local commit with facts writes format 7. Unknown definitions, duplicate
+next local commit with facts writes format 8. Unknown definitions, duplicate
 identities, or inconsistent run, Plan, artifact, digest, base, commit, history,
 reconciliation, sequential commit chain, or single-frontier references are
 rejected rather than guessed.
@@ -467,3 +475,21 @@ Tests are grouped by behavior: Knowledge, sequential delivery, feedback and
 resumption, recovery, recording, and Pi integration. Shared harnesses contain
 synthetic data and controlled dependencies. Builds remove stale compiled modules
 and suites before compiling, so renamed tests cannot silently run twice.
+
+## Applied Judge feedback
+
+The existing approval command applies REWORK_IMPLEMENTATION, REVISIT_DESIGN, or
+REDEFINE to an exact report and clean evaluated commit. Pure delivery coordination
+owns the decision and invalidation; runtime checks files and Git; the controller
+persists through its existing journal. Repeated decisions return historical
+results without applying them again. No role runs during approval or recovery.
+
+A rework delivery is identified by its Plan and applied Judge report. Frontier,
+dependency, chain, and status selection exclude earlier delivery approvals, while
+budgets count all histories. Rework starts from the evaluated tip, provides the
+Judge report and prior evidence as inputs, and requires fresh Implementation and
+Verification for every increment. A new explicit Judge consumes the new evidence
+and the cumulative diff from the same Plan's original base. Knowledge feedback
+uses the existing Define/Design edges and revised-Plan resumption. Exhausted
+budgets remain an unresolved open outcome visible in status. Rust records these
+facts without interpreting or authorizing them.

@@ -1,7 +1,7 @@
 import { judgmentDefinition } from "../judgment/definition.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { knowledgeChange, type CheckpointChange } from "../checkpoint/update.js";
-import { implementationDefinition } from "../implementation/definition.js";
+import { definitionForImplementation } from "../implementation/definition.js";
 import { transitionKnowledge } from "../knowledge/machine.js";
 import type { ModelUsage } from "../types.js";
 import { invalid } from "../validation.js";
@@ -25,7 +25,10 @@ export function usageChange(
   const verification = Object.values(checkpoint.verifications)
     .flat()
     .find((candidate) => Object.hasOwn(candidate.attempts, attemptId));
-  const judgment = checkpoint.judgment?.attempts[attemptId] ? checkpoint.judgment : null;
+  const judgment = checkpoint.judgment?.attempts[attemptId]
+    ? checkpoint.judgment
+    : checkpoint.judgmentHistory.find((entry) => Object.hasOwn(entry.state.attempts, attemptId))
+        ?.state;
   const delivery = implementation ?? verification ?? judgment;
   if (!delivery) invalid("attempt is not registered");
 
@@ -37,7 +40,7 @@ export function usageChange(
     definition: judgment
       ? judgmentDefinition
       : implementation
-        ? implementationDefinition
+        ? definitionForImplementation(implementation.definition.version)
         : verificationDefinition,
     context: {
       runId: delivery.runId,

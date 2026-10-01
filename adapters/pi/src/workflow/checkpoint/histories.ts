@@ -1,3 +1,4 @@
+import type { AdapterCheckpoint } from "./types.js";
 import { decodeImplementationState } from "../implementation/checkpoint.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { WorkflowState } from "../knowledge/state.js";
@@ -9,6 +10,7 @@ export function decodeHistories(
   knowledge: WorkflowState,
   implementationValue: Record<string, unknown>,
   verificationValue: Record<string, unknown>,
+  judgments: AdapterCheckpoint["judgmentHistory"] = [],
 ) {
   const implementations: Record<string, ImplementationState[]> = {};
   const verifications: Record<string, VerificationState[]> = {};
@@ -53,7 +55,9 @@ export function decodeHistories(
         (candidate) => candidate.instanceId === decoded.implementation.instanceId,
       );
       const firstForPlan = implementations[incrementId]?.find(
-        (candidate) => candidate.planArtifactId === decoded.planArtifactId,
+        (candidate) =>
+          candidate.planArtifactId === decoded.planArtifactId &&
+          candidate.reworkReportId === implementation?.reworkReportId,
       );
       const artifact = implementation?.artifacts[decoded.implementation.artifactId];
       if (
@@ -68,6 +72,8 @@ export function decodeHistories(
         !artifact ||
         artifact.digest !== decoded.implementation.digest ||
         decoded.implementation.baseCommit !== firstForPlan?.baseCommit ||
+        (decoded.implementation.baseCommit === decoded.implementation.evaluatedCommit &&
+          !implementation.reworkReportId) ||
         (artifact.resultingCommit !== undefined &&
           artifact.resultingCommit !== decoded.implementation.evaluatedCommit) ||
         instanceIds.has(decoded.instanceId)
@@ -88,6 +94,12 @@ export function decodeHistories(
     });
   }
 
-  validateHistoryReferences(knowledge, implementations, verifications, artifactIds);
+  for (const entry of judgments)
+    if (entry.state.report) {
+      if (artifactIds.has(entry.state.report.artifact_id))
+        throw new WorkflowValidationError("duplicate Judge artifact identity");
+      artifactIds.add(entry.state.report.artifact_id);
+    }
+  validateHistoryReferences(knowledge, implementations, verifications, artifactIds, judgments);
   return { implementations, verifications };
 }

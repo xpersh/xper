@@ -80,7 +80,14 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
             const [artifactId, revision] = args;
             if (artifactId && revision) {
               const result = await workflow.applyJudgment(artifactId, revision);
-              message = `Run ${result.runId} closed: ${result.status}; report ${result.reportId}; evaluated ${result.evaluatedCommit}${result.replayed ? "; existing decision" : ""}. [Run summary](${result.summary.path})`;
+              const unresolved =
+                result.status === "reopened"
+                  ? (await workflow.getRunStatus()).unresolvedReason
+                  : undefined;
+              message =
+                result.status === "reopened"
+                  ? `Run ${result.runId} reopened: ${result.phase}; report ${result.reportId}; evaluated ${result.evaluatedCommit}${result.replayed ? "; existing decision" : ""}. ${unresolved ? `Unresolved: ${unresolved}.` : "Use xper_delegate for the next assignment."}`
+                  : `Run ${result.runId} closed: ${result.status}; report ${result.reportId}; evaluated ${result.evaluatedCommit}${result.replayed ? "; existing decision" : ""}. [Run summary](${result.summary.path})`;
             } else {
               message = JSON.stringify(await workflow.advanceRun(artifactId));
             }

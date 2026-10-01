@@ -1,4 +1,6 @@
 import { prepareJudgmentSettlement } from "./judgment.js";
+import { transitionJudgment } from "../judgment/machine.js";
+import { judgmentDefinition } from "../judgment/definition.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { implementationChange, knowledgeChange, verificationChange } from "../checkpoint/update.js";
 import { transitionImplementation } from "../implementation/machine.js";
@@ -21,6 +23,27 @@ export async function prepareSettlement(
 ): Promise<PreparedSettlement> {
   if (checkpoint.judgment?.attempts[result.attemptId])
     return prepareJudgmentSettlement(checkpoint, result, effects);
+  const historical = checkpoint.judgmentHistory.find((entry) =>
+    Object.hasOwn(entry.state.attempts, result.attemptId),
+  );
+  if (historical) {
+    const now = effects.now();
+    const replay = transitionJudgment(
+      historical.state,
+      { type: "attempt.finish", result, artifactId: "" },
+      now,
+    );
+    return {
+      now,
+      change: {
+        state: checkpoint,
+        facts: [],
+        result: replay.result,
+        definition: judgmentDefinition,
+        context: { runId: historical.state.runId, instanceId: historical.state.instanceId },
+      },
+    };
+  }
   const implementation = Object.values(checkpoint.implementations)
     .flat()
     .find((candidate) => Object.hasOwn(candidate.attempts, result.attemptId));

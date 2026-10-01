@@ -97,6 +97,28 @@ function proposal(
   });
 }
 
+test("an unchanged authorized implementation receives fresh independent verification and host tests", async () => {
+  const { cwd, evaluated } = await checkout();
+  try {
+    const command = `node -e "process.stdout.write('independent revalidation')"`;
+    const result = await runVerification(request(cwd, evaluated, evaluated, [command]), {
+      runChild: async () => ({ outcome: "succeeded", brief: proposal() }),
+    });
+    assert.equal(result.outcome, "succeeded");
+    assert(result.brief);
+    const { output } = JSON.parse(result.brief);
+    assert.equal(output.verdict, "verified");
+    assert.equal(output.evaluatedCommit, evaluated);
+    assert.match(
+      await readFile(join(cwd, output.tests[0].outputPath), "utf8"),
+      /independent revalidation/,
+    );
+    assert.equal(git(cwd, "status", "--porcelain"), "");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("verification runs implementation tests before deduplicated reviewer additions", async () => {
   const { cwd, base, evaluated } = await checkout();
   try {

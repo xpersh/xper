@@ -63,6 +63,9 @@ export async function prepareImplementationAssignment(
           selection,
           model,
           baseCommit: existing?.baseCommit ?? workspace.head,
+          ...(checkpoint.authorizedPlan?.reworkReportId
+            ? { reworkReportId: checkpoint.authorizedPlan.reworkReportId }
+            : {}),
           attemptTimeMs: knowledge.policy.attemptTimeMs,
           attemptCostMicros: knowledge.policy.attemptCostMicros,
           assignmentBudget: assignmentBudget(

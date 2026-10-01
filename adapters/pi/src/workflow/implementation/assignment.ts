@@ -17,7 +17,7 @@ export function startAssignment(
       runId: event.runId,
       definition: {
         id: implementationDefinition.id,
-        version: implementationDefinition.version,
+        version: event.reworkReportId ? 2 : implementationDefinition.version,
       },
       instanceId: event.instanceId,
       incrementId: event.assignment.incrementId,
@@ -25,6 +25,7 @@ export function startAssignment(
       planDigest: event.planDigest,
       startedAt: now,
       baseCommit: event.baseCommit,
+      ...(event.reworkReportId ? { reworkReportId: event.reworkReportId } : {}),
       assignment: {
         ...structuredClone(event.assignment),
         inputs: [...event.inputs],
@@ -45,6 +46,7 @@ export function startAssignment(
       assignmentId: state.assignment.id,
       planArtifactId: state.planArtifactId,
       baseCommit: state.baseCommit,
+      ...(state.reworkReportId ? { reworkReportId: state.reworkReportId } : {}),
     });
     fact("assignment.created", {
       assignmentId: state.assignment.id,
@@ -130,6 +132,7 @@ export function startAssignment(
       ...(state.assignment.model ? { model: state.assignment.model } : {}),
       incrementId: state.incrementId,
       baseCommit: state.baseCommit,
+      ...(state.reworkReportId ? { reworkReportId: state.reworkReportId } : {}),
       criteria: structuredClone(state.assignment.criteria),
       verification: [...state.assignment.verification],
       artifactKind: "implementation_result",

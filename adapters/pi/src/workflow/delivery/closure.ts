@@ -17,6 +17,18 @@ export function judgmentReplay(
   revision: string,
 ): JudgmentApplied | null {
   validateResumeRevision(revision);
+  const historical = checkpoint.judgmentHistory.find(
+    (entry) => entry.decision.reportId === reportId,
+  );
+  if (historical) {
+    if (historical.decision.evaluatedCommit !== revision)
+      invalid("approval must identify the exact Judge report and evaluated commit");
+    return {
+      ...structuredClone(historical.decision),
+      runId: checkpoint.knowledge.run_id,
+      replayed: true,
+    };
+  }
   const report = checkpoint.judgment?.report;
   if (
     !report ||
@@ -30,7 +42,7 @@ export function judgmentReplay(
       runId: checkpoint.knowledge.run_id,
       replayed: true,
     };
-  if (report.verdict !== "ACCEPT" && report.verdict !== "REJECT")
+  if (report.verdict === "ACCEPT_WITH_DEBT" || report.verdict === "HUMAN_DECISION")
     invalid(`handling ${report.verdict} is unsupported; the recommendation remains pending`);
   validateJudgmentReferences(checkpoint);
   return null;

@@ -31,7 +31,6 @@ export function decodeVerificationState(value: unknown): VerificationState {
     !text(value.implementation.digest) ||
     !sha(value.implementation.baseCommit) ||
     !sha(value.implementation.evaluatedCommit) ||
-    value.implementation.baseCommit === value.implementation.evaluatedCommit ||
     !strings(value.implementation.testCommands) ||
     !value.implementation.testCommands.length ||
     !object(value.assignment) ||

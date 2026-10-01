@@ -2,6 +2,7 @@ import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { PlannedAssignment } from "../knowledge/contract.js";
 import { budgetRemaining } from "../policy.js";
+import { satisfiedAssignmentArtifacts } from "./frontier.js";
 import type { RemainingBudget } from "../types.js";
 import type { VerificationState } from "../verification/state.js";
 export function runBudget(checkpoint: AdapterCheckpoint, now: number) {
@@ -9,6 +10,10 @@ export function runBudget(checkpoint: AdapterCheckpoint, now: number) {
   const attempts =
     Object.keys(knowledge.attempts).length +
     Object.keys(checkpoint.judgment?.attempts ?? {}).length +
+    checkpoint.judgmentHistory.reduce(
+      (total, entry) => total + Object.keys(entry.state.attempts).length,
+      0,
+    ) +
     Object.values(checkpoint.implementations).reduce(
       (total, history) =>
         total +
@@ -58,4 +63,41 @@ export function assignmentHistory(
     .filter(
       (state) => state.assignment.id === assignment.id && state.assignment.role === assignment.role,
     );
+}
+
+export function unresolvedBudgetReason(checkpoint: AdapterCheckpoint, now: number): string | null {
+  const cost = checkpoint.knowledge.policy.attemptCostMicros;
+  const exhausted = (budget: RemainingBudget, label: string) =>
+    !budget.attempts
+      ? `${label} attempt budget exhausted`
+      : !budget.timeMs
+        ? `${label} time budget exhausted`
+        : budget.costMicros !== null && budget.costMicros < cost
+          ? `${label} cost budget exhausted`
+          : null;
+  const global = exhausted(runBudget(checkpoint, now), "run");
+  if (global || checkpoint.knowledge.lifecycle.status !== "completed") return global;
+  const satisfied = satisfiedAssignmentArtifacts(checkpoint);
+  for (const kind of ["implementation", "verification"] as const) {
+    const histories =
+      kind === "implementation" ? checkpoint.implementations : checkpoint.verifications;
+    for (const history of Object.values(histories)) {
+      const latest = history.findLast(
+        (state: ImplementationState | VerificationState) =>
+          state.planArtifactId === checkpoint.authorizedPlan?.artifactId,
+      );
+      if (!latest || satisfied.has(latest.assignment.id)) continue;
+      const reason = exhausted(
+        assignmentBudget(
+          checkpoint,
+          latest.assignment,
+          assignmentHistory(checkpoint, latest.assignment, kind),
+          now,
+        ),
+        `${kind} assignment ${latest.assignment.id}`,
+      );
+      if (reason) return reason;
+    }
+  }
+  return null;
 }

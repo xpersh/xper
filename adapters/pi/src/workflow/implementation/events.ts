@@ -37,6 +37,7 @@ export type ImplementationEvent =
       selection: ModelSelection | null;
       model: string | null;
       baseCommit: string;
+      reworkReportId?: string;
       attemptTimeMs: number;
       attemptCostMicros: number;
       assignmentBudget?: RemainingBudget;

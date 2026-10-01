@@ -1,3 +1,4 @@
+import { cycleImplementations } from "./cycle.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { parseDocument } from "../knowledge/contracts.js";
@@ -64,8 +65,21 @@ export function implementationHandoff(
     if (!planId) invalid("sealed Plan identity is unavailable");
     const planArtifact = knowledge.artifacts[planId];
     if (!planArtifact) invalid("sealed Plan artifact is unavailable");
+    const source = checkpoint.judgmentHistory.find(
+      (entry) => entry.decision.reportId === authorized.reworkReportId,
+    );
+    const prior =
+      source?.state.evaluation.artifacts
+        .filter(
+          (input) => input.kind === "implementation_result" || input.kind === "verification_result",
+        )
+        .map((input) => input.artifact_id) ?? [];
     const inputs = [
-      ...new Set([...Object.values(knowledge.accepted), ...selection.dependencyArtifactIds]),
+      ...new Set([
+        ...Object.values(knowledge.accepted),
+        ...selection.dependencyArtifactIds,
+        ...(source ? [source.decision.reportId, ...prior] : []),
+      ]),
     ];
     return {
       ...selection.handoff,
@@ -74,9 +88,10 @@ export function implementationHandoff(
       inputArtifacts: inputs.map((id) => artifactInput(checkpoint, id)),
       expectedBaseCommit:
         verifiedDeliveryTip(
-          checkpoint.implementations,
+          cycleImplementations(checkpoint),
           checkpoint.verifications,
           planArtifact.artifact_id,
+          authorized.baseCommit,
         ) ?? authorized.baseCommit,
     };
   } catch (error) {
@@ -120,7 +135,9 @@ export function verificationHandoff(
     const inputs = [...new Set([...implementation.assignment.inputs, implementationArtifactId])];
     const rootBaseCommit =
       checkpoint.implementations[implementation.incrementId]?.find(
-        (candidate) => candidate.planArtifactId === implementation.planArtifactId,
+        (candidate) =>
+          candidate.planArtifactId === implementation.planArtifactId &&
+          candidate.reworkReportId === implementation.reworkReportId,
       )?.baseCommit ?? implementation.baseCommit;
     return {
       ...handoff,

@@ -59,6 +59,7 @@ export interface ImplementationCriterion {
 }
 
 export interface ImplementationAssignmentStarted extends AssignmentStartedBase {
+  reworkReportId?: string;
   workflow: "implementation";
   incrementId: string;
   baseCommit: string;
@@ -153,6 +154,8 @@ export interface WorkflowPosition {
 }
 
 export interface RunStatus {
+  feedback?: JudgmentReopened;
+  unresolvedReason?: string;
   closure?: RunClosure;
   judgment?: WorkflowPosition & {
     assignmentId: string;
@@ -172,7 +175,8 @@ export interface RunStatus {
   reconciliation?: {
     status: "revisiting" | "awaiting_resume" | "resumed";
     reason: "ambiguous_criteria" | "infeasible_design";
-    verificationArtifactId: string;
+    verificationArtifactId?: string;
+    judgmentArtifactId?: string;
     previousPlanArtifactId: string;
     revisedPlanArtifactId?: string;
     resumeCommit?: string;
@@ -196,10 +200,21 @@ export interface RunClosure {
   closedAt: number;
   summary: ArtifactInput & { digest: string };
 }
-export interface JudgmentApplied extends RunClosure {
+export interface JudgmentReopened {
+  reportId: string;
+  reportDigest: string;
+  planArtifactId: string;
+  evaluatedCommit: string;
+  verdict: "REWORK_IMPLEMENTATION" | "REVISIT_DESIGN" | "REDEFINE";
+  status: "reopened";
+  phase: "implementation" | "design" | "define";
+  incrementIds: string[];
+  appliedAt: number;
+}
+export type JudgmentApplied = (RunClosure | JudgmentReopened) & {
   runId: string;
   replayed: boolean;
-}
+};
 
 /** Workflow operations available to adapter actions, independent of the transport. */
 export interface WorkflowClient {

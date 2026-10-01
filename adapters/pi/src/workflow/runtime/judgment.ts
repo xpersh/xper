@@ -49,12 +49,13 @@ export async function prepareJudgmentAssignment(
   }
   const previous = checkpoint.judgment;
   if (previous?.report) invalid("Judge recommendation is already recorded and remains unapplied");
-  const selection = previous
-    ? previous.selection
+  const frozen = previous ?? checkpoint.judgmentHistory[0]?.state;
+  const selection = frozen
+    ? frozen.selection
     : (checkpoint.knowledge.routing?.routes["judgment_day.judge"]?.[0] ?? null);
   if (!previous && checkpoint.knowledge.routing && !selection)
     invalid("active profile has no judgment_day.judge route");
-  const model = previous ? previous.model : selection ? null : (fallbackModel ?? null);
+  const model = frozen ? frozen.model : selection ? null : (fallbackModel ?? null);
   if (!selection && !model)
     invalid("Judgment requires the active Pi model to freeze its selection");
   admit(checkpoint.knowledge.policy, budget, 0);

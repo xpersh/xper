@@ -1,3 +1,4 @@
+import { cycleImplementations } from "./cycle.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import type { JudgmentEvaluation } from "../types.js";
 import { invalid } from "../validation.js";
@@ -14,18 +15,32 @@ export function judgmentEvaluation(
   const planArtifactId = checkpoint.authorizedPlan?.artifactId;
   if (!planArtifactId) invalid("Judgment requires an authorized Plan");
   const satisfied = satisfiedAssignmentArtifacts(checkpoint);
+  const implementations = cycleImplementations(checkpoint);
   const reviews = Object.values(checkpoint.verifications)
-    .map((history) => history.findLast((state) => state.planArtifactId === planArtifactId))
+    .map((history) =>
+      history.findLast(
+        (state) =>
+          state.planArtifactId === planArtifactId &&
+          implementations[state.incrementId]?.some(
+            (implementation) => implementation.instanceId === state.implementation.instanceId,
+          ),
+      ),
+    )
     .filter((state) => state !== undefined);
   const tip = verifiedDeliveryTip(
-    checkpoint.implementations,
+    implementations,
     checkpoint.verifications,
     planArtifactId,
+    checkpoint.authorizedPlan?.baseCommit,
   );
   const commits = new Set(reviews.map((state) => state.implementation.evaluatedCommit));
   const roots = reviews.filter((state) => !commits.has(state.implementation.baseCommit));
   const root = roots[0];
-  if (!tip || !root || roots.length !== 1) invalid("Judgment requires one verified delivery chain");
+  if (!tip || (!checkpoint.authorizedPlan?.reworkReportId && (!root || roots.length !== 1)))
+    invalid("Judgment requires one verified delivery chain");
+  const source = checkpoint.judgmentHistory.find(
+    (entry) => entry.decision.reportId === checkpoint.authorizedPlan?.reworkReportId,
+  );
   return {
     planArtifactId,
     incrementIds: reviews.map((state) => state.incrementId),
@@ -35,12 +50,19 @@ export function judgmentEvaluation(
       ),
     ],
     artifacts: [
-      ...new Set([...Object.values(checkpoint.knowledge.accepted), ...satisfied.values()]),
+      ...new Set([
+        ...Object.values(checkpoint.knowledge.accepted),
+        ...satisfied.values(),
+        ...(source ? [source.decision.reportId] : []),
+      ]),
     ].map((id) => {
       const { artifact_id, kind, path, version, digest } = registeredArtifact(checkpoint, id);
       return { artifact_id, kind, path, version, digest };
     }),
-    baseCommit: root.implementation.baseCommit,
+    baseCommit:
+      source?.state.evaluation.baseCommit ??
+      root?.implementation.baseCommit ??
+      invalid("Judgment base is unavailable"),
     evaluatedCommit: tip,
   };
 }

@@ -39,6 +39,7 @@ interface DeliveryExecution extends ExecutionBase {
   verification: string[];
 }
 export interface ImplementationExecution extends DeliveryExecution {
+  reworkReportId?: string;
   workflow: "implementation";
 }
 export interface VerificationExecution extends DeliveryExecution {

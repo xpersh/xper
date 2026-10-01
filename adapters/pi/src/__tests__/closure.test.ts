@@ -181,13 +181,7 @@ test("first application rejects wrong identities, revisions, changed reports, in
 });
 
 test("unsupported recommendations stay pending without summary writes or closure", async () => {
-  for (const verdict of [
-    "ACCEPT_WITH_DEBT",
-    "REWORK_IMPLEMENTATION",
-    "REVISIT_DESIGN",
-    "REDEFINE",
-    "HUMAN_DECISION",
-  ] as const) {
+  for (const verdict of ["ACCEPT_WITH_DEBT", "HUMAN_DECISION"] as const) {
     const h = await judged(verdict);
     try {
       await assert.rejects(
@@ -331,6 +325,24 @@ function commands(workflow: PiWorkflow) {
   } as unknown as XperSession);
   return ui;
 }
+
+test("Pi approval presents Judge feedback as reopening and exposes exhausted delivery budgets", async () => {
+  const h = await judged("REWORK_IMPLEMENTATION");
+  try {
+    const ui = commands(h.controller);
+    const exact = `approve ${h.reportId} ${h.revision}`;
+    assert((await ui.status()).includes(`/xper ${exact}`));
+    assert.match(
+      await ui.command(exact),
+      /reopened: implementation.*Unresolved:.*budget exhausted/,
+    );
+    assert.doesNotMatch(await ui.status(), /closed:|recommendation not applied/);
+    assert.match(await ui.status(), /unresolved: implementation assignment.*budget exhausted/);
+    assert.match(await ui.command(exact), /existing decision/);
+  } finally {
+    await h.cleanup();
+  }
+});
 
 test("Pi approve preserves human gates and requires an exact report and revision for closure", async () => {
   const knowledge = await setup({ humanGates: ["define"] });

@@ -44,7 +44,8 @@ export type KnowledgeEvent =
       type: "delivery.feedback";
       nextVisitId: string;
       sourceAttemptId: string;
-      incrementId: string;
+      incrementId?: string;
+      incrementIds?: string[];
       planArtifactId: string;
       planDigest: string;
       reason: "ambiguous_criteria" | "infeasible_design";

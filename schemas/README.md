@@ -109,7 +109,13 @@ increment to the recorded Git base and resulting commit, changed repository
 paths, at least one locally rerun command with its real exit code and confined
 log reference, and evidence for every selected criterion. The child proposes
 commands and criterion evidence; it cannot supply a trusted pass flag. This is
-an adapter artifact contract and does not add a Rust protocol method.
+an adapter artifact contract and does not add a Rust protocol method. The additive
+optional `revalidationOf` field identifies the applied Judge report authorizing
+an unchanged revision. Its presence requires empty `changedFiles`; Pi additionally
+requires equal commits, the matching frozen rework authorization, fresh host tests
+and criterion evidence. Without it, the descendant-change contract is unchanged.
+Older v1 artifacts remain valid; consumers supporting revalidation must understand
+this additive variant.
 
 [verification-v1.schema.json](verification-v1.schema.json) defines the
 host-constructed review of one exact Implementation artifact and commit. It
@@ -138,7 +144,7 @@ recommendations only. Their presence does not mean acceptance, feedback or closu
 The checkpoint stores references and report metadata, not the artifact contents.
 Rust continues to record opaque adapter facts without a new RPC or artifact parser.
 
-Pi applies ACCEPT or REJECT only through `/xper approve <reportId> <commit>`.
+Pi applies supported verdicts only through `/xper approve <reportId> <commit>`.
 `judgment.applied` carries `reportId`, `planArtifactId`, `evaluatedCommit`, `verdict`
 and covered `incrementIds`. ACCEPT also emits one `increment.accepted` per covered
 increment with those identity references and its `incrementId`,
@@ -148,3 +154,12 @@ increment with those identity references and its `incrementId`,
 artifact; its content stays local. These are extensible event data under protocol
 v1, not new RPCs or Rust workflow rules. Reapplying an identical decision emits
 no new facts. Later checkout changes do not rewrite the historical closure.
+
+REWORK_IMPLEMENTATION, REVISIT_DESIGN and REDEFINE emit `judgment.applied` with
+`status: "reopened"`, target `phase`, exact report digest, covered increments and
+application time. Delivery approvals are invalidated with the Judge as cause;
+Knowledge feedback retains its existing transition events. These decisions do
+not emit `increment.accepted` or `run.finished`. Existing verification-sourced
+reconciliation events retain `verificationArtifactId`; Judge-sourced events use
+`judgmentArtifactId` and covered `incrementIds`. Reports remain `judgment-v1`;
+checkpoint format 8 is opaque adapter data. Rust needs no new parser or policy.

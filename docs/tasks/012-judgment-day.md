@@ -3,7 +3,7 @@
 - Status: `in_progress`
 - Milestone: M3
 - Entry dependency: XP-011.3
-- Next slice: XP-012.3
+- Next slice: XP-012.4
 
 ## Outcome and boundary
 
@@ -135,10 +135,20 @@ Stop here: closure does not merge, push, deploy, or publish changes.
 
 ## XP-012.3 — Route Judge feedback through existing paths
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-012.2 and XP-011.4
 - Example: `REWORK_IMPLEMENTATION` makes the Implementer eligible again;
   `REVISIT_DESIGN` and `REDEFINE` use the Knowledge handoff.
+
+Implementation note: extend explicit `/xper approve <reportId> <commit>` application
+to reopen delivery or Knowledge using the existing pure coordination, evidence
+checks, journal, outbox, and cumulative budgets. A Judge rework invalidates the
+whole Plan's delivery approvals; explicit delegations create fresh Implementer
+and Verifier evidence, permitting host-checked unchanged revisions only in this
+authorized rework. Preserve historical judgments and idempotent decisions in
+checkpoint format 8. Verify two-increment rework, both Knowledge destinations,
+unchanged-revision revalidation, stale evidence, migration, recovery, exhausted
+budgets, and unavailable recording before running the complete check suite.
 
 Acceptance:
 
@@ -148,6 +158,45 @@ Acceptance:
   cannot survive changes to the evaluated revision.
 - Exhausted budgets expose an unresolved outcome without restarting the run,
   hiding attempts, or automatically repeating judgments.
+
+### Delivery evidence
+
+- `/xper approve <reportId> <commit>` now applies REWORK_IMPLEMENTATION,
+  REVISIT_DESIGN and REDEFINE after the existing report, frozen evidence and clean
+  checkout checks. Application and reopening share one local checkpoint commit;
+  replay returns the historical decision without creating visits or executions.
+- Judge rework invalidates all active delivery approvals, preserves the same Plan
+  and starts fresh sequential Implementation/Verification from the evaluated tip.
+  Fresh instances receive the Judge and prior evidence; only explicit delegation
+  runs them. A later Judge retains the original cumulative diff base.
+- Host-observed unchanged revisions require Judge authorization, fresh tests,
+  criterion evidence and independent Verification. The additive `revalidationOf`
+  variant retains compatibility with existing implementation-v1 artifacts.
+  New rework instances use pi.implementation v2; historical v1 instances retain
+  their original gate. Define/Design feedback reuses Knowledge transitions,
+  invalidation and explicit revised-Plan resumption.
+- Checkpoint format 8 preserves historical Judges, decisions and frozen Plan
+  contexts. All attempts remain in cumulative budgets. Exhaustion exposes an
+  unresolved open outcome; neither approval nor recovery executes another role.
+  Rust remains background recording/configuration, with no new RPC or policy.
+- `npm run check` passes 67 Rust tests, 221 adapter tests, 12 architecture tests,
+  shared schema fixtures, formatting, lint and strict TypeScript. Coverage includes
+  changed/unchanged two-increment delivery, repeated judgments, exact replay,
+  both Knowledge destinations, interrupted retries, stale/corrupt evidence,
+  migration, real Git and host tests, exhausted budgets, and unavailable,
+  rejecting or unanswered recording. Documentation links and `git diff --check`
+  pass. Tests use synthetic agents and isolated resources without credentials.
+- Diff size: 1,479 additions and 170 removals across 61 files:
+  739 production, 509 test, 59 contract, and 172 documentation additions.
+  This exceeds the roadmap's scope alarms. The accepted plan includes delivery
+  invalidation, historical Judge recovery and explicitly requested unchanged-
+  revision revalidation. Review this complete slice together; no XP-012.4
+  behavior is included.
+- Public changes are the reopened `JudgmentApplied` result, status feedback and
+  unresolved reason, optional rework authorization on Implementation handoffs,
+  implementation-v1 revalidation, pi.implementation v2, and checkpoint format 8.
+  No dependency, new command/tool, scheduler, workspace manager or Rust change
+  was introduced. Debt/human decisions and publication remain deferred.
 
 ## XP-012.4 — Resolve debt and human decisions
 

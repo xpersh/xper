@@ -1,3 +1,4 @@
+import { currentImplementation } from "./cycle.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import type { ImplementationState } from "../implementation/state.js";
 import { invalid } from "../validation.js";
@@ -19,8 +20,8 @@ export function deliveryFrontier(checkpoint: AdapterCheckpoint): DeliveryFrontie
   if (!planArtifactId) return null;
   const frontiers: DeliveryFrontier[] = [];
   for (const [incrementId, history] of Object.entries(checkpoint.implementations)) {
-    const implementation = history.findLast(
-      (candidate) => candidate.planArtifactId === planArtifactId,
+    const implementation = history.findLast((candidate) =>
+      currentImplementation(checkpoint, candidate),
     );
     if (!implementation) continue;
     if (implementation.lifecycle.status === "active") {
@@ -52,8 +53,8 @@ export function satisfiedAssignmentArtifacts(checkpoint: AdapterCheckpoint): Map
   const satisfied = new Map<string, string>();
   if (!planArtifactId) return satisfied;
   for (const [incrementId, history] of Object.entries(checkpoint.implementations)) {
-    const implementation = history.findLast(
-      (candidate) => candidate.planArtifactId === planArtifactId,
+    const implementation = history.findLast((candidate) =>
+      currentImplementation(checkpoint, candidate),
     );
     if (implementation?.lifecycle.status !== "completed") continue;
     satisfied.set(implementation.assignment.id, implementation.lifecycle.artifactId);

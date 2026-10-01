@@ -11,6 +11,10 @@ export function registeredArtifact(
   digest: string;
 } {
   if (checkpoint.judgment?.report?.artifact_id === id) return checkpoint.judgment.report;
+  const historical = checkpoint.judgmentHistory.find(
+    (entry) => entry.state.report?.artifact_id === id,
+  )?.state.report;
+  if (historical) return historical;
   const knowledge = checkpoint.knowledge.artifacts[id];
   if (knowledge) return knowledge;
   const imported = checkpoint.knowledge.imports[id];

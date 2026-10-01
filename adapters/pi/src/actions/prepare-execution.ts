@@ -49,5 +49,9 @@ export function prepareExecution(
         implementationArtifactId: started.implementationArtifactId,
         implementationTestCommands: started.implementationTestCommands,
       }
-    : { ...details, workflow: "implementation" };
+    : {
+        ...details,
+        workflow: "implementation",
+        ...(started.reworkReportId ? { reworkReportId: started.reworkReportId } : {}),
+      };
 }

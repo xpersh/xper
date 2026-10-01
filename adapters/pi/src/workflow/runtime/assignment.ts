@@ -1,3 +1,5 @@
+import { runBudget } from "../delivery/budget.js";
+import { admit } from "../policy.js";
 import { prepareJudgmentAssignment } from "./judgment.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { knowledgeChange } from "../checkpoint/update.js";
@@ -16,6 +18,7 @@ export async function prepareAssignment(
   effects: WorkflowEffects,
 ): Promise<PreparedChange<StartedAssignment>> {
   const knowledge = checkpoint.knowledge;
+  admit(knowledge.policy, runBudget(checkpoint, effects.now()), 0);
   if (knowledge.lifecycle.status === "completed") {
     assertDeliveryReady(checkpoint);
     const nowBeforeEvidence = effects.now();

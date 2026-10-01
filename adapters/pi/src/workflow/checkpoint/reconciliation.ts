@@ -1,3 +1,5 @@
+import { feedbackArtifactId } from "../delivery/cycle.js";
+import type { AdapterCheckpoint } from "./types.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { WorkflowState } from "../knowledge/state.js";
 import { WorkflowValidationError } from "../types.js";
@@ -10,6 +12,7 @@ export function validateReconciliations(
   verifications: Record<string, VerificationState[]>,
   authorizedPlan: DeliveryPlanAuthorization | null,
   reconciliations: DeliveryReconciliation[],
+  judgments: AdapterCheckpoint["judgmentHistory"] = [],
 ): void {
   if (authorizedPlan) {
     const plan = knowledge.artifacts[authorizedPlan.artifactId];
@@ -24,11 +27,26 @@ export function validateReconciliations(
   }
   const seenFeedback = new Set<string>();
   for (const [index, reconciliation] of reconciliations.entries()) {
+    const sourceId = feedbackArtifactId(reconciliation);
+    const judge = judgments.find(
+      (entry) => entry.decision.reportId === reconciliation.judgmentArtifactId,
+    );
     const verification = Object.values(verifications)
       .flat()
-      .find((state) => Object.hasOwn(state.artifacts, reconciliation.verificationArtifactId));
-    const artifact = verification?.artifacts[reconciliation.verificationArtifactId];
-    const imported = knowledge.imports[reconciliation.verificationArtifactId];
+      .find((state) => Object.hasOwn(state.artifacts, sourceId));
+    const artifact = judge?.state.report ?? verification?.artifacts[sourceId];
+    const imported = knowledge.imports[sourceId];
+    const sourceMatches = judge
+      ? reconciliation.verificationArtifactId === undefined &&
+        judge.decision.phase ===
+          (reconciliation.reason === "ambiguous_criteria" ? "define" : "design") &&
+        judge.decision.planArtifactId === reconciliation.previousPlanArtifactId &&
+        JSON.stringify(judge.decision.incrementIds) === JSON.stringify(reconciliation.incrementIds)
+      : reconciliation.judgmentArtifactId === undefined &&
+        verification?.incrementId === reconciliation.incrementId &&
+        verification?.planArtifactId === reconciliation.previousPlanArtifactId &&
+        verification.planDigest === reconciliation.previousPlanDigest &&
+        verification.artifacts[sourceId]?.knowledgeFeedbackReason === reconciliation.reason;
     const previousPlan = knowledge.artifacts[reconciliation.previousPlanArtifactId];
     const preceding = reconciliations[index - 1];
     const expectedInvalidated = Object.values(verifications)
@@ -42,8 +60,8 @@ export function validateReconciliations(
       .map((state) => (state.lifecycle.status === "completed" ? state.lifecycle.artifactId : ""));
     const invalidated = new Set(reconciliation.invalidatedVerificationArtifactIds);
     if (
-      seenFeedback.has(reconciliation.verificationArtifactId) ||
-      !verification ||
+      seenFeedback.has(sourceId) ||
+      !sourceMatches ||
       !artifact ||
       !imported ||
       imported.artifact_id !== artifact.artifact_id ||
@@ -51,11 +69,7 @@ export function validateReconciliations(
       imported.path !== artifact.path ||
       imported.version !== artifact.version ||
       imported.digest !== artifact.digest ||
-      artifact.knowledgeFeedbackReason !== reconciliation.reason ||
       artifact.attemptId !== reconciliation.sourceAttemptId ||
-      verification.incrementId !== reconciliation.incrementId ||
-      verification.planArtifactId !== reconciliation.previousPlanArtifactId ||
-      verification.planDigest !== reconciliation.previousPlanDigest ||
       !previousPlan ||
       previousPlan.digest !== reconciliation.previousPlanDigest ||
       !["revisiting", "awaiting_resume", "resumed"].includes(reconciliation.status) ||
@@ -80,7 +94,7 @@ export function validateReconciliations(
       (index < reconciliations.length - 1 && reconciliation.status !== "resumed")
     )
       throw new WorkflowValidationError("invalid delivery reconciliation");
-    seenFeedback.add(reconciliation.verificationArtifactId);
+    seenFeedback.add(sourceId);
   }
   if (Object.keys(knowledge.imports).some((id) => !seenFeedback.has(id)))
     throw new WorkflowValidationError("invalid imported knowledge artifact reference");

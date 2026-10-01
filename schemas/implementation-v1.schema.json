@@ -19,10 +19,10 @@
         "incrementId": { "type": "string", "minLength": 1 },
         "baseCommit": { "$ref": "#/$defs/commit" },
         "resultingCommit": { "$ref": "#/$defs/commit" },
+        "revalidationOf": { "type": "string", "minLength": 1 },
         "changedFiles": {
           "type": "array",
           "items": { "$ref": "#/$defs/relativePath" },
-          "minItems": 1,
           "uniqueItems": true
         },
         "tests": {
@@ -36,6 +36,11 @@
           "minItems": 1
         }
       },
+      "allOf": [{
+        "if": { "required": ["revalidationOf"] },
+        "then": { "properties": { "changedFiles": { "maxItems": 0 } } },
+        "else": { "properties": { "changedFiles": { "minItems": 1 } } }
+      }],
       "required": [
         "kind",
         "assignmentId",

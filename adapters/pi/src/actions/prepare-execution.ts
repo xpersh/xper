@@ -18,12 +18,19 @@ export function prepareExecution(
     ...(started.budget ? { budget: started.budget } : {}),
     ...(started.selection
       ? { selection: started.selection }
-      : delivery && started.model
+      : (delivery || started.workflow === "judgment") && started.model
         ? { model: started.model }
         : request.model
           ? { model: request.model }
           : {}),
   };
+  if (started.workflow === "judgment")
+    return {
+      ...common,
+      workflow: "judgment",
+      assignmentId: started.assignmentId,
+      evaluation: started.evaluation,
+    };
   if (!delivery) return { ...common, workflow: "knowledge" };
   const details = {
     ...common,

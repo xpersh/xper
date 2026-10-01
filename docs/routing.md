@@ -81,3 +81,9 @@ select between two subscriptions exposed under the same provider identifier,
 so a `company` and `personal` context that both use `openai` may use the same
 Pi credential. Use distinct provider identifiers if account separation is
 required. xper configuration and events contain no API keys or tokens.
+
+Judge uses the role `judgment_day.judge` through the same direct routing contract.
+A frozen profile must include that route before Judgment can dispatch; it may use
+the same provider/model as other roles. Without a prepared profile, the first
+Judge attempt freezes the active Pi model. Explicit retries preserve the original
+selection, with no dynamic replacement or second-provider requirement.

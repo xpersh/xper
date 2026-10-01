@@ -79,10 +79,30 @@ export interface VerificationAssignmentStarted extends AssignmentStartedBase {
   model?: string;
 }
 
+export interface JudgmentEvaluation {
+  planArtifactId: string;
+  incrementIds: string[];
+  criterionIds: string[];
+  artifacts: Array<ArtifactInput & { digest: string }>;
+  logs: Array<{ path: string; digest: string }>;
+  baseCommit: string;
+  evaluatedCommit: string;
+}
+export interface JudgmentAssignmentStarted extends AssignmentStartedBase {
+  workflow: "judgment";
+  evaluation: JudgmentEvaluation;
+  model?: string;
+}
+export interface JudgmentRecommendation {
+  verdict: string;
+  evaluatedCommit: string;
+  applied: false;
+}
 export type AssignmentStarted =
   | KnowledgeAssignmentStarted
   | ImplementationAssignmentStarted
-  | VerificationAssignmentStarted;
+  | VerificationAssignmentStarted
+  | JudgmentAssignmentStarted;
 export type StartedAssignment = AssignmentStarted;
 
 export type FinishAttempt = { attemptId: string } & (
@@ -96,6 +116,7 @@ export type AttemptFinished = { attemptId: string; outcome: AttemptOutcome } & (
   | { replayed?: false; artifactId: string | null; workflowCompleted?: boolean }
 ) & {
     handoffPhase?: "define" | "design";
+    judgment?: JudgmentRecommendation;
   };
 
 export type RunAdvanced = {
@@ -132,6 +153,13 @@ export interface WorkflowPosition {
 }
 
 export interface RunStatus {
+  judgment?: WorkflowPosition & {
+    assignmentId: string;
+    evaluatedCommit: string;
+    verdict?: string;
+    artifactPath?: string;
+    applied: false;
+  };
   workflow?: WorkflowPosition;
   implementations?: Record<string, WorkflowPosition>;
   verifications?: Record<string, WorkflowPosition>;

@@ -12,7 +12,7 @@ export function registerXperDelegate(
     name: "xper_delegate",
     label: "Xper assignment",
     description:
-      "Execute the current xper assignment from sealed artifacts and evaluate its local gate. Supports Knowledge and the first Implementer/Verifier delivery loop. Start a run with /xper first.",
+      "Execute the current xper assignment from sealed artifacts and evaluate its local gate. Supports Knowledge, sequential Implementer/Verifier delivery, and a read-only Judge recommendation. Start a run with /xper first.",
     parameters: {
       type: "object",
       properties: {
@@ -48,10 +48,17 @@ export function registerXperDelegate(
         content: [
           {
             type: "text",
-            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.resumeRequired ? "; resume revised delivery with /xper resume <commit>" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
+            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.judgment ? `; Judge ${result.judgment.verdict}; evaluated ${result.judgment.evaluatedCommit}; report ${artifactId}; recommendation not applied` : ""}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.resumeRequired ? "; resume revised delivery with /xper resume <commit>" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
           },
         ],
-        details: { attemptId, outcome, phase, incrementId, artifactId },
+        details: {
+          attemptId,
+          outcome,
+          phase,
+          incrementId,
+          artifactId,
+          ...(result.judgment ? { judgment: result.judgment } : {}),
+        },
       };
     },
   });

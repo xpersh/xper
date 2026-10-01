@@ -1,3 +1,4 @@
+import type { judgmentDefinition } from "../judgment/definition.js";
 import type { RecordedEvent } from "../../bridge/xper-client.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import type { implementationDefinition } from "../implementation/definition.js";
@@ -11,7 +12,8 @@ export function prepareRecordedEvents(
   definition:
     | typeof knowledgeDefinition
     | typeof implementationDefinition
-    | typeof verificationDefinition,
+    | typeof verificationDefinition
+    | typeof judgmentDefinition,
   context: { runId: string; instanceId: string },
   definitionsRecorded: Set<string>,
   id: () => string,

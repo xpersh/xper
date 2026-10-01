@@ -127,3 +127,13 @@ rework.
 The stable error catalog remains in
 [the Rust protocol crate](../crates/xper-protocol/src/lib.rs) and
 [the TypeScript transport](../adapters/pi/src/bridge/protocol.ts).
+
+[judgment-v1.schema.json](judgment-v1.schema.json) defines the read-only Judge's
+recommendation for a completely verified Plan. Host-owned evaluation metadata
+binds artifact IDs/digests, log digests, covered criteria/increments and exact
+base/evaluated commits. Every criterion and criticism cites supplied artifact IDs
+or the exact `git:<base>..<evaluated>` diff reference; Pi checks reference membership
+and criterion coverage beyond JSON Schema. All seven RFC 0001 verdicts are
+recommendations only. Their presence does not mean acceptance, feedback or closure.
+The checkpoint stores references and report metadata, not the artifact contents.
+Rust continues to record opaque adapter facts without a new RPC or artifact parser.

@@ -28,3 +28,8 @@ evidence consumed by Verifier.
 reviews that request a Define or Design revisit. Every example is bound to its
 Implementation artifact and exact commit and includes criterion and
 regression/scope/simplicity evidence plus observed command output references.
+
+`judgment-v1.json` contains a synthetic independent recommendation with sealed
+artifact/log references and an exact evaluated revision. Schema and adapter tests
+exercise all seven verdicts from this fixture, plus invalid evidence and coverage.
+No verdict in this fixture represents an applied acceptance or run closure.

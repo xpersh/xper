@@ -23,8 +23,10 @@ flowchart LR
     Implementation --> Git[Git inspection and host-run tests]
     Action --> Verification[Verification runner]
     Verification --> Git
+    Action --> Judgment[Read-only Judgment runner]
+    Judgment --> Git
     Action --> Writer[Artifact writer]
-    Workflow --> Machines[Pure Knowledge, Implementation and Verification transitions]
+    Workflow --> Machines[Pure Knowledge, Implementation, Verification and Judgment transitions]
     Workflow --> Runtime[Evidence preparation and event construction]
     Runtime --> Delivery[Pure delivery coordination]
     Delivery --> Machines
@@ -56,6 +58,7 @@ flowchart LR
 | Pure Knowledge start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge/` |
 | Pure per-increment Implementation transition and result validation | `src/workflow/implementation/` |
 | Pure per-increment Verification transition and result validation | `src/workflow/verification/` |
+| Pure Judge report lifecycle and frozen evidence validation | `src/workflow/judgment/` |
 | Versioned serializable topology and explicit transition edges | `src/workflow/graph.ts` and each flow’s `definition.ts` |
 | Composed checkpoint migrations, history/reference checks, updates and recovery | `src/workflow/checkpoint/` and each flow's `checkpoint.ts` |
 | Phase roles and execution budgets | `src/workflow/policy.ts` |
@@ -96,7 +99,8 @@ receives only the data and effect ports it needs, never the controller itself.
 Only `PiWorkflow` owns the serialization queue and applies changes to live state.
 Its single commit path records Verification before a separate Knowledge handoff;
 recovery finishes only the missing handoff. This reorganization preserves all
-definition versions, public interfaces and checkpoint format 5.
+existing flow definitions and public commands. Judgment adds its own definition
+and upgrades the composed checkpoint to format 6.
 
 The `pi.knowledge` definition at version 2 declares the five knowledge nodes
 and a terminal ready node, with stable IDs and explicit edges. Its only outgoing
@@ -174,8 +178,8 @@ result locally. It continues to serve all Knowledge roles and, after Plan, the
 next eligible `implementation.driver` or dependent `verify.verifier`; no second
 public delivery tool exists.
 Pi validates the artifact and evaluates the owning gate after success.
-Internally, execution requests distinguish Knowledge, Implementation and
-Verification. Delivery requests require assignment, increment and commit evidence;
+Internally, execution requests distinguish Knowledge, Implementation,
+Verification and Judgment. Delivery requests require assignment, increment and commit evidence;
 Verification additionally requires the exact Implementation artifact and commands.
 The shared child process receives role-specific prompts and permissions, while
 each delivery runner constructs its own canonical result from host evidence.
@@ -252,6 +256,24 @@ remain serial. Recovery preserves the single pending frontier without starting
 it. Once all planned increments verify, the run remains open and reports that it
 is ready for Judgment Day; no `run.finished` event is emitted.
 
+The next explicit delegation starts `pi.judgment` v1 with role
+`judgment_day.judge`. Delivery validates the complete authorized Plan and freezes
+all accepted Knowledge artifacts, current Implementation/Verification artifacts,
+referenced test-log digests, covered increments and criteria, and cumulative Git
+base/tip. The execution runner supplies the complete host-read diff to a fresh
+child with only `read`; it checks the clean revision and input digests before and
+after evaluation using the existing evidence reader. It ignores the delegation's
+free-form task text in favor of the sealed intent. Oversized diffs fail explicitly.
+
+All seven RFC verdicts complete only the Judge flow with a `judgment_verdict`.
+The reducer validates every criterion and citation, and emits `judgment.reported`
+and the declared `judge` to `reported` transition. It emits no acceptance,
+feedback or run closure. Status and delegation expose the exact report/revision
+and its unapplied recommendation. Judge attempts consume the existing run budget;
+there is no Judge-specific configuration or Plan role. Successful evaluation
+cannot be repeated. Interrupted evaluation requires the exact assignment ID,
+frozen inputs and route, and another explicit delegation.
+
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
 overwritten. A late success may become `timed_out` under Pi's execution policy.
@@ -315,15 +337,16 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
-Checkpoint envelope format 5 contains Knowledge v3, increment-keyed ordered
+Checkpoint envelope format 6 contains Knowledge v3, increment-keyed ordered
 histories of Implementation v1 and Verification v1 instances, the currently
-authorized Plan, and sequential delivery reconciliations. Each historical flow
+authorized Plan, sequential delivery reconciliations, and nullable Judgment v1
+state with its frozen references and report metadata. Each historical flow
 is validated against the Plan identity and digest that created it. Only the
 authorized Plan contributes to current frontier, dependency satisfaction, and
 the sequential commit tip. Pi migrates valid Knowledge v1/v2 states and envelope
-formats 1 through 4 in memory, preserving identities, visits, attempts, artifacts,
+formats 1 through 5 in memory, preserving identities, visits, attempts, artifacts,
 budgets, and pending events. Reading alone does not rewrite the checkpoint; the
-next local commit with facts writes format 5. Unknown definitions, duplicate
+next local commit with facts writes format 6. Unknown definitions, duplicate
 identities, or inconsistent run, Plan, artifact, digest, base, commit, history,
 reconciliation, sequential commit chain, or single-frontier references are
 rejected rather than guessed.

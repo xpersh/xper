@@ -1,3 +1,4 @@
+import { judgmentPosition } from "./judgment/state.js";
 import type { RecordedEvent } from "../bridge/xper-client.js";
 import type { AdapterCheckpoint } from "./checkpoint/types.js";
 import { implementationPosition } from "./implementation/selectors.js";
@@ -14,6 +15,22 @@ export function projectRunStatus(
 ): RunStatus {
   const reconciliation = checkpoint?.reconciliations.at(-1);
   return {
+    ...(checkpoint?.judgment
+      ? {
+          judgment: {
+            ...judgmentPosition(checkpoint.judgment),
+            assignmentId: checkpoint.judgment.assignmentId,
+            evaluatedCommit: checkpoint.judgment.evaluation.evaluatedCommit,
+            applied: false as const,
+            ...(checkpoint.judgment.report
+              ? {
+                  verdict: checkpoint.judgment.report.verdict,
+                  artifactPath: checkpoint.judgment.report.path,
+                }
+              : {}),
+          },
+        }
+      : {}),
     run: checkpoint ? toRunSummary(checkpoint.knowledge) : null,
     ...(checkpoint ? { workflow: workflowPosition(checkpoint.knowledge) } : {}),
     ...(checkpoint && Object.keys(checkpoint.implementations).length

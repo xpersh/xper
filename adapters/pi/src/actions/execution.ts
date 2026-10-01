@@ -1,5 +1,6 @@
 import type {
   ArtifactInput,
+  JudgmentEvaluation,
   AttemptOutcome,
   ImplementationCriterion,
   ModelSelection,
@@ -46,4 +47,13 @@ export interface VerificationExecution extends DeliveryExecution {
   implementationArtifactId: string;
   implementationTestCommands: string[];
 }
-export type ExecutionRequest = KnowledgeExecution | ImplementationExecution | VerificationExecution;
+export interface JudgmentExecution extends ExecutionBase {
+  workflow: "judgment";
+  assignmentId: string;
+  evaluation: JudgmentEvaluation;
+}
+export type ExecutionRequest =
+  | KnowledgeExecution
+  | ImplementationExecution
+  | VerificationExecution
+  | JudgmentExecution;

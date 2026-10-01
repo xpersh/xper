@@ -14,7 +14,7 @@ diagram. These rules also guide changes to the checkout's `.pi/` integration.
   implementations. Test the action with doubles before connecting its entry point.
 - `src/workflow/` owns phases, assignments, attempts, gates, feedback,
   approvals, artifact contracts, dependency checks, and execution budgets.
-  `knowledge/`, `implementation/`, and `verification/` own their pure typed
+  `knowledge/`, `implementation/`, `verification/`, and `judgment/` own their pure typed
   transitions, state, artifact contracts, checkpoint decoders, and definitions.
   `graph.ts` owns vocabulary-neutral topology operations. `checkpoint/` validates
   and migrates the composed envelope. `delivery/` owns pure coordination across
@@ -33,7 +33,8 @@ diagram. These rules also guide changes to the checkout's `.pi/` integration.
   artifact writing, Git inspection and host-run commands. Keep Implementer and
   Verifier proposal parsing and runners separate: agent proposals, host evidence,
   and workflow decisions have different owners. `actions/execution.ts` defines
-  the discriminated request; each delivery role requires its own handoff fields.
+  the discriminated request; each delivery role requires its own handoff fields. Judge consumes frozen
+  run-wide evidence through reading tools only; its report does not apply a verdict.
 
 The adapter decides gates and transitions and reports the resulting facts to
 the core. Do not import crate internals or delegate these decisions to Rust.

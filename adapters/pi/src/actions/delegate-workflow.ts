@@ -65,7 +65,9 @@ export async function delegateWorkflow(
   });
   observe({ type: "attempt.finished", attemptId, outcome: settled.outcome });
   const gate =
-    settled.outcome === "succeeded" && !delivery ? await workflow.advanceRun() : undefined;
+    settled.outcome === "succeeded" && !delivery && started.workflow !== "judgment"
+      ? await workflow.advanceRun()
+      : undefined;
   // Usage delivery is observational. It cannot delay settlement, gate evaluation,
   // or the tool response, even if a recorder implementation never resolves.
   for (const usage of usageReports) {
@@ -84,6 +86,7 @@ export async function delegateWorkflow(
     phase,
     ...(gate ? { gate } : {}),
     ...(reason ? { reason } : {}),
+    ...(settled.judgment ? { judgment: settled.judgment } : {}),
     ...(delivery ? { incrementId: started.incrementId } : {}),
     artifactId: settled.replayed ? null : settled.artifactId,
     ...(delivery && "artifactPath" in completion && !settled.replayed && settled.artifactId

@@ -13,7 +13,7 @@ import {
   type KnowledgeDocuments,
 } from "../delivery/handoff.js";
 import type { ArtifactReader } from "./evidence.js";
-async function readKnowledgeDocuments(
+export async function readKnowledgeDocuments(
   checkpoint: AdapterCheckpoint,
   readArtifact: ArtifactReader,
 ): Promise<KnowledgeDocuments> {

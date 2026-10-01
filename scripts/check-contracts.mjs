@@ -119,3 +119,44 @@ for (const fixture of read("fixtures/verification-v1.json")) {
   assert(!validateVerification(claimed), "reject model-claimed verification test outcomes");
 }
 console.log("Shared protocol and adapter artifact schemas match their fixtures.");
+const validateJudgment = ajv.compile(read("schemas/judgment-v1.schema.json"));
+for (const fixture of read("fixtures/judgment-v1.json")) {
+  assert(validateJudgment(fixture.artifact), ajv.errorsText(validateJudgment.errors));
+  for (const verdict of [
+    "ACCEPT",
+    "ACCEPT_WITH_DEBT",
+    "REWORK_IMPLEMENTATION",
+    "REVISIT_DESIGN",
+    "REDEFINE",
+    "HUMAN_DECISION",
+    "REJECT",
+  ]) {
+    const report = structuredClone(fixture.artifact);
+    report.output.verdict = verdict;
+    assert(validateJudgment(report), verdict);
+  }
+  for (const mutate of [
+    (report) => {
+      report.output.verdict = "accept";
+    },
+    (report) => {
+      report.output.criteria = [];
+    },
+    (report) => {
+      report.output.criteria[0].evidence = [];
+    },
+    (report) => {
+      report.evaluation.evaluatedCommit = "HEAD";
+    },
+    (report) => {
+      report.evaluation.artifacts[0].digest = "unknown";
+    },
+    (report) => {
+      report.output.applied = true;
+    },
+  ]) {
+    const report = structuredClone(fixture.artifact);
+    mutate(report);
+    assert(!validateJudgment(report), "reject malformed Judgment contract");
+  }
+}

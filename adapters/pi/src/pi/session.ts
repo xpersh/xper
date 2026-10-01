@@ -97,6 +97,7 @@ export class XperSession {
   phaseSummary(): string {
     const run = this.lastRun?.run;
     if (!run) return "; no run";
+    const judgment = this.lastRun?.judgment;
     const telemetry = this.lastRun?.degradedReason
       ? `; telemetry: ${this.lastRun.degradedReason}`
       : "";
@@ -105,8 +106,9 @@ export class XperSession {
     const verification = Object.values(this.lastRun?.verifications ?? {})[0];
     const routing = run.routing ? `profile ${run.routing.profile}` : "Pi model";
     const outcomes = Object.values(run.attempts).map((attempt) => attempt.outcome ?? "running");
-    const gate =
-      this.lastRun?.reconciliation?.status === "awaiting_resume"
+    const gate = judgment
+      ? `; judgment ${judgment.verdict ?? judgment.status}; evaluated ${judgment.evaluatedCommit}; ${judgment.artifactId ? `report ${judgment.artifactId} (${judgment.artifactPath}); recommendation not applied` : `retry with assignmentId ${judgment.assignmentId}`}`
+      : this.lastRun?.reconciliation?.status === "awaiting_resume"
         ? "; revised plan ready: /xper resume <commit>"
         : implementation?.nodeId === "implement"
           ? `; implementation ${implementation.status}`

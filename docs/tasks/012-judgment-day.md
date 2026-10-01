@@ -1,9 +1,9 @@
 # XP-012: Judgment and explicit closure
 
-- Status: `pending`
+- Status: `in_progress`
 - Milestone: M3
 - Entry dependency: XP-011.3
-- Next slice: XP-012.1
+- Next slice: XP-012.2
 
 ## Outcome and boundary
 
@@ -18,10 +18,18 @@ increment, and a closed run are distinct facts.
 
 ## XP-012.1 — Obtain a Judge report
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-011.3
 - Example: when all planned increments verify, an explicit delegation returns
   an independent verdict with reasons; no closure or rework starts automatically.
+
+Implementation note: replace the all-increments-verified readiness diagnostic
+with one explicitly delegated, read-only Judge evaluation. Reuse the child role
+runner, artifact writer, pure flow transitions, cumulative run budgets, checkpoint
+and background outbox. A two-increment fixture and temporary Git checkout will
+verify exact evidence, all seven recommendations, interrupted retry, and local
+operation with an unavailable recorder. Judge consumes existing test evidence;
+it cannot request or execute additional commands.
 
 Provide intent, criteria, evaluated revision/diff reference, decisions, and
 verification evidence without inheriting the full conversation. Use the
@@ -37,6 +45,40 @@ Acceptance:
 - Interrupted evaluation requires explicit retry with frozen inputs.
 
 Stop here: no debt workflow, human decision UI, or retrospective generation.
+
+### Delivery evidence
+
+- After the last planned increment verifies, an explicit `xper_delegate` now
+  starts `pi.judgment` v1 instead of returning only the readiness diagnostic.
+  Every valid RFC recommendation completes that flow while leaving the run open
+  and the recommendation unapplied. Subsequent delegation cannot repeat it.
+- The host freezes accepted Knowledge, current delivery artifacts, test-log
+  digests, covered increments/criteria and the cumulative Git base/tip. A fresh
+  Pi child receives the complete diff and only the `read` tool. Revision or
+  evidence changes invalidate the attempt; an oversized diff fails explicitly.
+- The existing runner, writer, cumulative run budgets, journal and background
+  recorder are reused. Checkpoint format 6 preserves Judgment references and
+  migrates older envelopes. Interrupted retries require the assignment ID and
+  retain the model, inputs, revision and spent budgets. Requested routing and
+  observed response models remain separate facts.
+- Tests cover all seven recommendations, malformed output and citations, a
+  two-increment handoff, reload, corrupted checkpoints, explicit frozen retries,
+  budgets, configured/default routing, actual child flags and model observations,
+  real temporary Git changes, and missing/rejecting/unanswered Rust.
+- `npm run check` passes formatting, Clippy/Biome lint, 12 Pi architecture tests,
+  strict TypeScript, 67 Rust tests, shared JSON Schema fixtures, and 203 adapter
+  tests. `git diff --check` and changed documentation links also pass. Execution
+  uses synthetic children and isolated checkouts, without model credentials.
+- The final diff changes 50 files with 2,143 additions and 60 removals:
+  940 production, 775 test, 279 contract, and 149 documentation/check additions.
+  This exceeds the roadmap's size alarm; the requested
+  slice includes its flow, checkpoint validation, evidence contract, execution
+  and regression coverage. Review the complete change together. No later slice,
+  new dependency, public command/tool, Rust workflow rule or JSON-RPC method is
+  included. The new surfaces are `judgment-v1`, the Judge role, local projection
+  fields, and checkpoint format 6.
+- Applying recommendations, closure, feedback, debt/human decisions, additional
+  tests requested by Judge, retrospectives and publication remain deferred.
 
 ## XP-012.2 — Apply acceptance or rejection and close
 

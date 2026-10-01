@@ -1,3 +1,5 @@
+import { judgmentDefinition } from "../judgment/definition.js";
+import type { JudgmentTransition } from "../judgment/machine.js";
 import { implementationDefinition } from "../implementation/definition.js";
 import { knowledgeDefinition } from "../knowledge/definition.js";
 import type { Transition } from "../knowledge/events.js";
@@ -14,7 +16,8 @@ export interface CheckpointChange<Result> {
   definition:
     | typeof knowledgeDefinition
     | typeof implementationDefinition
-    | typeof verificationDefinition;
+    | typeof verificationDefinition
+    | typeof judgmentDefinition;
   context: { runId: string; instanceId: string };
 }
 export function knowledgeChange<Result>(
@@ -25,7 +28,8 @@ export function knowledgeChange<Result>(
   if (checkpoint) checkpoint.knowledge = transition.state;
   else
     checkpoint = {
-      version: 5,
+      version: 6,
+      judgment: null,
       knowledge: transition.state,
       implementations: {},
       verifications: {},
@@ -99,6 +103,19 @@ export function verificationChange<Result>(
     facts: transition.facts,
     result: transition.result,
     definition: verificationDefinition,
+    context: { runId: transition.state.runId, instanceId: transition.state.instanceId },
+  };
+}
+
+export function judgmentChange<Result>(
+  previous: AdapterCheckpoint,
+  transition: JudgmentTransition<Result>,
+): CheckpointChange<Result> {
+  return {
+    state: { ...previous, judgment: transition.state },
+    facts: transition.facts,
+    result: transition.result,
+    definition: judgmentDefinition,
     context: { runId: transition.state.runId, instanceId: transition.state.instanceId },
   };
 }

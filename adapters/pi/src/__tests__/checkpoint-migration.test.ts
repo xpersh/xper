@@ -136,11 +136,11 @@ test("version 1 migration preserves identities, sealed evidence, frozen routing 
   assert.notEqual(state.attempts, legacy.attempts);
 });
 
-test("version 1 and 2 knowledge checkpoints migrate into an empty version 5 envelope", () => {
+test("version 1 and 2 knowledge checkpoints migrate into an empty version 6 envelope", () => {
   const legacy = deepFreeze(legacyCheckpoint());
   const fromOne = decodeAdapterCheckpoint(legacy);
   assert(fromOne);
-  assert.equal(fromOne.version, 5);
+  assert.equal(fromOne.version, 6);
   assert.equal(fromOne.knowledge.run_id, legacy.run_id);
   assert.deepEqual(fromOne.implementations, {});
   assert.deepEqual(fromOne.verifications, {});
@@ -208,7 +208,7 @@ test("version 3 wraps its existing implementation as the first immutable history
   });
   const migrated = decodeAdapterCheckpoint(versionThree);
   assert(migrated);
-  assert.equal(migrated.version, 5);
+  assert.equal(migrated.version, 6);
   assert.deepEqual(migrated.implementations.s1, [started.state]);
   assert.deepEqual(migrated.verifications, {});
   assert.equal(JSON.stringify(versionThree).includes('"version":4'), false);

@@ -1,4 +1,9 @@
-import type { AttemptOutcome, RunAdvanced, WorkflowClient } from "../workflow/types.js";
+import type {
+  AttemptOutcome,
+  JudgmentRecommendation,
+  RunAdvanced,
+  WorkflowClient,
+} from "../workflow/types.js";
 import type { ExecutionRequest, ExecutionResult } from "./execution.js";
 
 export type Observation =
@@ -26,6 +31,7 @@ export interface DelegationRequest {
 }
 
 export interface DelegationResult {
+  judgment?: JudgmentRecommendation;
   attemptId: string;
   outcome: AttemptOutcome;
   phase: string;

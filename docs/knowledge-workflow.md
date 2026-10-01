@@ -210,13 +210,35 @@ automatically schedule another increment. When called again explicitly,
 delegation selects the next Plan-eligible Implementer, requires the clean checkout
 at the latest verified commit, and includes direct dependency artifacts in its
 sealed inputs. Once every increment verifies, the open run is ready for Judgment
-Day; Judgment and closure remain later slices.
+Day; the next explicit delegation obtains its recommendation.
 
 Failures, cancellation, and timeout may be retried explicitly within both the
 remaining run budget and the assignment's `maxAttempts`, `maxTimeMs`, and
 `maxCostMicros`. Recovery marks an unfinished attempt `interrupted`, preserves
 the checkout, and requires its `assignmentId` on retry; it never relaunches the
 child automatically.
+
+## Judge recommendation
+
+After every increment in the authorized Plan verifies, call `xper_delegate`
+explicitly for `judgment_day.judge`. The fresh child receives sealed Knowledge,
+all current delivery results, test logs, and a host-read cumulative diff. It has
+only the `read` tool and cannot run tests or commands. The host requires the clean
+final verified revision and unchanged evidence before and after evaluation.
+
+The versioned `judgment_verdict` contains one finding per criterion, reasons and
+criticisms. Each finding cites supplied artifact IDs (bound to recorded digests)
+or `git:<baseCommit>..<evaluatedCommit>` for the exact supplied diff. The seven
+recommendations are `ACCEPT`, `ACCEPT_WITH_DEBT`, `REWORK_IMPLEMENTATION`,
+`REVISIT_DESIGN`, `REDEFINE`, `HUMAN_DECISION`, and `REJECT`. None applies a decision
+or closes the run in this slice. Invalid reports fail the attempt; valid reports
+remain inspectable and cannot trigger a second evaluation.
+
+Interruption requires explicit retry with the displayed `assignmentId`. The
+assignment retains its model, evidence and Git revision, including log digests;
+changed or missing inputs block retry. Use the configured Judge route when a
+profile is frozen; without a profile, freeze the active Pi model. Actual response
+provider/model identities remain separate `model.usage` facts.
 
 ## Limits and human gates
 
@@ -263,7 +285,8 @@ threshold. Plan checks the sum of proposed assignment budgets against remaining
 attempt, wall-time, and cost limits, conservatively summing time even for parallel
 work. Implementation and Verification each enforce their assignment limits
 cumulatively across all instances for that Plan assignment. The global budget
-sums Knowledge, Implementation, and Verification attempts. Each child and its
+sums Knowledge, Implementation, Verification, and Judgment attempts. Judge uses
+only the run limits and configured per-attempt timeout. Each child and its
 host-run commands share one deadline.
 
 Human gates are owned by Pi. A gate first records a request naming its current
@@ -287,9 +310,12 @@ After the normal checkout build:
    Verifier. If rejected for Implementation, delegate the bounded rework and then
    a fresh review. If it returns to Define or Design, revise and seal the Plan,
    then run `/xper resume <commit>` before delegating fresh delivery.
+8. After all increments verify, delegate once for Judge and inspect its unapplied
+   recommendation; applying the verdict remains future work.
 
 `/xper status` shows the phase, outcomes, artifact count, pending approval,
-ready-plan state, latest Implementation and Verification positions, and any
+ready-plan state, latest Implementation/Verification positions, the Judge report
+and evaluated revision, and any
 pending reconciliation with its exact resume command. `xper_delegate` reports
 the same block and never resumes implicitly. `/xper advance` evaluates the
 current gate; unlike the original
@@ -298,18 +324,20 @@ replaying Discovery's result. Repeated calls on an unchanged accepted Plan retur
 `ready: true, resumed: true` without new events.
 
 Profiles must include the five Knowledge roles in the table to reach Plan plus
-`implementation.driver` and `verify.verifier` for the first delivery loop.
+`implementation.driver` and `verify.verifier` for delivery, and
+`judgment_day.judge` for Judgment.
 Existing Discovery-only profiles remain usable for Discovery; dispatch explains
 when the current role has no route. New runs resume from Pi's versioned
-checkpoint. Checkpoint envelope format 5 contains Knowledge v3, ordered
+checkpoint. Checkpoint envelope format 6 contains Knowledge v3, ordered
 per-increment histories of Implementation v1 and Verification v1, the currently
-authorized Plan, and sequential reconciliation records. Each delivery history is
+authorized Plan, sequential reconciliation records, and nullable Judgment v1
+state with frozen evidence references and report metadata. Each delivery history is
 validated against its own historical Plan; only the authorized Plan contributes
 to the current frontier, satisfied dependencies, and sequential Git tip. Valid
-Knowledge v1/v2 states and envelope formats 1 through 4 migrate in memory without
+Knowledge v1/v2 states and envelope formats 1 through 5 migrate in memory without
 changing existing run, visit, assignment, attempt, evidence, budget, or outbox
 identities. Reading alone does not rewrite the journal; the next local commit
-writes format 5. Restoring a checkpoint does not repeat an agent invocation.
+writes format 6. Restoring a checkpoint does not repeat an agent invocation.
 Core-owned legacy runs remain
 available for historical inspection, but cannot resume under the new architecture
 because they lack that checkpoint.

@@ -1,3 +1,4 @@
+import { prepareJudgmentSettlement } from "./judgment.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { implementationChange, knowledgeChange, verificationChange } from "../checkpoint/update.js";
 import { transitionImplementation } from "../implementation/machine.js";
@@ -18,6 +19,8 @@ export async function prepareSettlement(
   result: FinishAttempt,
   effects: WorkflowEffects,
 ): Promise<PreparedSettlement> {
+  if (checkpoint.judgment?.attempts[result.attemptId])
+    return prepareJudgmentSettlement(checkpoint, result, effects);
   const implementation = Object.values(checkpoint.implementations)
     .flat()
     .find((candidate) => Object.hasOwn(candidate.attempts, result.attemptId));

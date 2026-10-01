@@ -1,3 +1,4 @@
+import { prepareJudgmentAssignment } from "./judgment.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { knowledgeChange } from "../checkpoint/update.js";
 import { assertDeliveryReady, deliveryFrontier } from "../delivery/frontier.js";
@@ -27,6 +28,15 @@ export async function prepareAssignment(
         fallbackModel,
         effects,
       );
+    if (!frontier) {
+      const judgment = await prepareJudgmentAssignment(
+        checkpoint,
+        assignmentId,
+        fallbackModel,
+        effects,
+      );
+      if (judgment) return judgment;
+    }
     return prepareImplementationAssignment(
       checkpoint,
       frontier,

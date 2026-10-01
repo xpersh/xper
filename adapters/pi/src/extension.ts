@@ -1,3 +1,5 @@
+import { readEvidence } from "./workflow/evidence.js";
+import { runJudgment } from "./execution/judgment.js";
 import type { BridgeOptions } from "./bridge/client.js";
 import { saveArtifact } from "./execution/artifacts.js";
 import { runPiChild } from "./execution/child.js";
@@ -39,6 +41,11 @@ export function createXperExtension(
           timeoutMs: childTimeoutMs,
           tools: toolsForRole(role),
           ...modelOptions,
+        });
+      if (execution.workflow === "judgment")
+        return runJudgment(execution, {
+          runChild,
+          readEvidence: (path) => readEvidence(cwd, path),
         });
       if (execution.workflow === "implementation")
         return runImplementation(execution, { runChild });

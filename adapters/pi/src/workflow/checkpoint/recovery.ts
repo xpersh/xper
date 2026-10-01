@@ -1,3 +1,5 @@
+import { transitionJudgment } from "../judgment/machine.js";
+import { judgmentChange } from "./update.js";
 import { transitionImplementation } from "../implementation/machine.js";
 import { transitionKnowledge } from "../knowledge/machine.js";
 import { transitionVerification } from "../verification/machine.js";
@@ -38,4 +40,9 @@ export function* recoveryChanges(
       yield change;
       current = change.state;
     }
+  if (current.judgment)
+    yield judgmentChange(
+      current,
+      transitionJudgment(current.judgment, { type: "session.recover" }, now),
+    );
 }

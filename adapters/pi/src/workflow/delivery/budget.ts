@@ -8,6 +8,7 @@ export function runBudget(checkpoint: AdapterCheckpoint, now: number) {
   const knowledge = checkpoint.knowledge;
   const attempts =
     Object.keys(knowledge.attempts).length +
+    Object.keys(checkpoint.judgment?.attempts ?? {}).length +
     Object.values(checkpoint.implementations).reduce(
       (total, history) =>
         total +

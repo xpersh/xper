@@ -58,10 +58,15 @@ class Recorder implements RecorderClient {
     return { routing: this.routing, adapterConfig: { ...this.config } };
   }
 }
-async function setup(policy: WorkflowPolicy = {}, id?: () => string) {
+async function setup(
+  policy: WorkflowPolicy = {},
+  id?: () => string,
+  routing: RoutingSnapshot | null = null,
+) {
   const cwd = await mkdtemp(join(tmpdir(), "xper-pi-policy-"));
   const recorder = new Recorder();
   recorder.config = policy;
+  recorder.routing = routing;
   const artifacts = new Map<string, { content: string; digest: string }>();
   let now = 1000;
   let workspace = {
@@ -247,6 +252,10 @@ async function completeImplementation(
     },
   });
   harness.artifacts.set(assignment.artifactPath, { content, digest: content });
+  harness.artifacts.set(`.xper/artifacts/test-output-${assignment.attemptId}-1.log`, {
+    content: "Synthetic test passed",
+    digest: "synthetic-test-log",
+  });
   const finished = await controller.finishAttempt({
     attemptId: assignment.attemptId,
     outcome: "succeeded",
@@ -314,6 +323,10 @@ async function completeVerification(
     },
   });
   harness.artifacts.set(assignment.artifactPath, { content, digest: content });
+  harness.artifacts.set(`.xper/artifacts/test-output-${assignment.attemptId}-1.log`, {
+    content: "Synthetic test passed",
+    digest: "synthetic-test-log",
+  });
   const finished = await controller.finishAttempt({
     attemptId: assignment.attemptId,
     outcome: "succeeded",

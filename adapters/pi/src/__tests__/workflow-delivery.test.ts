@@ -34,10 +34,8 @@ test("explicit delivery verifies one exact implementation without finishing the 
     assert.equal(status.implementations?.s1?.nodeId, "implemented");
     assert.equal(status.verifications?.s1?.nodeId, "verified");
     assert(!status.timeline.some((event) => (event as RecordedEvent).type === "run.finished"));
-    await assert.rejects(
-      h.controller.startAssignment(undefined, "provider/model"),
-      /all planned increments are verified; the run is ready for Judgment Day/,
-    );
+    const judge = await h.controller.startAssignment(undefined, "provider/model");
+    assert.equal(judge.workflow, "judgment");
   } finally {
     await h.cleanup();
   }
@@ -111,7 +109,7 @@ test("dependent increments advance explicitly in one checkout and survive reload
     assert(!status.timeline.some((event) => (event as RecordedEvent).type === "run.finished"));
     await assert.rejects(
       restored.startAssignment(undefined, "provider/model"),
-      /all planned increments are verified; the run is ready for Judgment Day/,
+      /run attempt budget exhausted/,
     );
   } finally {
     await h.cleanup();

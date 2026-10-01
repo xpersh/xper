@@ -126,3 +126,18 @@ test("actions cannot acquire I/O through a shared helper outside their dependenc
     /receive Pi execution/,
   );
 });
+
+test("Judgment follows the same purity and cross-flow composition rules", () => {
+  assert.match(
+    check({
+      "workflow/judgment/machine.ts": 'import { run } from "../../execution/child.js";',
+    }).join("\n"),
+    /must remain pure/,
+  );
+  assert.match(
+    check({
+      "workflow/judgment/machine.ts": 'import { transition } from "../verification/machine.js";',
+    }).join("\n"),
+    /compose other flows through delivery/,
+  );
+});

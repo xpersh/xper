@@ -1,3 +1,5 @@
+import { decodeJudgment } from "../judgment/checkpoint.js";
+import { validateJudgmentReferences } from "../delivery/judgment.js";
 import { validateSerialDelivery } from "../delivery/history.js";
 import type { WorkflowState } from "../knowledge/state.js";
 import { decodeHistories } from "./histories.js";
@@ -13,6 +15,7 @@ export function decodeEnvelope(
   verificationValue: Record<string, unknown>,
   authorizedPlan: DeliveryPlanAuthorization | null,
   reconciliations: DeliveryReconciliation[],
+  judgment: unknown = null,
 ): AdapterCheckpoint {
   const { implementations, verifications } = decodeHistories(
     knowledge,
@@ -27,12 +30,15 @@ export function decodeEnvelope(
     reconciliations,
   );
   validateSerialDelivery(implementations, verifications, authorizedPlan?.artifactId ?? null);
-  return {
-    version: 5,
+  const checkpoint: AdapterCheckpoint = {
+    version: 6,
+    judgment: decodeJudgment(judgment),
     knowledge,
     implementations,
     verifications,
     authorizedPlan: structuredClone(authorizedPlan),
     reconciliations: structuredClone(reconciliations),
   };
+  validateJudgmentReferences(checkpoint);
+  return checkpoint;
 }

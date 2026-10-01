@@ -10,6 +10,7 @@ export function registeredArtifact(
   version: number;
   digest: string;
 } {
+  if (checkpoint.judgment?.report?.artifact_id === id) return checkpoint.judgment.report;
   const knowledge = checkpoint.knowledge.artifacts[id];
   if (knowledge) return knowledge;
   const imported = checkpoint.knowledge.imports[id];

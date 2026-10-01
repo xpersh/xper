@@ -1,3 +1,4 @@
+import type { JudgmentState } from "../judgment/state.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { WorkflowState } from "../knowledge/state.js";
 import type { VerificationState } from "../verification/state.js";
@@ -23,7 +24,8 @@ export interface DeliveryReconciliation {
 }
 
 export interface AdapterCheckpoint {
-  version: 5;
+  version: 6;
+  judgment: JudgmentState | null;
   knowledge: WorkflowState;
   implementations: Record<string, ImplementationState[]>;
   verifications: Record<string, VerificationState[]>;

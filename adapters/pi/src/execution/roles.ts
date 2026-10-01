@@ -1,4 +1,5 @@
 export function toolsForRole(role: string): string[] {
+  if (role === "judgment_day.judge") return ["read"];
   return role === "implementation.driver" ? ["read", "bash", "edit", "write"] : ["read", "bash"];
 }
 
@@ -30,6 +31,12 @@ export function resolveAgent(role: string): { name: string; systemPrompt: string
       name: role,
       systemPrompt:
         "You are verify.verifier. Independently review the exact supplied implementation revision for behavior, regressions, unrequested scope, and unnecessary complexity. Read the accepted artifacts, implementation result, source, diff, and test logs. You must not edit, write, commit, reset, clean, or repair the checkout. Your final response must be only the requested JSON report; do not invent test exit statuses because the host runs the commands.",
+    };
+  if (role === "judgment_day.judge")
+    return {
+      name: role,
+      systemPrompt:
+        "You are judgment_day.judge. Independently evaluate the supplied frozen intent, criteria, decisions, code diff and verification evidence. Read the supplied artifacts and source. Do not modify, execute commands, publish, approve, reopen work or close the run. Return only the requested JSON recommendation; cite exact supplied evidence for every criterion and criticism.",
     };
   const output = outputs[role];
   if (!output) throw new Error(`Unsupported xper agent: ${role}`);

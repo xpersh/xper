@@ -160,9 +160,11 @@ export function checkArchitecture(sources) {
           `${adapterPath} must report execution evidence, not drive workflow decisions`,
         );
       }
-      const owner = adapterPath.match(/^workflow\/(knowledge|implementation|verification)\//)?.[1];
+      const owner = adapterPath.match(
+        /^workflow\/(knowledge|implementation|verification|judgment)\//,
+      )?.[1];
       const dependencyOwner = target?.match(
-        /^workflow\/(knowledge|implementation|verification)\//,
+        /^workflow\/(knowledge|implementation|verification|judgment)\//,
       )?.[1];
       if (
         owner &&

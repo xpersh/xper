@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTransition, verificationDefinition } from "../workflow/definition.js";
-import {
-  decodeVerificationState,
-  transitionVerification,
-  type VerificationEvent,
-} from "../workflow/verification.js";
+import { findTransition } from "../workflow/graph.js";
+import { decodeVerificationState } from "../workflow/verification/checkpoint.js";
+import { verificationDefinition } from "../workflow/verification/definition.js";
+import type { VerificationEvent } from "../workflow/verification/events.js";
+import { transitionVerification } from "../workflow/verification/machine.js";
 
 const base = "1111111111111111111111111111111111111111";
 const evaluated = "2222222222222222222222222222222222222222";

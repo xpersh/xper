@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { KnowledgeExecution } from "../actions/delegate-knowledge.js";
-import { runImplementation } from "../implementation/execution.js";
-import { inspectGitWorkspace } from "../implementation/workspace.js";
+import type { ImplementationExecution } from "../actions/execution.js";
+import { runImplementation } from "../execution/implementation.js";
+import { inspectGitWorkspace } from "../execution/workspace.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -24,7 +24,7 @@ async function checkout() {
   return cwd;
 }
 
-function request(cwd: string, command: string): KnowledgeExecution {
+function request(cwd: string, command: string): ImplementationExecution {
   return {
     attemptId: "attempt-1",
     assignmentId: "driver",

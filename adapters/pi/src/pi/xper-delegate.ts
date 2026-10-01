@@ -1,11 +1,12 @@
-import { delegateKnowledge, type KnowledgeDependencies } from "../actions/delegate-knowledge.js";
-import type { PiExtensionAPI } from "./types.js";
+import { delegateWorkflow } from "../actions/delegate-workflow.js";
+import type { DelegationDependencies } from "../actions/delegation.js";
 import type { XperSession } from "./session.js";
+import type { PiExtensionAPI } from "./types.js";
 
 export function registerXperDelegate(
   pi: PiExtensionAPI,
   session: XperSession,
-  execution: Pick<KnowledgeDependencies, "execute" | "saveBrief">,
+  execution: Pick<DelegationDependencies, "execute" | "saveBrief">,
 ): void {
   pi.registerTool({
     name: "xper_delegate",
@@ -27,7 +28,7 @@ export function registerXperDelegate(
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const workflow = session.workflow;
       if (!workflow) throw new Error("local xper workflow is not initialized");
-      const result = await delegateKnowledge(
+      const result = await delegateWorkflow(
         {
           ...params,
           cwd: ctx.cwd,

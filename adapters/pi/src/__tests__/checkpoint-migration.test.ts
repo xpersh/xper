@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type Phase, policyFrom } from "../workflow/policy.js";
+import { decodeAdapterCheckpoint } from "../workflow/checkpoint/decode.js";
+import { transitionImplementation } from "../workflow/implementation/machine.js";
+import { decodeCheckpoint } from "../workflow/knowledge/checkpoint.js";
 import {
   type Artifact,
   type Assignment,
   type Attempt,
-  decodeAdapterCheckpoint,
-  decodeCheckpoint,
   toRunSummary,
-} from "../workflow/state.js";
+} from "../workflow/knowledge/state.js";
+import { type Phase, policyFrom } from "../workflow/policy.js";
 import { WorkflowValidationError } from "../workflow/types.js";
-import { transitionImplementation } from "../workflow/implementation.js";
 
 // These historical labels intentionally do not derive from the new definition:
 // a future graph edit must not silently redefine what a version 1 file meant.

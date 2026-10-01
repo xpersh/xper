@@ -6,8 +6,8 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { connectBridge } from "../bridge/client.js";
-import { PiWorkflow } from "../workflow/controller.js";
 import { XperClient } from "../bridge/xper-client.js";
+import { PiWorkflow } from "../workflow/controller.js";
 
 const workspace = fileURLToPath(new URL("../../../..", import.meta.url));
 const binary = resolve(workspace, "target/debug/xper");

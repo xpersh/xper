@@ -1,12 +1,12 @@
 import { BridgeClient, type BridgeHandshake, type BridgeOptions } from "../bridge/client.js";
-import type { RunStatus } from "../workflow/types.js";
+import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
 import { XperClient, type RecorderClient } from "../bridge/xper-client.js";
-import { PreparedConfiguration } from "./configuration.js";
-import { listAvailableModels } from "../knowledge/models.js";
+import { listAvailableModels } from "../execution/models.js";
 import { PiWorkflow } from "../workflow/controller.js";
+import type { RunStatus } from "../workflow/types.js";
+import { PreparedConfiguration } from "./configuration.js";
 import { PiObservations } from "./observations.js";
 import type { PiContext } from "./types.js";
-import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
 
 const ADAPTER_VERSION = "0.1.0";
 const STATUS_KEY = "xper";

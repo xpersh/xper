@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runKnowledge } from "../knowledge/delegate.js";
-import { delegateKnowledge } from "../actions/delegate-knowledge.js";
+import { delegateWorkflow } from "../actions/delegate-workflow.js";
+import { runPiChild } from "../execution/child.js";
 import type { ModelUsage } from "../workflow/types.js";
 
 const fakeExecutor = (messages: unknown[]) => `
@@ -15,7 +15,7 @@ const fakeExecutor = (messages: unknown[]) => `
 `;
 
 test("Pi captures per-message usage and observed models without prompts or response content", async () => {
-  const result = await runKnowledge("private task", process.cwd(), undefined, {
+  const result = await runPiChild("private task", process.cwd(), undefined, {
     command: process.execPath,
     args: [
       "-e",
@@ -74,7 +74,7 @@ test("Pi captures per-message usage and observed models without prompts or respo
 test("usage recording failure leaves the execution outcome and gate decision unchanged", async () => {
   const reports: ModelUsage[] = [];
   const events: string[] = [];
-  const result = await delegateKnowledge(
+  const result = await delegateWorkflow(
     { task: "synthetic", cwd: "/unused", signal: new AbortController().signal },
     {
       workflow: {
@@ -125,7 +125,7 @@ test("hanging usage and throwing observers cannot hold the tool result or gate",
   timeout: 5000,
 }, async () => {
   let called = false;
-  const result = await delegateKnowledge(
+  const result = await delegateWorkflow(
     { task: "synthetic", cwd: "/unused", signal: new AbortController().signal },
     {
       workflow: {

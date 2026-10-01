@@ -1,0 +1,37 @@
+import type { AdapterCheckpoint } from "../checkpoint/types.js";
+import { invalid } from "../validation.js";
+export function registeredArtifact(
+  checkpoint: AdapterCheckpoint,
+  id: string,
+): {
+  artifact_id: string;
+  kind: string;
+  path: string;
+  version: number;
+  digest: string;
+} {
+  const knowledge = checkpoint.knowledge.artifacts[id];
+  if (knowledge) return knowledge;
+  const imported = checkpoint.knowledge.imports[id];
+  if (imported) return imported;
+  for (const history of Object.values(checkpoint.implementations))
+    for (const implementation of history) {
+      const artifact = implementation.artifacts[id];
+      if (artifact) return artifact;
+    }
+  for (const history of Object.values(checkpoint.verifications))
+    for (const verification of history) {
+      const artifact = verification.artifacts[id];
+      if (artifact) return artifact;
+    }
+  invalid("input artifact is not registered");
+}
+export function artifactInput(checkpoint: AdapterCheckpoint, id: string) {
+  const artifact = registeredArtifact(checkpoint, id);
+  return {
+    artifact_id: artifact.artifact_id,
+    kind: artifact.kind,
+    path: artifact.path,
+    version: artifact.version,
+  };
+}

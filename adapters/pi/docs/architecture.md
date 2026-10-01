@@ -16,7 +16,7 @@ changes telemetry status, not whether Pi can work.
 ```mermaid
 flowchart LR
     Commands[Pi commands and tools] --> Workflow[PiWorkflow]
-    Commands --> Action[delegateKnowledge]
+    Commands --> Action[delegateWorkflow]
     Action --> Workflow
     Action --> Executor[Child Pi execution]
     Action --> Implementation[Implementation runner]
@@ -25,6 +25,9 @@ flowchart LR
     Verification --> Git
     Action --> Writer[Artifact writer]
     Workflow --> Machines[Pure Knowledge, Implementation and Verification transitions]
+    Workflow --> Runtime[Evidence preparation and event construction]
+    Runtime --> Delivery[Pure delivery coordination]
+    Delivery --> Machines
     Machines --> Definition[Versioned definitions and edges]
     Machines --> Policy[Contracts, gates and budgets]
     Workflow --> Evidence[Local artifact evidence]
@@ -44,22 +47,28 @@ flowchart LR
 | Compose dependencies and register the extension | `src/extension.ts` |
 | Commands, tools, session hooks, and presentation | `src/pi/` |
 | Background configuration preparation and last available snapshot | `src/pi/configuration.ts` |
-| Coordinate delegation with injected execution and writing dependencies | `src/actions/delegate-knowledge.ts` |
-| Prepare evidence, time and IDs; invoke transitions; commit local state | `src/workflow/controller.ts` |
-| Pure Knowledge start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge-machine.ts` |
-| Pure per-increment Implementation transition and result validation | `src/workflow/implementation.ts` |
-| Pure per-increment Verification transition and result validation | `src/workflow/verification.ts` |
-| Versioned serializable topology and explicit transition edges | `src/workflow/definition.ts` |
-| Runtime state, checkpoint validation, and migration | `src/workflow/state.ts` |
+| Coordinate delegation with injected execution and writing dependencies | `src/actions/delegate-workflow.ts` |
+| Discriminated execution requests and assignment adaptation | `src/actions/execution.ts`, `prepare-execution.ts` |
+| Serialize operations and apply/persist the one owned checkpoint | `src/workflow/controller.ts` |
+| Prepare evidence, time and IDs; construct events with explicit effect ports | `src/workflow/runtime/` |
+| Pure delivery frontier, dependencies, cumulative budgets, commit chain, feedback and Plan authorization | `src/workflow/delivery/` |
+| Project local state and recording health for inspection | `src/workflow/status.ts` |
+| Pure Knowledge start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge/` |
+| Pure per-increment Implementation transition and result validation | `src/workflow/implementation/` |
+| Pure per-increment Verification transition and result validation | `src/workflow/verification/` |
+| Versioned serializable topology and explicit transition edges | `src/workflow/graph.ts` and each flow’s `definition.ts` |
+| Composed checkpoint migrations, history/reference checks, updates and recovery | `src/workflow/checkpoint/` and each flow's `checkpoint.ts` |
 | Phase roles and execution budgets | `src/workflow/policy.ts` |
-| Artifact contracts, cross-artifact gates, and plan validation | `src/workflow/contracts.ts` |
+| Knowledge artifact types and parsing | `src/workflow/knowledge/contract.ts`, `contracts.ts` |
+| Cross-artifact handoff, Plan DAG and routing validation | `src/workflow/delivery/plan.ts`, `handoff.ts` |
 | Bounded evidence reads, path confinement, and digests | `src/workflow/evidence.ts` |
 | Local checkpoint and pending recording events | `src/workflow/journal.ts` |
 | Typed configuration, recording, and inspection operations | `src/bridge/xper-client.ts` |
 | Transport, correlation, handshake, envelopes, and errors | `src/bridge/client.ts`, `protocol.ts` |
-| Role prompts, child Pi execution, and output writing | `src/knowledge/` |
-| Implementer handoff, Git inspection, host-run tests, and result construction | `src/implementation/` |
-| Verifier proposal validation, host-run tests, and canonical review construction | `src/verification/` |
+| Shared role prompts, child Pi process, models and artifact writing | `src/execution/roles.ts`, `child.ts`, `models.ts`, `artifacts.ts` |
+| Shared Git inspection and host-run commands | `src/execution/workspace.ts`, `test-command.ts` |
+| Implementer proposal validation, execution and canonical result construction | `src/execution/implementation-proposal.ts`, `implementation.ts` |
+| Verifier proposal validation, execution and canonical review construction | `src/execution/verification-proposal.ts`, `verification.ts` |
 
 Actions receive their effects explicitly and remain testable without Pi,
 processes, or files. Workflow rules live in the adapter's workflow modules,
@@ -70,9 +79,24 @@ it does not hide workflow commands behind recording calls.
 
 `PiWorkflow` is the runtime boundary. It loads the local checkpoint, reads and
 verifies artifact evidence, supplies IDs and time, and invokes the applicable
-pure transition function. Each reducer owns its state changes and decisions and
-returns the next state, result, and facts. Local persistence and agent execution
+pure transition function. Each reducer clones its input once, dispatches to typed event handlers, and
+finalizes the revision and ordered facts once. Handlers work only on that owned
+draft. Each flow owns its state, checkpoint decoder, artifact contract, graph
+definition, and transitions. The outer checkpoint decoder validates identities
+and evidence references between flows. Reducers return the next state, result,
+and facts. Local persistence and agent execution
 stay outside them; neither reducer nor its guards consult Rust.
+
+Knowledge dispatches lifecycle, assignment, completion, gate and feedback events
+to their owners. Implementation and Verification each keep admission, completion
+and recovery semantics in their own flow; they do not share a generic reducer.
+Delivery functions compose flows through identities and evidence and return a new
+checkpoint and ordered facts without mutating their inputs. Runtime preparation
+receives only the data and effect ports it needs, never the controller itself.
+Only `PiWorkflow` owns the serialization queue and applies changes to live state.
+Its single commit path records Verification before a separate Knowledge handoff;
+recovery finishes only the missing handoff. This reorganization preserves all
+definition versions, public interfaces and checkpoint format 5.
 
 The `pi.knowledge` definition at version 2 declares the five knowledge nodes
 and a terminal ready node, with stable IDs and explicit edges. Its only outgoing
@@ -150,6 +174,11 @@ result locally. It continues to serve all Knowledge roles and, after Plan, the
 next eligible `implementation.driver` or dependent `verify.verifier`; no second
 public delivery tool exists.
 Pi validates the artifact and evaluates the owning gate after success.
+Internally, execution requests distinguish Knowledge, Implementation and
+Verification. Delivery requests require assignment, increment and commit evidence;
+Verification additionally requires the exact Implementation artifact and commands.
+The shared child process receives role-specific prompts and permissions, while
+each delivery runner constructs its own canonical result from host evidence.
 `/xper advance` reevaluates the gate; `/xper approve <artifactId>` supplies an
 explicit user decision for a pending human gate. The delegation tool never
 grants human approval. After a revised Plan is sealed, `/xper resume <commit>`
@@ -367,9 +396,17 @@ command/tool entry points. It also protects injected action dependencies and
 keeps workflow modules independent of the bridge process. Pure definition,
 state, and reducer modules cannot import concrete I/O or use ambient time,
 randomness, timers, or process state. The controller cannot navigate by phase
-array index. These are static
-conventions, not a complete TypeScript analysis; unresolved-promise tests check
+array index. Import and re-export edges are parsed with TypeScript, including type-only
+and dynamic imports. Every pure workflow subdirectory inherits the same rules,
+and dependency cycles are rejected. Cross-flow runtime dependencies belong in
+delivery; flows may import only another flow's contract types. Runtime preparation
+receives effects through ports (buffer encoding is a local utility), and executors
+cannot import workflow decisions. Negative architecture tests run with the
+boundary command. These checks do not prove runtime purity; unresolved-promise tests check
 the execution guarantee dynamically.
+
+There are no fixed line-count limits. Review module size together with its
+responsibility and dependencies; extracting a second controller is not a boundary.
 
 Pure reducer tests supply fixed time, IDs, and evidence; definition tests check
 stable references and declared paths. Migration tests preserve existing IDs and
@@ -381,3 +418,8 @@ Tests must cover interrupted execution, local checkpoint integrity, delayed
 configuration, and missing/rejecting/never-resolving recording without delaying
 workflow operations or changing their outcomes. Run `npm run check`
 before delivering code changes.
+
+Tests are grouped by behavior: Knowledge, sequential delivery, feedback and
+resumption, recovery, recording, and Pi integration. Shared harnesses contain
+synthetic data and controlled dependencies. Builds remove stale compiled modules
+and suites before compiling, so renamed tests cannot silently run twice.

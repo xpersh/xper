@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { KnowledgeExecution } from "../actions/delegate-knowledge.js";
-import { runVerification } from "../verification/execution.js";
+import type { VerificationExecution } from "../actions/execution.js";
+import { runVerification } from "../execution/verification.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -32,7 +32,7 @@ function request(
   baseCommit: string,
   evaluatedCommit: string,
   implementationTestCommands: string[],
-): KnowledgeExecution {
+): VerificationExecution {
   return {
     attemptId: "verification-1",
     assignmentId: "verifier",

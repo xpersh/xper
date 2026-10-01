@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { delegateKnowledge } from "../actions/delegate-knowledge.js";
+import { delegateWorkflow } from "../actions/delegate-workflow.js";
 import { connectBridge, type BridgeClient } from "../bridge/client.js";
-import { PiWorkflow } from "../workflow/controller.js";
 import { XperClient } from "../bridge/xper-client.js";
-import { saveArtifact } from "../knowledge/artifacts.js";
-import { resolveAgent } from "../knowledge/delegate.js";
-import { knowledgeDefinition } from "../workflow/definition.js";
+import { saveArtifact } from "../execution/artifacts.js";
+import { resolveAgent } from "../execution/roles.js";
+import { PiWorkflow } from "../workflow/controller.js";
+import { knowledgeDefinition } from "../workflow/knowledge/definition.js";
 
 const workspace = fileURLToPath(new URL("../../../..", import.meta.url));
 const fixtures = JSON.parse(
@@ -51,7 +51,7 @@ test("all phases run through the public bridge with fake execution, durable appr
     let expectedInputs = 0;
     for (const phase of ["discovery", "define", "design", "breakdown", "plan"]) {
       if (phase === "define") {
-        const rejected = await delegateKnowledge(
+        const rejected = await delegateWorkflow(
           { task: "Synthetic malformed output", cwd: root, signal: new AbortController().signal },
           {
             workflow: client,
@@ -63,7 +63,7 @@ test("all phases run through the public bridge with fake execution, durable appr
         assert.match(rejected.reason ?? "", /structured phase artifact required/);
         assert.equal(rejected.artifactId, null);
       }
-      const result = await delegateKnowledge(
+      const result = await delegateWorkflow(
         { task: "Use the supplied artifacts", cwd: root, signal: new AbortController().signal },
         {
           workflow: client,

@@ -121,7 +121,7 @@ before entering Define. From each worktree,
 npm run check
 ```
 
-The end-to-end test in `adapters/pi/src/__tests__/extension.test.ts` uses a
+The end-to-end test in `adapters/pi/src/__tests__/extension-integration.test.ts` uses a
 deterministic child Pi RPC process without credentials to cover the four
 outcomes, the gate without evidence, recovery after restart, and the CLI.
 Another test kills the bridge during an attempt, moves its lease expiry

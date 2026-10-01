@@ -1,7 +1,7 @@
-import type { WorkflowPolicy, RemainingBudget } from "./types.js";
+import { isKnowledgePhase, knowledgeDefinition, type Phase } from "./knowledge/definition.js";
+import type { RemainingBudget, WorkflowPolicy } from "./types.js";
 
-export type { Phase } from "./definition.js";
-import { knowledgeDefinition, isKnowledgePhase, type Phase } from "./definition.js";
+export type { Phase } from "./knowledge/definition.js";
 
 export const phases = Object.freeze(
   knowledgeDefinition.nodes.map((node) => node.id).filter(isKnowledgePhase),

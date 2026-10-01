@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { saveArtifact } from "../knowledge/artifacts.js";
+import { saveArtifact } from "../execution/artifacts.js";
 
 test("artifact writer returns a workspace-relative path and preserves existing evidence", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "xper-brief-"));

@@ -22,8 +22,8 @@
     "dist"
   ],
   "scripts": {
-    "boundaries": "node scripts/check-boundaries.mjs",
-    "build": "tsc --project tsconfig.build.json",
+    "boundaries": "node --test scripts/architecture.test.mjs && node scripts/check-boundaries.mjs",
+    "build": "node scripts/build.mjs",
     "test": "npm run build && node --test --test-concurrency=1 dist/__tests__/*.test.js",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },

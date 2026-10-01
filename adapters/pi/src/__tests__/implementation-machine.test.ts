@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTransition, implementationDefinition } from "../workflow/definition.js";
-import {
-  decodeImplementationState,
-  transitionImplementation,
-  type ImplementationEvent,
-  type ImplementationState,
-} from "../workflow/implementation.js";
+import { findTransition } from "../workflow/graph.js";
+import { decodeImplementationState } from "../workflow/implementation/checkpoint.js";
+import { implementationDefinition } from "../workflow/implementation/definition.js";
+import type { ImplementationEvent } from "../workflow/implementation/events.js";
+import { transitionImplementation } from "../workflow/implementation/machine.js";
+import type { ImplementationState } from "../workflow/implementation/state.js";
 
 const base = "1111111111111111111111111111111111111111";
 const resultCommit = "2222222222222222222222222222222222222222";

@@ -2,19 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   defineWorkflow,
-  feedbackTransition,
   findTransition,
+  outgoingTransitions,
+  reachableStates,
+  validateWorkflowDefinition,
+  type WorkflowDefinition,
+} from "../workflow/graph.js";
+import {
+  feedbackTransition,
   forwardTransition,
   isKnowledgePhase,
   knowledgeDefinition,
   nextPhase,
-  outgoingTransitions,
   phasesInvalidatedBy,
-  reachableStates,
-  validateWorkflowDefinition,
-  type WorkflowDefinition,
   type KnowledgeNodeId,
-} from "../workflow/definition.js";
+} from "../workflow/knowledge/definition.js";
 import { contracts, feedbackTargets, phases } from "../workflow/policy.js";
 
 type ReviewState = "queue" | "automatic" | "manual" | "done";

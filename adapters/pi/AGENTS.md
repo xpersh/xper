@@ -14,18 +14,26 @@ diagram. These rules also guide changes to the checkout's `.pi/` integration.
   implementations. Test the action with doubles before connecting its entry point.
 - `src/workflow/` owns phases, assignments, attempts, gates, feedback,
   approvals, artifact contracts, dependency checks, and execution budgets.
-  `knowledge-machine.ts` owns pure transitions; `controller.ts` prepares local
-  evidence and effects, invokes the reducer, and commits its result.
-  `definition.ts` owns the serializable topology used by execution; `state.ts`
-  owns checkpoint validation and migration.
+  `knowledge/`, `implementation/`, and `verification/` own their pure typed
+  transitions, state, artifact contracts, checkpoint decoders, and definitions.
+  `graph.ts` owns vocabulary-neutral topology operations. `checkpoint/` validates
+  and migrates the composed envelope. `delivery/` owns pure coordination across
+  flows: frontier, dependencies, cumulative budgets, feedback and Plan authorization.
+  `runtime/` prepares evidence with explicit effect ports and constructs recorded
+  events; it does not own state or repeat transition rules. `controller.ts` invokes
+  those operations and commits results through one serialized checkpoint owner.
+  New pure modules inherit the directory-based boundary rules; never add an I/O
+  exception merely to make an extraction pass.
 - `src/bridge/xper-client.ts` provides typed configuration, recording, and
   inspection operations and validates their responses. Keep public core RPC
   calls in this boundary; workflow decisions are local adapter operations.
 - `src/bridge/client.ts` handles transport, correlation, and the handshake;
   `src/bridge/protocol.ts` handles contract envelopes and errors.
-- `src/knowledge/` implements Pi execution, role prompts, model selection, and
-  artifact writing for Discovery through Plan. Keep these effects
-  outside the action that coordinates them.
+- `src/execution/` owns the child Pi process, role prompts, model selection,
+  artifact writing, Git inspection and host-run commands. Keep Implementer and
+  Verifier proposal parsing and runners separate: agent proposals, host evidence,
+  and workflow decisions have different owners. `actions/execution.ts` defines
+  the discriminated request; each delivery role requires its own handoff fields.
 
 The adapter decides gates and transitions and reports the resulting facts to
 the core. Do not import crate internals or delegate these decisions to Rust.
@@ -87,6 +95,14 @@ The test command builds the package. Action and client tests use doubles;
 artifact tests use temporary directories. Integration tests require the checkout
 and Rust toolchain, start the bridge, and simulate the Pi process without model
 credentials. Preserve this separation when adding tests.
+
+Keep behavior suites flat under `src/__tests__/*.test.ts`; shared harnesses contain
+synthetic builders and doubles. The build removes stale generated suites before
+compiling. Architecture tests check TypeScript import and re-export edges,
+including type-only edges in cycle detection. Pure modules cannot import effects;
+flows may reference another flow's contract types but not its state or decisions.
+Runtime effects arrive through ports, and execution reports evidence without
+importing workflow decisions. File size is a review signal, not a hard limit.
 
 Do not edit `dist/`. For manual integration checks, follow the
 [README](../../README.md#relationship-with-pi); a demo does not replace tests.

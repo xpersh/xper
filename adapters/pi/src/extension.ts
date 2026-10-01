@@ -1,12 +1,13 @@
 import type { BridgeOptions } from "./bridge/client.js";
-import { saveArtifact } from "./knowledge/artifacts.js";
-import { runImplementation } from "./implementation/execution.js";
-import { resolveAgent, runKnowledge, toolsForRole } from "./knowledge/delegate.js";
-import { runVerification } from "./verification/execution.js";
-import { piModelOptions } from "./knowledge/models.js";
-import type { PiExtensionAPI } from "./pi/types.js";
+import { saveArtifact } from "./execution/artifacts.js";
+import { runPiChild } from "./execution/child.js";
+import { runImplementation } from "./execution/implementation.js";
+import { piModelOptions } from "./execution/models.js";
+import { resolveAgent, toolsForRole } from "./execution/roles.js";
+import { runVerification } from "./execution/verification.js";
 import { registerPiHooks } from "./pi/hooks.js";
 import { XperSession } from "./pi/session.js";
+import type { PiExtensionAPI } from "./pi/types.js";
 import { registerXperCommand } from "./pi/xper-command.js";
 import { registerXperDelegate } from "./pi/xper-delegate.js";
 
@@ -33,7 +34,7 @@ export function createXperExtension(
       } = execution;
       const modelOptions = selection ? piModelOptions(selection) : model ? { model } : {};
       const runChild = (message: string, childTimeoutMs: number) =>
-        runKnowledge(message, cwd, signal, {
+        runPiChild(message, cwd, signal, {
           systemPrompt: resolveAgent(role).systemPrompt,
           timeoutMs: childTimeoutMs,
           tools: toolsForRole(role),

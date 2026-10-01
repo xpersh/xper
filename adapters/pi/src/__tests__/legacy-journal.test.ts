@@ -5,10 +5,11 @@ import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { object, type RecordedEvent, type RecorderClient } from "../bridge/xper-client.js";
+import { decodeAdapterCheckpoint } from "../workflow/checkpoint/decode.js";
 import { PiWorkflow } from "../workflow/controller.js";
 import { type JournalData, WorkflowJournal } from "../workflow/journal.js";
+import { decodeCheckpoint } from "../workflow/knowledge/checkpoint.js";
 import { policyFrom } from "../workflow/policy.js";
-import { decodeAdapterCheckpoint, decodeCheckpoint } from "../workflow/state.js";
 import { WorkflowValidationError } from "../workflow/types.js";
 
 function legacyState(active = false) {

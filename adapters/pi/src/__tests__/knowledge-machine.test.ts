@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findTransition, knowledgeDefinition } from "../workflow/definition.js";
-import {
-  transitionKnowledge,
-  workflowPosition,
-  type Evidence,
-  type KnowledgeEvent,
-  type WorkflowFact,
-} from "../workflow/knowledge-machine.js";
-import type { WorkflowState } from "../workflow/state.js";
+import { findTransition } from "../workflow/graph.js";
+import type { Output } from "../workflow/knowledge/contract.js";
+import { knowledgeDefinition } from "../workflow/knowledge/definition.js";
+import type { Evidence, KnowledgeEvent, WorkflowFact } from "../workflow/knowledge/events.js";
+import { transitionKnowledge } from "../workflow/knowledge/machine.js";
+import { workflowPosition } from "../workflow/knowledge/selectors.js";
+import type { WorkflowState } from "../workflow/knowledge/state.js";
 import type { WorkflowPolicy } from "../workflow/types.js";
-import type { Output } from "../workflow/contracts.js";
 
 function freeze<T>(value: T): T {
   if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {

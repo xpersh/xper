@@ -1,5 +1,5 @@
-import type { RoutingSnapshot } from "../bridge/xper-client.js";
 import assert from "node:assert/strict";
+import type { RoutingSnapshot } from "../bridge/xper-client.js";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { delegateWorkflow } from "../actions/delegate-workflow.js";
@@ -16,12 +16,7 @@ import { transitionJudgment } from "../workflow/judgment/machine.js";
 import { WorkflowJournal } from "../workflow/journal.js";
 import { policyFrom } from "../workflow/policy.js";
 import type { JudgmentAssignmentStarted } from "../workflow/types.js";
-import {
-  completeImplementation,
-  completeVerification,
-  sealTwoIncrementPlan,
-  setup,
-} from "./workflow-harness.js";
+import { ready, reportFor } from "./judgment-harness.js";
 
 function required<T>(value: T | null | undefined): T {
   assert(value !== null && value !== undefined);
@@ -147,45 +142,6 @@ test("interruption, cancellation and deadlines cannot complete Judgment or refun
   assert.deepEqual(transitionJudgment(recovered.state, { type: "session.recover" }, 102).facts, []);
   assert.equal(recovered.state.report, null);
 });
-
-async function ready(routing: RoutingSnapshot | null = null) {
-  const h = await setup({}, undefined, routing);
-  try {
-    await sealTwoIncrementPlan(h);
-    for (const digit of ["2", "3"]) {
-      await completeImplementation(h, digit.repeat(40));
-      h.setWorkspace({ root: h.cwd, head: digit.repeat(40), clean: true, status: "" });
-      await completeVerification(h, "verified");
-      assert.equal((await h.controller.getRunStatus()).judgment, undefined);
-    }
-    return h;
-  } catch (error) {
-    await h.cleanup();
-    throw error;
-  }
-}
-function reportFor(started: JudgmentAssignmentStarted) {
-  return JSON.stringify({
-    schemaVersion: 1,
-    evaluation: started.evaluation,
-    output: {
-      ...fixture.output,
-      assignmentId: started.assignmentId,
-      criteria: started.evaluation.criterionIds.map((criterionId) => ({
-        criterionId,
-        outcome: "passed",
-        reason: "Independent verification supports this behavior",
-        evidence: [
-          required(
-            started.evaluation.artifacts.find(
-              (artifact) => artifact.kind === "verification_result",
-            ),
-          ).artifact_id,
-        ],
-      })),
-    },
-  });
-}
 
 test("two verified increments hand off through explicit delegation; reload preserves the unapplied report", async () => {
   const h = await ready();

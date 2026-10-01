@@ -14,7 +14,8 @@ and makes the execution history available for inspection and metrics.
 > or returns a concrete criteria/design problem to Knowledge. A revised Plan
 > requires an explicit `/xper resume <commit>` decision before fresh delivery.
 > An explicit read-only Judge delegation records a recommendation for the verified
-> Plan. Applying that verdict and closing the run remain under development.
+> Plan. `/xper approve <reportId> <commit>` applies ACCEPT or REJECT, saves a
+> linked summary, and closes that exact run. Other verdict handling remains pending.
 > Basic event and usage summaries are available; full metric comparison and a
 > dashboard remain future work.
 
@@ -99,7 +100,8 @@ same Knowledge instance, invalidates the obsolete Plan, and conservatively
 requires fresh delivery evidence after an explicit checkout-resumption decision.
 Completion of every increment makes the run eligible for Judgment Day without
 closing it. The next explicit delegation obtains an independent Judge recommendation.
-Applying verdicts, closure, and a read-only graph UI remain backlog work.
+An explicit approval applies ACCEPT or REJECT and closes the run. Other verdict
+handling and a read-only graph UI remain backlog work.
 
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
@@ -159,7 +161,14 @@ may start the next Plan-eligible increment. Verifying them all makes Judgment
 Day eligible without closing the run. A further explicit delegation evaluates
 the frozen Plan, verified artifacts, and exact cumulative diff with a read-only
 Judge. Its recommendation is recorded without applying acceptance, feedback,
-or closure. The
+or closure. Review the report, then use `/xper approve <reportId> <commit>` with
+its full evaluated Git hash to apply ACCEPT or REJECT. Pi rechecks the report,
+all frozen evidence, and the clean checkout before closing. The command and
+status link a deterministic Markdown summary in `.xper/artifacts`. Repeating
+the same decision returns the historical closure even if the checkout later
+changes. A closed run cannot resume execution; use a new Pi session for another
+objective. Other recommendations remain pending. Closure uses no model call and
+does not merge, push, deploy, or publish. The
 [workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection
 and timeline from SQLite. This shared history can lag the live Pi workflow.

@@ -137,3 +137,14 @@ and criterion coverage beyond JSON Schema. All seven RFC 0001 verdicts are
 recommendations only. Their presence does not mean acceptance, feedback or closure.
 The checkpoint stores references and report metadata, not the artifact contents.
 Rust continues to record opaque adapter facts without a new RPC or artifact parser.
+
+Pi applies ACCEPT or REJECT only through `/xper approve <reportId> <commit>`.
+`judgment.applied` carries `reportId`, `planArtifactId`, `evaluatedCommit`, `verdict`
+and covered `incrementIds`. ACCEPT also emits one `increment.accepted` per covered
+increment with those identity references and its `incrementId`,
+`implementationArtifactId` and `verificationArtifactId`. `run.finished` reports
+`status: "accepted" | "rejected"`, the report/Plan/commit references, and
+`summaryArtifactId`/`summaryPath`. The Markdown `run_summary` is registered as an
+artifact; its content stays local. These are extensible event data under protocol
+v1, not new RPCs or Rust workflow rules. Reapplying an identical decision emits
+no new facts. Later checkout changes do not rewrite the historical closure.

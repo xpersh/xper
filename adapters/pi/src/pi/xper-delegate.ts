@@ -48,7 +48,7 @@ export function registerXperDelegate(
         content: [
           {
             type: "text",
-            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.judgment ? `; Judge ${result.judgment.verdict}; evaluated ${result.judgment.evaluatedCommit}; report ${artifactId}; recommendation not applied` : ""}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.resumeRequired ? "; resume revised delivery with /xper resume <commit>" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
+            text: `Xper attempt ${attemptId}: ${outcome}; phase ${phase}${result.judgment ? `; Judge ${result.judgment.verdict}; evaluated ${result.judgment.evaluatedCommit}; report ${artifactId}; recommendation not applied; ${["ACCEPT", "REJECT"].includes(result.judgment.verdict) ? `apply with /xper approve ${artifactId} ${result.judgment.evaluatedCommit}` : "handling this verdict is unsupported; pending"}` : ""}${result.reason ? `; ${result.reason}` : ""}${artifactPath ? `; artifact ${artifactPath}` : ""}${result.gate?.advanced === false ? `; ${result.gate.reason}` : ""}${result.gate?.ready ? "; execution plan ready" : ""}${result.gate?.resumeRequired ? "; resume revised delivery with /xper resume <commit>" : ""}${result.gate?.humanArtifactId ? `; approve with /xper approve ${result.gate.humanArtifactId}` : ""}`,
           },
         ],
         details: {

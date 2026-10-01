@@ -28,7 +28,8 @@ export function knowledgeChange<Result>(
   if (checkpoint) checkpoint.knowledge = transition.state;
   else
     checkpoint = {
-      version: 6,
+      version: 7,
+      closure: null,
       judgment: null,
       knowledge: transition.state,
       implementations: {},

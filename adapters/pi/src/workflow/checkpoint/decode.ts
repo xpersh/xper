@@ -10,7 +10,7 @@ import { decodeEnvelope } from "./validate.js";
 
 export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | null {
   if (value === null) return null;
-  if (object(value) && (value.version === 4 || value.version === 5 || value.version === 6)) {
+  if (object(value) && [4, 5, 6, 7].some((version) => value.version === version)) {
     const knowledge = decodeCheckpoint(value.knowledge);
     if (!knowledge || !object(value.implementations) || !object(value.verifications))
       throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
@@ -28,7 +28,8 @@ export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | nul
     if (
       !(value.authorizedPlan === null || object(value.authorizedPlan)) ||
       !Array.isArray(value.reconciliations) ||
-      (value.version === 6 && !Object.hasOwn(value, "judgment"))
+      ((value.version === 6 || value.version === 7) && !Object.hasOwn(value, "judgment")) ||
+      (value.version === 7 && !Object.hasOwn(value, "closure"))
     )
       throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
     const authorizedPlan = value.authorizedPlan as DeliveryPlanAuthorization | null;
@@ -45,7 +46,8 @@ export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | nul
       value.verifications,
       authorizedPlan,
       value.reconciliations as DeliveryReconciliation[],
-      value.version === 6 ? value.judgment : null,
+      value.version === 6 || value.version === 7 ? value.judgment : null,
+      value.version === 7 ? value.closure : null,
     );
   }
   if (object(value) && value.version === 3 && Object.hasOwn(value, "knowledge")) {

@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION } from "../bridge/protocol.js";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
 
 const USAGE =
-  "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance | /xper approve <artifactId> | /xper resume <commit>";
+  "Usage: /xper [objective] | /xper start <objective> | /xper status | /xper advance | /xper approve <artifactId> [<commit>] | /xper resume <commit>";
 
 export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): void {
   pi.registerCommand("xper", {
@@ -72,12 +72,18 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
             const result = await workflow.resumeDelivery(revision);
             message = JSON.stringify(result);
           } else {
-            const artifactId =
-              action === "approve" ? input.slice("approve".length).trim() : undefined;
-            if (action === "approve" && (!artifactId || /\s/.test(artifactId)))
-              throw new Error("Provide the artifact ID from the pending human gate");
-            const result = await workflow.advanceRun(artifactId);
-            message = JSON.stringify(result);
+            const args = action === "approve" ? input.split(/\s+/).slice(1) : [];
+            if (action === "approve" && (args.length < 1 || args.length > 2))
+              throw new Error(
+                "Provide the human gate artifact ID, or the Judge report ID and full evaluated commit",
+              );
+            const [artifactId, revision] = args;
+            if (artifactId && revision) {
+              const result = await workflow.applyJudgment(artifactId, revision);
+              message = `Run ${result.runId} closed: ${result.status}; report ${result.reportId}; evaluated ${result.evaluatedCommit}${result.replayed ? "; existing decision" : ""}. [Run summary](${result.summary.path})`;
+            } else {
+              message = JSON.stringify(await workflow.advanceRun(artifactId));
+            }
           }
           await session.refreshRun();
           ctx.ui.notify(`xper: ${message}`, "info");

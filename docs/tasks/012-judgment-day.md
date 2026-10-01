@@ -3,7 +3,7 @@
 - Status: `in_progress`
 - Milestone: M3
 - Entry dependency: XP-011.3
-- Next slice: XP-012.2
+- Next slice: XP-012.3
 
 ## Outcome and boundary
 
@@ -82,10 +82,17 @@ Stop here: no debt workflow, human decision UI, or retrospective generation.
 
 ## XP-012.2 — Apply acceptance or rejection and close
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-012.1
 - Example: explicitly applying an `ACCEPT` report records acceptance and closes
   the evaluated run; applying it again leaves the same result.
+
+Implementation note: extend `/xper approve <reportId> <commit>` to validate and
+apply the exact ACCEPT or REJECT report, persist a deterministic Markdown summary,
+and close the run once. Reuse Judgment evidence checks, pure delivery coordination,
+the artifact writer, serialized controller and checkpoint/outbox. Verify two
+increments, stale evidence, replay after checkout changes, interrupted summary
+writing, checkpoint migration and closure with unavailable recording.
 
 Extend the existing command/approval path to apply a specific verdict artifact.
 Initially handle `ACCEPT` and `REJECT`; other verdicts remain pending with an
@@ -104,6 +111,27 @@ Acceptance:
   needs no extra model call, database, or memory subsystem.
 
 Stop here: closure does not merge, push, deploy, or publish changes.
+
+### Delivery evidence
+
+- `/xper approve <reportId> <commit>` applies ACCEPT or REJECT after checking
+  the exact report, frozen evidence and clean revision. Repetition returns the
+  original closure and Markdown summary even after checkout changes. Other
+  verdicts stay pending; existing Knowledge approvals remain available.
+- Pure delivery coordination emits the applied decision, per-increment acceptance
+  references for ACCEPT, and run closure. Runtime reuses evidence checks and the
+  artifact writer; checkpoint format 7 and the existing journal/outbox preserve
+  the decision and summary reference without awaiting Rust or invoking a model.
+- `npm run check` passes: 67 Rust tests, 211 adapter tests, 12 architecture tests,
+  shared schema fixtures, formatting, lint and strict types. New coverage includes
+  two increments, stale evidence, interrupted summary writes, migration, replay,
+  command compatibility, unavailable recording and real-bridge closure projection.
+  Documentation links and `git diff --check` also pass.
+- Diff size: 29 files, 988 additions and 104 removals (402 production,
+  472 test and 114 documentation additions).
+- Public changes: extended approve syntax, `applyJudgment`, closure/status types,
+  recorded facts and checkpoint format 7. No dependency, RPC or Rust policy changes.
+  Feedback, debt/human resolutions, reopening and publication remain deferred.
 
 ## XP-012.3 — Route Judge feedback through existing paths
 

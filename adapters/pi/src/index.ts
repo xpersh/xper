@@ -23,6 +23,8 @@ export type {
   RunAdvanced,
   RunSummary,
   RunStatus,
+  RunClosure,
+  JudgmentApplied,
 } from "./workflow/types.js";
 export { createXperExtension } from "./extension.js";
 export type { AdapterManifest, BridgeHandshake, BridgeOptions } from "./bridge/client.js";

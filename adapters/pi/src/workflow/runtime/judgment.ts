@@ -11,7 +11,7 @@ import { invalid } from "../validation.js";
 import { readKnowledgeDocuments } from "./handoff.js";
 import type { WorkflowEffects } from "./ports.js";
 
-async function checkEvaluation(evaluation: JudgmentEvaluation, effects: WorkflowEffects) {
+export async function checkEvaluation(evaluation: JudgmentEvaluation, effects: WorkflowEffects) {
   for (const input of [...evaluation.artifacts, ...evaluation.logs]) {
     if ((await effects.readArtifact(input.path)).digest !== input.digest)
       invalid("Judgment evidence changed since evaluation was frozen");

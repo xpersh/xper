@@ -98,6 +98,7 @@ export class XperSession {
     const run = this.lastRun?.run;
     if (!run) return "; no run";
     const judgment = this.lastRun?.judgment;
+    const closure = this.lastRun?.closure;
     const telemetry = this.lastRun?.degradedReason
       ? `; telemetry: ${this.lastRun.degradedReason}`
       : "";
@@ -106,21 +107,23 @@ export class XperSession {
     const verification = Object.values(this.lastRun?.verifications ?? {})[0];
     const routing = run.routing ? `profile ${run.routing.profile}` : "Pi model";
     const outcomes = Object.values(run.attempts).map((attempt) => attempt.outcome ?? "running");
-    const gate = judgment
-      ? `; judgment ${judgment.verdict ?? judgment.status}; evaluated ${judgment.evaluatedCommit}; ${judgment.artifactId ? `report ${judgment.artifactId} (${judgment.artifactPath}); recommendation not applied` : `retry with assignmentId ${judgment.assignmentId}`}`
-      : this.lastRun?.reconciliation?.status === "awaiting_resume"
-        ? "; revised plan ready: /xper resume <commit>"
-        : implementation?.nodeId === "implement"
-          ? `; implementation ${implementation.status}`
-          : verification
-            ? `; verification ${verification.nodeId}`
-            : implementation
-              ? `; implementation ${implementation.status}`
-              : run.human_input
-                ? `; awaiting approval: /xper approve ${run.human_input[1]}`
-                : run.accepted?.plan
-                  ? "; execution plan ready"
-                  : "";
+    const gate = closure
+      ? `; closed: ${closure.status}; report ${closure.reportId}; evaluated ${closure.evaluatedCommit}; [Run summary](${closure.summary.path})`
+      : judgment
+        ? `; judgment ${judgment.verdict ?? judgment.status}; evaluated ${judgment.evaluatedCommit}; ${judgment.artifactId ? `report ${judgment.artifactId} (${judgment.artifactPath}); recommendation not applied; ${["ACCEPT", "REJECT"].includes(judgment.verdict ?? "") ? `apply with /xper approve ${judgment.artifactId} ${judgment.evaluatedCommit}` : "handling this verdict is unsupported; pending"}` : `retry with assignmentId ${judgment.assignmentId}`}`
+        : this.lastRun?.reconciliation?.status === "awaiting_resume"
+          ? "; revised plan ready: /xper resume <commit>"
+          : implementation?.nodeId === "implement"
+            ? `; implementation ${implementation.status}`
+            : verification
+              ? `; verification ${verification.nodeId}`
+              : implementation
+                ? `; implementation ${implementation.status}`
+                : run.human_input
+                  ? `; awaiting approval: /xper approve ${run.human_input[1]}`
+                  : run.accepted?.plan
+                    ? "; execution plan ready"
+                    : "";
     return `; run ${run.run_id}; phase ${phase}; run configuration: ${routing}; attempts ${outcomes.join(", ") || "none"}; artifacts ${Object.keys(run.artifacts).length}${gate}${telemetry}`;
   }
   async refreshRun(): Promise<void> {

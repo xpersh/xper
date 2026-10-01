@@ -53,7 +53,7 @@ flowchart LR
 | Discriminated execution requests and assignment adaptation | `src/actions/execution.ts`, `prepare-execution.ts` |
 | Serialize operations and apply/persist the one owned checkpoint | `src/workflow/controller.ts` |
 | Prepare evidence, time and IDs; construct events with explicit effect ports | `src/workflow/runtime/` |
-| Pure delivery frontier, dependencies, cumulative budgets, commit chain, feedback and Plan authorization | `src/workflow/delivery/` |
+| Pure delivery frontier, dependencies, cumulative budgets, commit chain, feedback, Plan authorization and run closure | `src/workflow/delivery/` |
 | Project local state and recording health for inspection | `src/workflow/status.ts` |
 | Pure Knowledge start, assignment, completion, advancement, and recovery decisions | `src/workflow/knowledge/` |
 | Pure per-increment Implementation transition and result validation | `src/workflow/implementation/` |
@@ -99,8 +99,9 @@ receives only the data and effect ports it needs, never the controller itself.
 Only `PiWorkflow` owns the serialization queue and applies changes to live state.
 Its single commit path records Verification before a separate Knowledge handoff;
 recovery finishes only the missing handoff. This reorganization preserves all
-existing flow definitions and public commands. Judgment adds its own definition
-and upgrades the composed checkpoint to format 6.
+existing flow definitions. Judgment has its own definition; applying its report
+closes the composed run through delivery coordination, without changing any flow
+graph. The composed checkpoint is format 7.
 
 The `pi.knowledge` definition at version 2 declares the five knowledge nodes
 and a terminal ready node, with stable IDs and explicit edges. Its only outgoing
@@ -274,6 +275,24 @@ there is no Judge-specific configuration or Plan role. Successful evaluation
 cannot be repeated. Interrupted evaluation requires the exact assignment ID,
 frozen inputs and route, and another explicit delegation.
 
+`/xper approve <reportId> <commit>` applies an exact ACCEPT or REJECT report.
+Runtime rereads the registered report and frozen artifact/log digests, checks the
+authorized Plan and clean evaluated HEAD, and saves a deterministic Markdown
+summary using the injected artifact writer. Delivery owns the pure run closure
+transition; the controller commits the decision, summary reference and outbox
+together. This reports `judgment.applied`, per-increment `increment.accepted`
+facts for ACCEPT, and `run.finished` with `accepted` or `rejected`. Judgment
+remains completed at `reported`; these facts do not traverse or redefine its graph.
+The local projection exposes `closure` and derives `judgment.applied` from it.
+
+Writing the summary must succeed before the first closure. An interrupted write
+can be reused only if its bytes match; existing evidence is never overwritten.
+The same report/commit returns the saved decision without rereading files or Git,
+even after later checkout changes. Other identities cannot replace it. Closed
+runs reject start, delegation, advance and delivery resumption. Closure requires
+no execution budget or Rust acknowledgement. Other verdicts remain pending;
+feedback, debt handling, publication and reopening closed runs are not implemented.
+
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
 overwritten. A late success may become `timed_out` under Pi's execution policy.
@@ -337,16 +356,18 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
-Checkpoint envelope format 6 contains Knowledge v3, increment-keyed ordered
+Checkpoint envelope format 7 contains Knowledge v3, increment-keyed ordered
 histories of Implementation v1 and Verification v1 instances, the currently
 authorized Plan, sequential delivery reconciliations, and nullable Judgment v1
-state with its frozen references and report metadata. Each historical flow
+state with its frozen references and report metadata, plus a nullable run closure
+with the exact decision, covered increments, time and summary reference/digest.
+The summary contents remain an artifact, outside the checkpoint. Each historical flow
 is validated against the Plan identity and digest that created it. Only the
 authorized Plan contributes to current frontier, dependency satisfaction, and
 the sequential commit tip. Pi migrates valid Knowledge v1/v2 states and envelope
-formats 1 through 5 in memory, preserving identities, visits, attempts, artifacts,
+formats 1 through 6 in memory with no closure, preserving identities, visits, attempts, artifacts,
 budgets, and pending events. Reading alone does not rewrite the checkpoint; the
-next local commit with facts writes format 6. Unknown definitions, duplicate
+next local commit with facts writes format 7. Unknown definitions, duplicate
 identities, or inconsistent run, Plan, artifact, digest, base, commit, history,
 reconciliation, sequential commit chain, or single-frontier references are
 rejected rather than guessed.

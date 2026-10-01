@@ -5,6 +5,9 @@ import type {
   ResolvedConfiguration,
 } from "../bridge/xper-client.js";
 import { inspectGitWorkspace, type GitWorkspace } from "../execution/workspace.js";
+import { saveArtifact } from "../execution/artifacts.js";
+import { assertRunOpen, judgmentReplay } from "./delivery/closure.js";
+import { prepareClosure } from "./runtime/closure.js";
 import { decodeAdapterCheckpoint } from "./checkpoint/decode.js";
 import { recoveryChanges } from "./checkpoint/recovery.js";
 import type { AdapterCheckpoint } from "./checkpoint/types.js";
@@ -26,7 +29,7 @@ import type { WorkflowState } from "./knowledge/state.js";
 import { prepareAssignment } from "./runtime/assignment.js";
 import { prepareRecordedEvents } from "./runtime/events.js";
 import { prepareGateEvidence, readRegisteredArtifact } from "./runtime/evidence.js";
-import type { WorkflowEffects } from "./runtime/ports.js";
+import type { ArtifactWriter, WorkflowEffects } from "./runtime/ports.js";
 import { prepareSettlement } from "./runtime/settlement.js";
 import { projectRunStatus } from "./status.js";
 import type {
@@ -34,6 +37,7 @@ import type {
   DeliveryResumed,
   FinishAttempt,
   ModelUsage,
+  JudgmentApplied,
   RoutingSnapshot,
   RunAdvanced,
   RunStarted,
@@ -49,6 +53,7 @@ import type { VerificationState } from "./verification/state.js";
 export type { WorkflowState } from "./knowledge/state.js";
 
 interface Options {
+  writeArtifact?: ArtifactWriter;
   configuration?: () => ResolvedConfiguration | null;
   now?: () => number;
   id?: () => string;
@@ -71,6 +76,7 @@ export class PiWorkflow implements WorkflowClient {
   private readonly readArtifact: (path: string) => Promise<Evidence>;
   private readonly inspectWorkspace: (cwd: string) => Promise<GitWorkspace>;
   private readonly cwd: string;
+  private readonly writeArtifact: ArtifactWriter;
   constructor(
     recorder: Pick<RecorderClient, "appendEvents">,
     cwd: string,
@@ -84,6 +90,8 @@ export class PiWorkflow implements WorkflowClient {
     this.id = options.id ?? randomUUID;
     this.readArtifact = options.readArtifact ?? ((path) => readEvidence(cwd, path));
     this.inspectWorkspace = options.inspectWorkspace ?? inspectGitWorkspace;
+    this.writeArtifact =
+      options.writeArtifact ?? ((id, content, path) => saveArtifact(cwd, id, content, path));
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
     if (this.stopping)
@@ -180,6 +188,7 @@ export class PiWorkflow implements WorkflowClient {
   }
   startRun(objective: string, policy?: WorkflowPolicy): Promise<RunStarted> {
     return this.serial(async () => {
+      assertRunOpen(this.state);
       if (!this.state && !objective.trim()) invalid("workflow objective is required");
       const now = this.now();
       return this.commitKnowledge(
@@ -205,6 +214,7 @@ export class PiWorkflow implements WorkflowClient {
 
   startAssignment(assignmentId?: string, fallbackModel?: string): Promise<StartedAssignment> {
     return this.serial(async () => {
+      assertRunOpen(this.requireRun());
       const prepared = await prepareAssignment(
         this.requireRun(),
         assignmentId,
@@ -244,6 +254,9 @@ export class PiWorkflow implements WorkflowClient {
 
   advanceRun(approvedArtifactId?: string): Promise<RunAdvanced> {
     return this.serial(async () => {
+      assertRunOpen(this.requireRun());
+      if (approvedArtifactId && approvedArtifactId === this.state?.judgment?.report?.artifact_id)
+        invalid("apply the Judge report with /xper approve <reportId> <commit>");
       const state = this.knowledge();
       const evidence = await prepareGateEvidence(this.requireRun(), this.readArtifact);
       const now = this.now();
@@ -266,6 +279,7 @@ export class PiWorkflow implements WorkflowClient {
   }
   resumeDelivery(revision: string): Promise<DeliveryResumed> {
     return this.serial(async () => {
+      assertRunOpen(this.requireRun());
       validateResumeRevision(revision);
       const checkpoint = this.requireRun();
       const replay = validateResumeRequest(checkpoint, revision);
@@ -279,6 +293,18 @@ export class PiWorkflow implements WorkflowClient {
     return this.serial(async () => {
       const now = this.now();
       await this.commit(usageChange(this.requireRun(), attemptId, usage, now), now);
+    });
+  }
+  applyJudgment(reportId: string, revision: string): Promise<JudgmentApplied> {
+    return this.serial(async () => {
+      const checkpoint = this.requireRun();
+      const replay = judgmentReplay(checkpoint, reportId, revision);
+      if (replay) return replay;
+      const prepared = await prepareClosure(checkpoint, reportId, revision, {
+        ...this.effects(),
+        writeArtifact: this.writeArtifact,
+      });
+      return this.commit(prepared.change, prepared.now);
     });
   }
   /** Finish queued local work; never wait for recording RPCs. */

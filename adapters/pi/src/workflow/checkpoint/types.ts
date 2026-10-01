@@ -2,6 +2,7 @@ import type { JudgmentState } from "../judgment/state.js";
 import type { ImplementationState } from "../implementation/state.js";
 import type { WorkflowState } from "../knowledge/state.js";
 import type { VerificationState } from "../verification/state.js";
+import type { RunClosure } from "../types.js";
 
 export interface DeliveryPlanAuthorization {
   artifactId: string;
@@ -24,7 +25,8 @@ export interface DeliveryReconciliation {
 }
 
 export interface AdapterCheckpoint {
-  version: 6;
+  version: 7;
+  closure: RunClosure | null;
   judgment: JudgmentState | null;
   knowledge: WorkflowState;
   implementations: Record<string, ImplementationState[]>;

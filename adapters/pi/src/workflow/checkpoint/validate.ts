@@ -1,5 +1,6 @@
 import { decodeJudgment } from "../judgment/checkpoint.js";
 import { validateJudgmentReferences } from "../delivery/judgment.js";
+import { decodeClosure } from "./closure.js";
 import { validateSerialDelivery } from "../delivery/history.js";
 import type { WorkflowState } from "../knowledge/state.js";
 import { decodeHistories } from "./histories.js";
@@ -16,6 +17,7 @@ export function decodeEnvelope(
   authorizedPlan: DeliveryPlanAuthorization | null,
   reconciliations: DeliveryReconciliation[],
   judgment: unknown = null,
+  closure: unknown = null,
 ): AdapterCheckpoint {
   const { implementations, verifications } = decodeHistories(
     knowledge,
@@ -31,7 +33,8 @@ export function decodeEnvelope(
   );
   validateSerialDelivery(implementations, verifications, authorizedPlan?.artifactId ?? null);
   const checkpoint: AdapterCheckpoint = {
-    version: 6,
+    version: 7,
+    closure: null,
     judgment: decodeJudgment(judgment),
     knowledge,
     implementations,
@@ -40,5 +43,6 @@ export function decodeEnvelope(
     reconciliations: structuredClone(reconciliations),
   };
   validateJudgmentReferences(checkpoint);
+  checkpoint.closure = decodeClosure(closure, checkpoint);
   return checkpoint;
 }

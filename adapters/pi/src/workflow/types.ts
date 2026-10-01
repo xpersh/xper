@@ -153,12 +153,13 @@ export interface WorkflowPosition {
 }
 
 export interface RunStatus {
+  closure?: RunClosure;
   judgment?: WorkflowPosition & {
     assignmentId: string;
     evaluatedCommit: string;
     verdict?: string;
     artifactPath?: string;
-    applied: false;
+    applied: boolean;
   };
   workflow?: WorkflowPosition;
   implementations?: Record<string, WorkflowPosition>;
@@ -184,6 +185,22 @@ export interface DeliveryResumed {
   replayed: boolean;
 }
 
+export interface RunClosure {
+  reportId: string;
+  reportDigest: string;
+  planArtifactId: string;
+  evaluatedCommit: string;
+  verdict: "ACCEPT" | "REJECT";
+  status: "accepted" | "rejected";
+  incrementIds: string[];
+  closedAt: number;
+  summary: ArtifactInput & { digest: string };
+}
+export interface JudgmentApplied extends RunClosure {
+  runId: string;
+  replayed: boolean;
+}
+
 /** Workflow operations available to adapter actions, independent of the transport. */
 export interface WorkflowClient {
   recordUsage?(attemptId: string, usage: ModelUsage): Promise<void>;
@@ -193,6 +210,7 @@ export interface WorkflowClient {
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;
   advanceRun(approvedArtifactId?: string): Promise<RunAdvanced>;
   resumeDelivery(revision: string): Promise<DeliveryResumed>;
+  applyJudgment(reportId: string, revision: string): Promise<JudgmentApplied>;
   getRunStatus(): Promise<RunStatus>;
 }
 

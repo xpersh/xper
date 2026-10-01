@@ -15,13 +15,14 @@ export function projectRunStatus(
 ): RunStatus {
   const reconciliation = checkpoint?.reconciliations.at(-1);
   return {
+    ...(checkpoint?.closure ? { closure: structuredClone(checkpoint.closure) } : {}),
     ...(checkpoint?.judgment
       ? {
           judgment: {
             ...judgmentPosition(checkpoint.judgment),
             assignmentId: checkpoint.judgment.assignmentId,
             evaluatedCommit: checkpoint.judgment.evaluation.evaluatedCommit,
-            applied: false as const,
+            applied: checkpoint.closure !== null,
             ...(checkpoint.judgment.report
               ? {
                   verdict: checkpoint.judgment.report.verdict,

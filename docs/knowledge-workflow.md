@@ -231,7 +231,7 @@ criticisms. Each finding cites supplied artifact IDs (bound to recorded digests)
 or `git:<baseCommit>..<evaluatedCommit>` for the exact supplied diff. The seven
 recommendations are `ACCEPT`, `ACCEPT_WITH_DEBT`, `REWORK_IMPLEMENTATION`,
 `REVISIT_DESIGN`, `REDEFINE`, `HUMAN_DECISION`, and `REJECT`. None applies a decision
-or closes the run in this slice. Invalid reports fail the attempt; valid reports
+or closes the run by itself. Invalid reports fail the attempt; valid reports
 remain inspectable and cannot trigger a second evaluation.
 
 Interruption requires explicit retry with the displayed `assignmentId`. The
@@ -239,6 +239,30 @@ assignment retains its model, evidence and Git revision, including log digests;
 changed or missing inputs block retry. Use the configured Judge route when a
 profile is frozen; without a profile, freeze the active Pi model. Actual response
 provider/model identities remain separate `model.usage` facts.
+
+## Apply a verdict and close
+
+Review the report, then run `/xper approve <reportId> <commit>` using the exact
+report ID and full lowercase evaluated Git hash shown by status or delegation.
+This applies the report's ACCEPT or REJECT recommendation; approving a REJECT
+report closes the run as rejected. The other five verdicts remain pending with
+an unsupported-handling diagnostic. `/xper advance` and `xper_delegate` never
+apply a verdict, and `/xper approve <artifactId>` still serves Knowledge gates.
+
+Before the first closure, Pi checks the registered report, its frozen evidence
+and logs, the authorized Plan, and the clean checkout at that exact commit.
+Missing or changed evidence blocks application. Pi saves
+`.xper/artifacts/run-summary-<reportId>.md` with criterion findings, decision and
+verification links, and unresolved findings; command output and status link it.
+The summary uses existing evidence without another model invocation.
+
+Decision, summary reference and recording events are committed locally together.
+An interrupted summary write can be reused only when its contents match. Repeating
+the same report and commit returns the historical closure and original summary,
+even if the checkout subsequently changes; it never produces new acceptance or
+closure events. A closed run rejects further execution; use a new Pi session for
+another objective. Closure needs no remaining execution budget and never waits
+for Rust. It does not merge, push, deploy, publish, or start feedback or debt work.
 
 ## Limits and human gates
 
@@ -311,11 +335,12 @@ After the normal checkout build:
    a fresh review. If it returns to Define or Design, revise and seal the Plan,
    then run `/xper resume <commit>` before delegating fresh delivery.
 8. After all increments verify, delegate once for Judge and inspect its unapplied
-   recommendation; applying the verdict remains future work.
+   recommendation. Apply ACCEPT or REJECT with `/xper approve <reportId> <commit>`
+   and inspect the linked run summary.
 
 `/xper status` shows the phase, outcomes, artifact count, pending approval,
 ready-plan state, latest Implementation/Verification positions, the Judge report
-and evaluated revision, and any
+and evaluated revision, any closed outcome and summary link, and any
 pending reconciliation with its exact resume command. `xper_delegate` reports
 the same block and never resumes implicitly. `/xper advance` evaluates the
 current gate; unlike the original
@@ -328,16 +353,17 @@ Profiles must include the five Knowledge roles in the table to reach Plan plus
 `judgment_day.judge` for Judgment.
 Existing Discovery-only profiles remain usable for Discovery; dispatch explains
 when the current role has no route. New runs resume from Pi's versioned
-checkpoint. Checkpoint envelope format 6 contains Knowledge v3, ordered
+checkpoint. Checkpoint envelope format 7 contains Knowledge v3, ordered
 per-increment histories of Implementation v1 and Verification v1, the currently
 authorized Plan, sequential reconciliation records, and nullable Judgment v1
-state with frozen evidence references and report metadata. Each delivery history is
+state with frozen evidence references and report metadata, and a nullable closure
+with its decision, covered increments and summary reference/digest. Each delivery history is
 validated against its own historical Plan; only the authorized Plan contributes
 to the current frontier, satisfied dependencies, and sequential Git tip. Valid
-Knowledge v1/v2 states and envelope formats 1 through 5 migrate in memory without
+Knowledge v1/v2 states and envelope formats 1 through 6 migrate in memory without a closure or
 changing existing run, visit, assignment, attempt, evidence, budget, or outbox
 identities. Reading alone does not rewrite the journal; the next local commit
-writes format 6. Restoring a checkpoint does not repeat an agent invocation.
+writes format 7. Restoring a checkpoint does not repeat an agent invocation.
 Core-owned legacy runs remain
 available for historical inspection, but cannot resume under the new architecture
 because they lack that checkpoint.

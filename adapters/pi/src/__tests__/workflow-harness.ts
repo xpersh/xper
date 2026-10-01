@@ -11,6 +11,8 @@ import type {
   RoutingSnapshot,
 } from "../bridge/xper-client.js";
 import { PiWorkflow } from "../workflow/controller.js";
+import { saveArtifact } from "../execution/artifacts.js";
+import { readEvidence } from "../workflow/evidence.js";
 import type { Document, Output } from "../workflow/knowledge/contract.js";
 import type { WorkflowPolicy } from "../workflow/types.js";
 
@@ -76,6 +78,11 @@ async function setup(
     status: "",
   };
   const options = {
+    writeArtifact: async (id: string, content: string, path: string) => {
+      await saveArtifact(cwd, id, content, path);
+      artifacts.set(path, await readEvidence(cwd, path));
+      return path;
+    },
     ...(id ? { id } : {}),
     configuration: () => ({ routing: recorder.routing, adapterConfig: { ...recorder.config } }),
     now: () => now,

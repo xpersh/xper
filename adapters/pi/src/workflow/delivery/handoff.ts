@@ -78,7 +78,13 @@ export function implementationHandoff(
       ...new Set([
         ...Object.values(knowledge.accepted),
         ...selection.dependencyArtifactIds,
-        ...(source ? [source.decision.reportId, ...prior] : []),
+        ...(source
+          ? [
+              source.decision.reportId,
+              ...(source.decision.resolution ? [source.decision.resolution.artifact_id] : []),
+              ...prior,
+            ]
+          : []),
       ]),
     ];
     return {

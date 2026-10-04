@@ -52,6 +52,7 @@ export type KnowledgeEvent =
       evidence: string;
       paths: string[];
       artifact: ImportedArtifact;
+      resolution?: ImportedArtifact;
     }
   | { type: "session.recover" }
   | { type: "usage.record"; attemptId: string; usage: ModelUsage };

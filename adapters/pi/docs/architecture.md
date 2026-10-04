@@ -103,7 +103,7 @@ existing flow definitions. Judgment has its own definition; applying its report
 closes or reopens the composed run through delivery coordination. Judge feedback
 application and its invalidation/handoff share one local checkpoint commit; the
 report is already durable before the explicit decision. The composed checkpoint
-is format 8, retaining each applied Judge's state, decision, and frozen Plan
+is format 9, retaining each applied Judge's state, decision, and frozen Plan
 context separately from the current Judge. Historical reports validate against
 their original evidence, not the current Plan.
 
@@ -297,8 +297,29 @@ The same report/commit returns the saved decision without rereading files or Git
 even after later checkout changes. Other identities cannot replace it. Closed
 runs reject start, delegation, advance and delivery resumption. Closure requires
 no execution budget or Rust acknowledgement. REWORK_IMPLEMENTATION, REVISIT_DESIGN
-and REDEFINE use the feedback paths below. Debt handling, publication and
-reopening closed runs remain outside this slice.
+and REDEFINE use the feedback paths below. Publication and reopening closed runs
+remain outside this slice.
+
+For ACCEPT_WITH_DEBT and HUMAN_DECISION, `prepareJudgmentApproval` returns validated
+report context or an existing decision. The command collects a human choice,
+reason and final confirmation through Pi's existing input dialogs, outside the
+controller serialization queue. `applyJudgment` validates again and requires a
+complete human resolution. Cancellation or missing UI leaves the report pending.
+Runtime writes the immutable `judgment_resolution` artifact and closure summary;
+pure delivery applies the effective verdict while preserving the recommendation.
+All debt is accepted together as `accepted_with_debt`, or the human selects rejection
+or an existing feedback destination. The answer and report both reach subsequent
+agents. Newly registered special reports require structured details; legacy
+reports collect missing details from the human without rewriting the original.
+
+Checkpoint 9 retains only resolution identity, digest, confirmation time and
+accepted debt IDs alongside the original recommendation and effective decision.
+The full answer, question and debt remain in the artifact. Status rereads that
+registered evidence locally to display obligations. Related facts and transitions
+use the existing atomic journal/outbox commit, with no Rust dependency. Interrupted
+artifact writes can be reused on explicit approval, but are never applied on load.
+Replay returns committed decisions without repeating the dialog or execution.
+The existing flow definitions and graph edges remain unchanged.
 
 Success, failure, cancellation, timeout, and interruption remain distinct.
 Output paths are published only after writing, and existing evidence is never
@@ -363,19 +384,20 @@ A local write failure retains state in memory and
 allows the workflow to continue, but survival after process exit is then
 unverified.
 
-Checkpoint envelope format 8 contains Knowledge v3, increment-keyed ordered
+Checkpoint envelope format 9 contains Knowledge v3, increment-keyed ordered
 histories of Implementation v1/v2 and Verification v1 instances, the currently
 authorized Plan, sequential delivery reconciliations, and nullable Judgment v1
 state with its frozen references and report metadata, historical applied Judges
 with frozen Plan contexts, plus a nullable run closure
-with the exact decision, covered increments, time and summary reference/digest.
+with the exact decision, covered increments, time, summary reference/digest and
+optional human resolution metadata.
 The summary contents remain an artifact, outside the checkpoint. Each historical flow
 is validated against the Plan identity and digest that created it. Only the
 authorized Plan and its current rework report contribute to current frontier, dependency satisfaction, and
 the sequential commit tip. Pi migrates valid Knowledge v1/v2 states and envelope
-formats 1 through 7 in memory, preserving existing closures, identities, visits, attempts, artifacts,
+formats 1 through 8 in memory, preserving existing closures, identities, visits, attempts, artifacts,
 budgets, and pending events. Reading alone does not rewrite the checkpoint; the
-next local commit with facts writes format 8. Unknown definitions, duplicate
+next local commit with facts writes format 9. Unknown definitions, duplicate
 identities, or inconsistent run, Plan, artifact, digest, base, commit, history,
 reconciliation, sequential commit chain, or single-frontier references are
 rejected rather than guessed.

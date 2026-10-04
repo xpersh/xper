@@ -1,3 +1,8 @@
+import {
+  approvalContext,
+  checkResolutionReplay,
+  readAppliedResolution,
+} from "./runtime/resolution.js";
 import { createHash, randomUUID } from "node:crypto";
 import type {
   RecordedEvent,
@@ -38,6 +43,8 @@ import type {
   FinishAttempt,
   ModelUsage,
   JudgmentApplied,
+  JudgmentApproval,
+  JudgmentResolutionInput,
   RoutingSnapshot,
   RunAdvanced,
   RunStarted,
@@ -295,15 +302,39 @@ export class PiWorkflow implements WorkflowClient {
       await this.commit(usageChange(this.requireRun(), attemptId, usage, now), now);
     });
   }
-  applyJudgment(reportId: string, revision: string): Promise<JudgmentApplied> {
+  prepareJudgmentApproval(reportId: string, revision: string): Promise<JudgmentApproval> {
     return this.serial(async () => {
       const checkpoint = this.requireRun();
       const replay = judgmentReplay(checkpoint, reportId, revision);
-      if (replay) return replay;
-      const prepared = await prepareClosure(checkpoint, reportId, revision, {
-        ...this.effects(),
-        writeArtifact: this.writeArtifact,
-      });
+      if (replay) {
+        await checkResolutionReplay(checkpoint, replay, undefined, this.effects());
+        return { applied: replay };
+      }
+      return structuredClone((await approvalContext(checkpoint, reportId, this.effects())).context);
+    });
+  }
+  applyJudgment(
+    reportId: string,
+    revision: string,
+    resolution?: JudgmentResolutionInput,
+  ): Promise<JudgmentApplied> {
+    return this.serial(async () => {
+      const checkpoint = this.requireRun();
+      const replay = judgmentReplay(checkpoint, reportId, revision);
+      if (replay) {
+        await checkResolutionReplay(checkpoint, replay, resolution, this.effects());
+        return replay;
+      }
+      const prepared = await prepareClosure(
+        checkpoint,
+        reportId,
+        revision,
+        {
+          ...this.effects(),
+          writeArtifact: this.writeArtifact,
+        },
+        resolution,
+      );
       return this.commit(prepared.change, prepared.now);
     });
   }
@@ -325,7 +356,7 @@ export class PiWorkflow implements WorkflowClient {
   getRunStatus(): Promise<RunStatus> {
     return this.serial(async () => {
       this.journal.flush();
-      return projectRunStatus(
+      const status = projectRunStatus(
         this.state,
         this.timeline,
         {
@@ -334,6 +365,14 @@ export class PiWorkflow implements WorkflowClient {
         },
         this.now(),
       );
+      const decision = status.closure ?? status.feedback;
+      if (decision?.resolution)
+        status.humanResolution = await readAppliedResolution(
+          this.requireRun(),
+          decision,
+          this.effects(),
+        );
+      return status;
     });
   }
 }

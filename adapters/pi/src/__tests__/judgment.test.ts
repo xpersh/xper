@@ -16,7 +16,7 @@ import { transitionJudgment } from "../workflow/judgment/machine.js";
 import { WorkflowJournal } from "../workflow/journal.js";
 import { policyFrom } from "../workflow/policy.js";
 import type { JudgmentAssignmentStarted } from "../workflow/types.js";
-import { ready, reportFor } from "./judgment-harness.js";
+import { ready, reportFor, setVerdict } from "./judgment-harness.js";
 
 function required<T>(value: T | null | undefined): T {
   assert(value !== null && value !== undefined);
@@ -64,7 +64,7 @@ test("all seven Judge recommendations complete only their flow and settle idempo
     const started = start();
     const before = structuredClone(started.state);
     const report = structuredClone(fixture);
-    report.output.verdict = verdict;
+    setVerdict(report, verdict);
     const event = {
       ...completedEvent,
       evidence: { content: JSON.stringify(report), digest: "d".repeat(64) },

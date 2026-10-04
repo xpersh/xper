@@ -214,6 +214,97 @@
               }
             }
           }
+        },
+        "debts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/debt"
+          }
+        },
+        "humanDecision": {
+          "$ref": "#/$defs/humanDecision"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "debts"
+                ]
+              },
+              {
+                "required": [
+                  "humanDecision"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "ACCEPT_WITH_DEBT",
+                  "HUMAN_DECISION"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "debt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "owner",
+        "futureCondition"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "description": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "futureCondition": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      }
+    },
+    "humanDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "evidence"
+      ],
+      "properties": {
+        "question": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "minItems": 1,
+          "uniqueItems": true
         }
       }
     }

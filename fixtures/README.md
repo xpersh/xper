@@ -34,3 +34,9 @@ regression/scope/simplicity evidence plus observed command output references.
 artifact/log references and an exact evaluated revision. Schema and adapter tests
 exercise all seven verdicts from this fixture, plus invalid evidence and coverage.
 No verdict in this fixture represents an applied acceptance or run closure.
+
+The Judgment fixtures also include structured debt and human questions alongside
+legacy recommendations without those fields. `judgment-resolution-v1.json` contains
+synthetic explicit human resolutions bound to report/Plan/revision identities. Shared
+schema checks cover their shape; Pi tests additionally enforce exact source details,
+reference membership, debt acceptance, persistence, replay and human-only command UI.

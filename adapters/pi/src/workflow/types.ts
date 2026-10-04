@@ -154,6 +154,7 @@ export interface WorkflowPosition {
 }
 
 export interface RunStatus {
+  humanResolution?: JudgmentResolution;
   feedback?: JudgmentReopened;
   unresolvedReason?: string;
   closure?: RunClosure;
@@ -189,18 +190,74 @@ export interface DeliveryResumed {
   replayed: boolean;
 }
 
-export interface RunClosure {
+export type JudgmentDecision =
+  | "ACCEPT"
+  | "ACCEPT_WITH_DEBT"
+  | "REJECT"
+  | "REWORK_IMPLEMENTATION"
+  | "REVISIT_DESIGN"
+  | "REDEFINE";
+export interface JudgmentDebt {
+  id: string;
+  description: string;
+  owner: string;
+  futureCondition: string;
+}
+export interface HumanQuestion {
+  question: string;
+  evidence: string[];
+}
+export interface JudgmentResolutionInput {
+  decision: JudgmentDecision;
+  reason: string;
+  debts: JudgmentDebt[];
+  humanDecision?: HumanQuestion;
+}
+export interface JudgmentResolution extends JudgmentResolutionInput {
+  schemaVersion: 1;
   reportId: string;
   reportDigest: string;
   planArtifactId: string;
   evaluatedCommit: string;
-  verdict: "ACCEPT" | "REJECT";
-  status: "accepted" | "rejected";
+  recommendation: "ACCEPT_WITH_DEBT" | "HUMAN_DECISION";
+  confirmedAt: number;
+  completedByHuman: Array<"debts" | "humanDecision">;
+}
+export interface HumanResolutionMetadata {
+  recommendation?: "ACCEPT_WITH_DEBT" | "HUMAN_DECISION";
+  resolution?: ArtifactInput & {
+    digest: string;
+    confirmedAt: number;
+    decision: JudgmentDecision;
+    acceptedDebtIds: string[];
+  };
+}
+export type JudgmentApproval =
+  | { applied: JudgmentApplied }
+  | {
+      reportId: string;
+      reportDigest: string;
+      reportPath: string;
+      content: string;
+      evaluation: JudgmentEvaluation;
+      recommendation: JudgmentDecision | "HUMAN_DECISION";
+      debts?: JudgmentDebt[];
+      humanDecision?: HumanQuestion;
+      savedResolution?: JudgmentResolution;
+    };
+
+export interface RunClosure extends HumanResolutionMetadata {
+  reportId: string;
+  reportDigest: string;
+  planArtifactId: string;
+  evaluatedCommit: string;
+  verdict: "ACCEPT" | "ACCEPT_WITH_DEBT" | "REJECT";
+  status: "accepted" | "accepted_with_debt" | "rejected";
   incrementIds: string[];
   closedAt: number;
   summary: ArtifactInput & { digest: string };
 }
-export interface JudgmentReopened {
+export interface JudgmentReopened extends HumanResolutionMetadata {
   reportId: string;
   reportDigest: string;
   planArtifactId: string;
@@ -225,7 +282,12 @@ export interface WorkflowClient {
   finishAttempt(result: FinishAttempt): Promise<AttemptFinished>;
   advanceRun(approvedArtifactId?: string): Promise<RunAdvanced>;
   resumeDelivery(revision: string): Promise<DeliveryResumed>;
-  applyJudgment(reportId: string, revision: string): Promise<JudgmentApplied>;
+  prepareJudgmentApproval(reportId: string, revision: string): Promise<JudgmentApproval>;
+  applyJudgment(
+    reportId: string,
+    revision: string,
+    resolution?: JudgmentResolutionInput,
+  ): Promise<JudgmentApplied>;
   getRunStatus(): Promise<RunStatus>;
 }
 

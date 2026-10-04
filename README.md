@@ -17,7 +17,8 @@ and makes the execution history available for inspection and metrics.
 > Plan. `/xper approve <reportId> <commit>` applies ACCEPT or REJECT, saves a
 > linked summary, and closes that exact run. The same explicit approval applies
 > implementation rework or a Define/Design revisit while retaining the open run.
-> Debt and human-decision handling remain pending.
+> Debt and human decisions use an explicit Pi dialog, retaining the human resolution
+> and distinguishing acceptance with debt from unconditional acceptance.
 > Basic event and usage summaries are available; full metric comparison and a
 > dashboard remain future work.
 
@@ -104,7 +105,8 @@ Completion of every increment makes the run eligible for Judgment Day without
 closing it. The next explicit delegation obtains an independent Judge recommendation.
 An explicit approval applies ACCEPT or REJECT and closes the run, or applies
 Judge feedback to reopen delivery, Define, or Design. Every next role remains
-explicitly delegated. Debt/human decisions and a read-only graph UI remain backlog work.
+explicitly delegated. Debt and human decisions require a confirmed interactive
+resolution; a read-only graph UI remains backlog work.
 
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
@@ -175,8 +177,13 @@ increment verification and permits fresh sequential delivery from the evaluated
 commit. Judge-authorized rework may revalidate an unchanged increment with fresh
 host tests and independent Verification. REVISIT_DESIGN and REDEFINE reuse the
 Knowledge revisit and revised-Plan resume path. Reports, decisions, and consumed
-budgets survive every round; exhausted budgets leave the run unresolved. Debt
-and human-decision recommendations remain pending. Closure uses no model call and
+budgets survive every round; exhausted execution budgets leave feedback unresolved.
+For ACCEPT_WITH_DEBT or HUMAN_DECISION, the same approval command displays the
+report and asks for a decision, reason, and final confirmation. Acceptance with
+debt records the entire list of descriptions, logical owners and future conditions
+and closes as `accepted_with_debt`. Cancellation or absence of an interactive UI
+leaves the recommendation pending. Legacy reports request missing details without
+rewriting their evidence. Closure uses no model call and
 does not merge, push, deploy, or publish. The
 [workflow guide](docs/knowledge-workflow.md) covers contracts and
 budgets. `xper status --json` queries the projection

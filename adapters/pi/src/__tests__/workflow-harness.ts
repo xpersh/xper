@@ -88,7 +88,7 @@ async function setup(
     now: () => now,
     readArtifact: async (path: string) => {
       const result = artifacts.get(path);
-      if (!result) throw new Error("artifact unavailable");
+      if (!result) throw Object.assign(new Error("artifact unavailable"), { code: "ENOENT" });
       return result;
     },
     inspectWorkspace: async () => structuredClone(workspace),

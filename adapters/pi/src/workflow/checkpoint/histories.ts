@@ -100,6 +100,14 @@ export function decodeHistories(
         throw new WorkflowValidationError("duplicate Judge artifact identity");
       artifactIds.add(entry.state.report.artifact_id);
     }
+  for (const entry of judgments) {
+    const ref = entry.decision.resolution;
+    if (ref) {
+      if (artifactIds.has(ref.artifact_id))
+        throw new WorkflowValidationError("duplicate human resolution identity");
+      artifactIds.add(ref.artifact_id);
+    }
+  }
   validateHistoryReferences(knowledge, implementations, verifications, artifactIds, judgments);
   return { implementations, verifications };
 }

@@ -40,7 +40,17 @@ export function startAssignment(
       phase,
       role,
       inputs: [
-        ...new Set([...Object.values(state.accepted), ...(state.feedback ? [state.feedback] : [])]),
+        ...new Set([
+          ...Object.values(state.accepted),
+          ...(state.feedback
+            ? [
+                state.feedback,
+                ...(state.imports[`judgment-resolution-${state.feedback}`]
+                  ? [`judgment-resolution-${state.feedback}`]
+                  : []),
+              ]
+            : []),
+        ]),
       ].sort(),
       selection,
       attemptIds: [] as string[],

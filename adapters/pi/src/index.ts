@@ -25,6 +25,11 @@ export type {
   RunStatus,
   RunClosure,
   JudgmentApplied,
+  JudgmentApproval,
+  JudgmentDebt,
+  JudgmentDecision,
+  JudgmentResolution,
+  JudgmentResolutionInput,
   JudgmentReopened,
 } from "./workflow/types.js";
 export { createXperExtension } from "./extension.js";

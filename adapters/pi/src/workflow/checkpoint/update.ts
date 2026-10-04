@@ -31,7 +31,7 @@ export function knowledgeChange<Result>(
   if (checkpoint) checkpoint.knowledge = transition.state;
   else
     checkpoint = {
-      version: 8,
+      version: 9,
       judgmentHistory: [],
       closure: null,
       judgment: null,

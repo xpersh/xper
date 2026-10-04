@@ -1,3 +1,5 @@
+import type { JudgmentResolutionInput } from "../workflow/types.js";
+import { promptJudgmentResolution } from "./judgment-approval.js";
 import type { PiExtensionAPI } from "./types.js";
 import { PROTOCOL_VERSION } from "../bridge/protocol.js";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
@@ -79,7 +81,25 @@ export function registerXperCommand(pi: PiExtensionAPI, session: XperSession): v
               );
             const [artifactId, revision] = args;
             if (artifactId && revision) {
-              const result = await workflow.applyJudgment(artifactId, revision);
+              const approval = await workflow.prepareJudgmentApproval(artifactId, revision);
+              let resolution: JudgmentResolutionInput | undefined;
+              if (
+                !("applied" in approval) &&
+                ["ACCEPT_WITH_DEBT", "HUMAN_DECISION"].includes(approval.recommendation)
+              ) {
+                resolution = await promptJudgmentResolution(ctx, approval);
+                if (!resolution) {
+                  ctx.ui.notify(
+                    "xper: no complete human resolution confirmed; recommendation remains pending. Use /xper approve in an interactive Pi session.",
+                    "info",
+                  );
+                  return;
+                }
+              }
+              const result =
+                "applied" in approval
+                  ? approval.applied
+                  : await workflow.applyJudgment(artifactId, revision, resolution);
               const unresolved =
                 result.status === "reopened"
                   ? (await workflow.getRunStatus()).unresolvedReason

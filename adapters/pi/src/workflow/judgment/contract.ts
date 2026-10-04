@@ -1,5 +1,5 @@
 import { keys, text } from "../contract-validation.js";
-import type { JudgmentEvaluation } from "../types.js";
+import type { JudgmentDebt, HumanQuestion, JudgmentEvaluation } from "../types.js";
 import { invalid, object } from "../validation.js";
 
 export const verdicts = [
@@ -17,6 +17,8 @@ export interface Finding {
   evidence: string[];
 }
 export interface JudgmentProposal {
+  debts?: JudgmentDebt[];
+  humanDecision?: HumanQuestion;
   verdict: Verdict;
   reason: string;
   criteria: Array<Finding & { criterionId: string; outcome: "passed" | "failed" | "uncertain" }>;
@@ -34,6 +36,7 @@ export function parseJudgmentReport(
   content: string,
   evaluation: JudgmentEvaluation,
   assignmentId: string,
+  requireDetails = false,
 ): JudgmentReport {
   let value: unknown;
   try {
@@ -64,7 +67,16 @@ export function parseJudgmentReport(
     item.evidence.every((id) => typeof id === "string" && sources.has(id));
   if (
     output.kind !== "judgment_verdict" ||
-    !keys(output, ["kind", "assignmentId", "verdict", "reason", "criteria", "criticisms"]) ||
+    !keys(output, [
+      "kind",
+      "assignmentId",
+      "verdict",
+      "reason",
+      "criteria",
+      "criticisms",
+      ...("debts" in output ? ["debts"] : []),
+      ...("humanDecision" in output ? ["humanDecision"] : []),
+    ]) ||
     output.assignmentId !== assignmentId ||
     !verdicts.includes(output.verdict as Verdict) ||
     typeof output.reason !== "string" ||
@@ -88,5 +100,52 @@ export function parseJudgmentReport(
     )
   )
     invalid("Judge report requires every criterion and exact evidence references");
+  validateResolutionDetails(output.debts, output.humanDecision, evaluation);
+  if (
+    requireDetails &&
+    ((output.verdict === "ACCEPT_WITH_DEBT" && !output.debts) ||
+      (output.verdict === "HUMAN_DECISION" && !output.humanDecision))
+  )
+    invalid("new Judge reports require structured debt or a human question");
+  if (
+    (output.debts !== undefined || output.humanDecision !== undefined) &&
+    !["ACCEPT_WITH_DEBT", "HUMAN_DECISION"].includes(String(output.verdict))
+  )
+    invalid("resolution details require a debt or human recommendation");
   return value as unknown as JudgmentReport;
+}
+
+export function validateResolutionDetails(
+  debts: unknown,
+  question: unknown,
+  evaluation: JudgmentEvaluation,
+): void {
+  if (
+    debts !== undefined &&
+    (!Array.isArray(debts) ||
+      !debts.length ||
+      !debts.every(
+        (item) =>
+          object(item) &&
+          keys(item, ["id", "description", "owner", "futureCondition"]) &&
+          [item.id, item.description, item.owner, item.futureCondition].every(text),
+      ) ||
+      new Set(debts.map((item) => item.id)).size !== debts.length)
+  )
+    invalid("invalid debt details");
+  const sources = new Set([
+    ...evaluation.artifacts.map((item) => item.artifact_id),
+    diffReference(evaluation),
+  ]);
+  if (
+    question !== undefined &&
+    (!object(question) ||
+      !keys(question, ["question", "evidence"]) ||
+      !text(question.question) ||
+      !Array.isArray(question.evidence) ||
+      !question.evidence.length ||
+      new Set(question.evidence).size !== question.evidence.length ||
+      !question.evidence.every((id) => typeof id === "string" && sources.has(id)))
+  )
+    invalid("invalid human question or evidence");
 }

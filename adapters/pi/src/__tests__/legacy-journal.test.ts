@@ -159,7 +159,7 @@ test("the next local transition persists migrated state while retaining the hist
   assert.equal(assignment.phase, "discovery");
   const snapshot = await h.snapshot();
   assert(object(snapshot.state));
-  assert.equal(snapshot.state.version, 8);
+  assert.equal(snapshot.state.version, 9);
   assert(object(snapshot.state.knowledge));
   assert.equal(snapshot.state.knowledge.instanceId, "historical-run");
   assert.deepEqual(snapshot.pending.slice(0, historicalEvents.length), historicalEvents);
@@ -183,7 +183,7 @@ test("legacy recovery interrupts an active attempt once and never admits executi
   const snapshot = await h.snapshot();
   const state = decodeAdapterCheckpoint(snapshot.state)?.knowledge;
   assert(object(snapshot.state));
-  assert.equal(snapshot.state.version, 8);
+  assert.equal(snapshot.state.version, 9);
   assert.equal(state?.attempts["historical-attempt"]?.outcome, "interrupted");
   assert.deepEqual(Object.keys(state?.assignments ?? {}), ["historical-assignment"]);
   assert.deepEqual(Object.keys(state?.attempts ?? {}), ["historical-attempt"]);

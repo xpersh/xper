@@ -41,6 +41,17 @@ export function receiveDeliveryFeedback(
   const edge = feedbackTransition("ready", event.reason);
   if (!edge || edge.to !== target) invalid("knowledge feedback target is not defined");
   state.imports[event.artifact.artifact_id] = structuredClone(event.artifact);
+  if (event.resolution) {
+    if (
+      event.artifact.kind !== "judgment_verdict" ||
+      event.resolution.kind !== "judgment_resolution" ||
+      event.resolution.artifact_id !== `judgment-resolution-${event.artifact.artifact_id}` ||
+      event.resolution.version !== 1 ||
+      !event.resolution.digest
+    )
+      invalid("invalid human resolution feedback");
+    state.imports[event.resolution.artifact_id] = structuredClone(event.resolution);
+  }
   for (const invalidated of phasesInvalidatedBy(target)) {
     const artifactId = state.accepted[invalidated];
     if (!artifactId) continue;

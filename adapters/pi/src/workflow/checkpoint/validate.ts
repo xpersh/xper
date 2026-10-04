@@ -43,7 +43,7 @@ export function decodeEnvelope(
     authorizedPlan?.reworkReportId,
   );
   const checkpoint: AdapterCheckpoint = {
-    version: 8,
+    version: 9,
     judgmentHistory,
     closure: null,
     judgment: decodeJudgment(judgment),

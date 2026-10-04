@@ -54,5 +54,131 @@
         "criticisms": []
       }
     }
+  },
+  {
+    "name": "accept_with_debt",
+    "artifact": {
+      "schemaVersion": 1,
+      "evaluation": {
+        "planArtifactId": "plan-1",
+        "incrementIds": [
+          "s1"
+        ],
+        "criterionIds": [
+          "c1"
+        ],
+        "artifacts": [
+          {
+            "artifact_id": "plan-1",
+            "kind": "execution_plan",
+            "path": ".xper/artifacts/plan-1.json",
+            "version": 1,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "artifact_id": "verified-1",
+            "kind": "verification_result",
+            "path": ".xper/artifacts/verified-1.json",
+            "version": 1,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "logs": [
+          {
+            "path": ".xper/artifacts/test-1.log",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ],
+        "baseCommit": "1111111111111111111111111111111111111111",
+        "evaluatedCommit": "2222222222222222222222222222222222222222"
+      },
+      "output": {
+        "kind": "judgment_verdict",
+        "assignmentId": "judge-1",
+        "verdict": "ACCEPT_WITH_DEBT",
+        "reason": "The defined behavior is supported by independent verification.",
+        "criteria": [
+          {
+            "criterionId": "c1",
+            "outcome": "passed",
+            "reason": "The recorded command verifies the required behavior.",
+            "evidence": [
+              "verified-1"
+            ]
+          }
+        ],
+        "criticisms": [],
+        "debts": [
+          {
+            "id": "debt-1",
+            "description": "Replace temporary storage",
+            "owner": "Storage team",
+            "futureCondition": "Before multi-user release"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "human_decision",
+    "artifact": {
+      "schemaVersion": 1,
+      "evaluation": {
+        "planArtifactId": "plan-1",
+        "incrementIds": [
+          "s1"
+        ],
+        "criterionIds": [
+          "c1"
+        ],
+        "artifacts": [
+          {
+            "artifact_id": "plan-1",
+            "kind": "execution_plan",
+            "path": ".xper/artifacts/plan-1.json",
+            "version": 1,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "artifact_id": "verified-1",
+            "kind": "verification_result",
+            "path": ".xper/artifacts/verified-1.json",
+            "version": 1,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "logs": [
+          {
+            "path": ".xper/artifacts/test-1.log",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ],
+        "baseCommit": "1111111111111111111111111111111111111111",
+        "evaluatedCommit": "2222222222222222222222222222222222222222"
+      },
+      "output": {
+        "kind": "judgment_verdict",
+        "assignmentId": "judge-1",
+        "verdict": "HUMAN_DECISION",
+        "reason": "The defined behavior is supported by independent verification.",
+        "criteria": [
+          {
+            "criterionId": "c1",
+            "outcome": "passed",
+            "reason": "The recorded command verifies the required behavior.",
+            "evidence": [
+              "verified-1"
+            ]
+          }
+        ],
+        "criticisms": [],
+        "humanDecision": {
+          "question": "Should the integration risk be accepted?",
+          "evidence": [
+            "plan-1"
+          ]
+        }
+      }
+    }
   }
 ]

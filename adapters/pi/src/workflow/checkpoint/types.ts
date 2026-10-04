@@ -28,7 +28,7 @@ export interface DeliveryReconciliation {
 }
 
 export interface AdapterCheckpoint {
-  version: 8;
+  version: 9;
   judgmentHistory: Array<{
     state: JudgmentState;
     decision: JudgmentReopened;

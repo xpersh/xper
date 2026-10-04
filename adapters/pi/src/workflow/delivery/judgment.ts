@@ -53,7 +53,12 @@ export function judgmentEvaluation(
       ...new Set([
         ...Object.values(checkpoint.knowledge.accepted),
         ...satisfied.values(),
-        ...(source ? [source.decision.reportId] : []),
+        ...(source
+          ? [
+              source.decision.reportId,
+              ...(source.decision.resolution ? [source.decision.resolution.artifact_id] : []),
+            ]
+          : []),
       ]),
     ].map((id) => {
       const { artifact_id, kind, path, version, digest } = registeredArtifact(checkpoint, id);

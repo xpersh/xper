@@ -1,0 +1,47 @@
+[
+  {
+    "name": "accept_with_debt",
+    "artifact": {
+      "schemaVersion": 1,
+      "reportId": "report-1",
+      "reportDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "planArtifactId": "plan-1",
+      "evaluatedCommit": "2222222222222222222222222222222222222222",
+      "recommendation": "ACCEPT_WITH_DEBT",
+      "decision": "ACCEPT_WITH_DEBT",
+      "reason": "Explicit human decision based on the evaluated evidence",
+      "debts": [
+        {
+          "id": "debt-1",
+          "description": "Replace temporary storage",
+          "owner": "Storage team",
+          "futureCondition": "Before multi-user release"
+        }
+      ],
+      "confirmedAt": 1000,
+      "completedByHuman": []
+    }
+  },
+  {
+    "name": "human_decision",
+    "artifact": {
+      "schemaVersion": 1,
+      "reportId": "report-1",
+      "reportDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "planArtifactId": "plan-1",
+      "evaluatedCommit": "2222222222222222222222222222222222222222",
+      "recommendation": "HUMAN_DECISION",
+      "decision": "REVISIT_DESIGN",
+      "reason": "Explicit human decision based on the evaluated evidence",
+      "debts": [],
+      "confirmedAt": 1000,
+      "completedByHuman": [],
+      "humanDecision": {
+        "question": "Should the integration risk be accepted?",
+        "evidence": [
+          "plan-1"
+        ]
+      }
+    }
+  }
+]

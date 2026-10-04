@@ -2,7 +2,8 @@ import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { closeRun } from "../delivery/closure.js";
 import { reopenJudgment } from "../delivery/judgment-feedback.js";
 import { closureSummary } from "../delivery/summary.js";
-import { parseJudgmentReport } from "../judgment/contract.js";
+import { prepareResolution } from "./resolution.js";
+import type { JudgmentResolutionInput } from "../types.js";
 import { invalid, object } from "../validation.js";
 import { readRegisteredArtifact } from "./evidence.js";
 import { checkEvaluation } from "./judgment.js";
@@ -13,17 +14,23 @@ export async function prepareClosure(
   reportId: string,
   revision: string,
   effects: WorkflowEffects & { writeArtifact: ArtifactWriter },
+  input?: JudgmentResolutionInput,
 ) {
   const judgment = checkpoint.judgment;
   if (!judgment?.report) invalid("Judge report is required");
-  const evidence = await readRegisteredArtifact(checkpoint, effects.readArtifact, reportId);
-  const report = parseJudgmentReport(evidence.content, judgment.evaluation, judgment.assignmentId);
-  if (report.output.verdict !== judgment.report.verdict)
-    invalid("Judge verdict does not match registration");
-  await checkEvaluation(judgment.evaluation, effects);
-  if (report.output.verdict !== "ACCEPT" && report.output.verdict !== "REJECT") {
+  const { report, resolution, metadata } = await prepareResolution(
+    checkpoint,
+    reportId,
+    input,
+    effects,
+  );
+  const verdict = resolution?.decision ?? report.output.verdict;
+  if (verdict !== "ACCEPT" && verdict !== "ACCEPT_WITH_DEBT" && verdict !== "REJECT") {
     const now = effects.now();
-    return { now, change: reopenJudgment(checkpoint, report, effects.id(), now) };
+    return {
+      now,
+      change: reopenJudgment(checkpoint, report, effects.id(), now, resolution, metadata),
+    };
   }
   const path = `.xper/artifacts/run-summary-${reportId}.md`;
   const content = closureSummary(
@@ -31,6 +38,7 @@ export async function prepareClosure(
     reportId,
     judgment.report.path,
     report,
+    resolution,
   );
   try {
     if ((await effects.writeArtifact(reportId, content, path)) !== path)
@@ -44,6 +52,11 @@ export async function prepareClosure(
     invalid("existing run summary differs; preserve it before retrying");
   await readRegisteredArtifact(checkpoint, effects.readArtifact, reportId);
   await checkEvaluation(judgment.evaluation, effects);
+  if (
+    metadata.resolution &&
+    (await effects.readArtifact(metadata.resolution.path)).digest !== metadata.resolution.digest
+  )
+    invalid("human resolution changed before application");
   const now = effects.now();
   return {
     now,
@@ -59,6 +72,8 @@ export async function prepareClosure(
         digest: summary.digest,
       },
       now,
+      resolution,
+      metadata,
     ),
   };
 }

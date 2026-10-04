@@ -95,6 +95,11 @@ export function validateReconciliations(
     )
       throw new WorkflowValidationError("invalid delivery reconciliation");
     seenFeedback.add(sourceId);
+    if (judge?.decision.resolution) {
+      if (!knowledge.imports[judge.decision.resolution.artifact_id])
+        throw new WorkflowValidationError("missing human resolution feedback");
+      seenFeedback.add(judge.decision.resolution.artifact_id);
+    }
   }
   if (Object.keys(knowledge.imports).some((id) => !seenFeedback.has(id)))
     throw new WorkflowValidationError("invalid imported knowledge artifact reference");

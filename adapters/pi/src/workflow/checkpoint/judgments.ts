@@ -1,3 +1,4 @@
+import { validateResolutionMetadata } from "../judgment/resolution.js";
 import type { AdapterCheckpoint } from "./types.js";
 import { decodeJudgment } from "../judgment/checkpoint.js";
 import { validateJudgmentReferences } from "../delivery/judgment.js";
@@ -19,11 +20,11 @@ export function decodeJudgmentHistory(value: unknown): AdapterCheckpoint["judgme
     if (!state?.report) invalid("historical Judge report is required");
     const decision = entry.decision;
     const phase =
-      state.report.verdict === "REWORK_IMPLEMENTATION"
+      decision.verdict === "REWORK_IMPLEMENTATION"
         ? "implementation"
-        : state.report.verdict === "REDEFINE"
+        : decision.verdict === "REDEFINE"
           ? "define"
-          : state.report.verdict === "REVISIT_DESIGN"
+          : decision.verdict === "REVISIT_DESIGN"
             ? "design"
             : null;
     if (
@@ -32,7 +33,6 @@ export function decodeJudgmentHistory(value: unknown): AdapterCheckpoint["judgme
       decision.status !== "reopened" ||
       decision.reportId !== state.report.artifact_id ||
       decision.reportDigest !== state.report.digest ||
-      decision.verdict !== state.report.verdict ||
       decision.planArtifactId !== state.evaluation.planArtifactId ||
       decision.evaluatedCommit !== state.evaluation.evaluatedCommit ||
       JSON.stringify(decision.incrementIds) !== JSON.stringify(state.evaluation.incrementIds) ||
@@ -42,6 +42,20 @@ export function decodeJudgmentHistory(value: unknown): AdapterCheckpoint["judgme
       !(entry.authorization.baseCommit === null || commit(entry.authorization.baseCommit))
     )
       invalid("invalid historical Judge decision");
+    validateResolutionMetadata(
+      decision,
+      state.report.verdict,
+      state.report.artifact_id,
+      Number(decision.appliedAt),
+    );
+    if (
+      object(decision.resolution) &&
+      Object.values(state.attempts).some(
+        (attempt) =>
+          attempt.startedAt > Number((decision.resolution as Record<string, unknown>).confirmedAt),
+      )
+    )
+      invalid("human resolution predates Judgment");
     return structuredClone({ ...entry, state }) as AdapterCheckpoint["judgmentHistory"][number];
   });
 }
@@ -70,6 +84,13 @@ export function validateJudgmentHistory(checkpoint: AdapterCheckpoint): void {
     if (state.report) {
       if (artifacts.has(state.report.artifact_id)) invalid("duplicate Judge artifact identity");
       artifacts.add(state.report.artifact_id);
+    }
+  }
+  for (const entry of checkpoint.judgmentHistory) {
+    const ref = entry.decision.resolution;
+    if (ref) {
+      if (artifacts.has(ref.artifact_id)) invalid("duplicate human resolution identity");
+      artifacts.add(ref.artifact_id);
     }
   }
   for (const [index, entry] of checkpoint.judgmentHistory.entries()) {
@@ -155,7 +176,9 @@ export function validateJudgmentHistory(checkpoint: AdapterCheckpoint): void {
       source.decision.verdict !== "REWORK_IMPLEMENTATION" ||
       source.decision.planArtifactId !== state.planArtifactId ||
       !source.decision.incrementIds.includes(state.incrementId) ||
-      !state.assignment.inputs.includes(state.reworkReportId)
+      !state.assignment.inputs.includes(state.reworkReportId) ||
+      (source.decision.resolution &&
+        !state.assignment.inputs.includes(source.decision.resolution.artifact_id))
     )
       invalid("implementation rework has no applied Judge authorization");
     if (state.startedAt < source.decision.appliedAt)

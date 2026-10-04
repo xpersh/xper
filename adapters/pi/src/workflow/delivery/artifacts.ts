@@ -15,6 +15,11 @@ export function registeredArtifact(
     (entry) => entry.state.report?.artifact_id === id,
   )?.state.report;
   if (historical) return historical;
+  const resolution = [
+    checkpoint.closure,
+    ...checkpoint.judgmentHistory.map((entry) => entry.decision),
+  ].find((decision) => decision?.resolution?.artifact_id === id)?.resolution;
+  if (resolution) return resolution;
   const knowledge = checkpoint.knowledge.artifacts[id];
   if (knowledge) return knowledge;
   const imported = checkpoint.knowledge.imports[id];

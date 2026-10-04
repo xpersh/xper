@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xper.dev/schemas/judgment-resolution-v1.schema.json",
+  "title": "Pi explicit human judgment resolution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reportId",
+    "reportDigest",
+    "planArtifactId",
+    "evaluatedCommit",
+    "recommendation",
+    "decision",
+    "reason",
+    "debts",
+    "confirmedAt",
+    "completedByHuman"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "reportId": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "reportDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "planArtifactId": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "evaluatedCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "recommendation": {
+      "enum": [
+        "ACCEPT_WITH_DEBT",
+        "HUMAN_DECISION"
+      ]
+    },
+    "decision": {
+      "enum": [
+        "ACCEPT",
+        "ACCEPT_WITH_DEBT",
+        "REJECT",
+        "REWORK_IMPLEMENTATION",
+        "REVISIT_DESIGN",
+        "REDEFINE"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "debts": {
+      "type": "array",
+      "items": {
+        "$ref": "https://xper.dev/schemas/judgment-v1.schema.json#/$defs/debt"
+      }
+    },
+    "confirmedAt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "completedByHuman": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "debts",
+          "humanDecision"
+        ]
+      }
+    },
+    "humanDecision": {
+      "$ref": "https://xper.dev/schemas/judgment-v1.schema.json#/$defs/humanDecision"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "recommendation": {
+            "const": "HUMAN_DECISION"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "humanDecision"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "ACCEPT_WITH_DEBT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "debts": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "ACCEPT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "debts": {
+            "maxItems": 0
+          },
+          "recommendation": {
+            "const": "HUMAN_DECISION"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -247,8 +247,8 @@ Review the report, then run `/xper approve <reportId> <commit>` using the exact
 report ID and full lowercase evaluated Git hash shown by status or delegation.
 ACCEPT closes the run as accepted; REJECT closes it as rejected.
 REWORK_IMPLEMENTATION reopens delivery, REVISIT_DESIGN reopens Design, and REDEFINE
-reopens Define. ACCEPT_WITH_DEBT and HUMAN_DECISION remain pending with an
-unsupported-handling diagnostic. `/xper advance` and `xper_delegate` never
+reopens Define. ACCEPT_WITH_DEBT and HUMAN_DECISION require the interactive
+human resolution described below. `/xper advance` and `xper_delegate` never
 apply a verdict, and `/xper approve <artifactId>` still serves Knowledge gates.
 
 Before the first closure, Pi checks the registered report, its frozen evidence
@@ -265,6 +265,42 @@ even if the checkout subsequently changes; it never produces new acceptance or
 closure events. A closed run rejects further execution; use a new Pi session for
 another objective. Closure needs no remaining execution budget and never waits
 for Rust. It does not merge, push, deploy, publish, or start debt work.
+
+## Resolve debt and human decisions
+
+Use `/xper approve <reportId> <commit>` in an interactive Pi session. The command
+shows the exact report, revision, findings, evidence and structured debt/question.
+Enter one offered decision, a nonempty reason and `CONFIRM` at the final dialog.
+Cancelling, incomplete input or absent UI leaves the recommendation pending;
+`xper_delegate` and `/xper advance` cannot provide a human resolution.
+
+ACCEPT_WITH_DEBT offers acceptance of the entire debt list, rejection, or feedback
+to Implementation, Design or Define. Every debt has a unique report-local ID,
+description, logical owner and future condition. Accepting records those unchanged
+obligations and closes as `accepted_with_debt`; it never reports unconditional
+acceptance. HUMAN_DECISION preserves its question and evidence and offers the same
+existing closure/feedback paths. If it contains debt, acceptance requires accepting
+all of it. Owners and conditions are descriptive: no external tracking or scheduled
+work is created.
+
+New Judge reports supply these structured fields. Older pending v1 reports remain
+readable: accepting debt asks for its count and each description, owner and future
+condition; resolving a human question asks for its text and comma-separated
+references from the displayed frozen evidence. The human-supplied fields are marked
+in the separate resolution, and the original report stays unchanged.
+
+Pi rechecks the exact report, frozen evidence and clean checkout after the dialog.
+The immutable `judgment_resolution` records the recommendation, effective decision,
+reason, question/evidence, debts and confirmation time. Status displays obligations;
+the closure summary links the full resolution and describes every debt without
+truncation. Feedback includes both the Judge report and human answer in subsequent
+assignments. No model call or remaining execution budget is needed to resolve it.
+
+An interrupted artifact or summary write remains pending until explicit approval
+resumes that saved decision. A different decision cannot overwrite the saved
+resolution. Repeating a committed decision returns its history without another
+dialog or new facts, even if the checkout later changes. Rust recording remains in
+the background, including when unavailable or unresponsive.
 
 ## Apply Judge feedback
 
@@ -383,16 +419,16 @@ Profiles must include the five Knowledge roles in the table to reach Plan plus
 `judgment_day.judge` for Judgment.
 Existing Discovery-only profiles remain usable for Discovery; dispatch explains
 when the current role has no route. New runs resume from Pi's versioned
-checkpoint. Checkpoint envelope format 8 contains Knowledge v3, ordered
+checkpoint. Checkpoint envelope format 9 contains Knowledge v3, ordered
 per-increment histories of Implementation v1/v2 and Verification v1, the current
 authorized Plan, sequential reconciliations, historical applied Judges and a
 nullable current Judgment v1 state with frozen references and report metadata.
 A nullable closure retains the decision, increments and summary reference/digest.
 Each delivery history is validated against its historical Plan; only the active
 Plan and rework report contribute to frontier, dependencies and Git tip. Valid
-Knowledge v1/v2 states and envelope formats 1 through 7 migrate in memory,
+Knowledge v1/v2 states and envelope formats 1 through 8 migrate in memory,
 preserving existing closures, identities, evidence, budgets and pending events. Reading alone does not rewrite the journal; the next local commit
-writes format 8. Restoring a checkpoint does not repeat an agent invocation.
+writes format 9. Restoring a checkpoint does not repeat an agent invocation.
 Core-owned legacy runs remain
 available for historical inspection, but cannot resume under the new architecture
 because they lack that checkpoint.

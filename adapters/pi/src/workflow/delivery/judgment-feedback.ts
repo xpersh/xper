@@ -1,9 +1,15 @@
+import { humanResolutionFacts, validateResolutionMetadata } from "../judgment/resolution.js";
 import type { AdapterCheckpoint } from "../checkpoint/types.js";
 import { knowledgeChange, type CheckpointChange } from "../checkpoint/update.js";
 import type { JudgmentReport } from "../judgment/contract.js";
 import { judgmentDefinition } from "../judgment/definition.js";
 import { transitionKnowledge } from "../knowledge/machine.js";
-import type { JudgmentApplied, JudgmentReopened } from "../types.js";
+import type {
+  JudgmentApplied,
+  JudgmentReopened,
+  JudgmentResolution,
+  HumanResolutionMetadata,
+} from "../types.js";
 import { invalid } from "../validation.js";
 
 export function reopenJudgment(
@@ -11,12 +17,14 @@ export function reopenJudgment(
   report: JudgmentReport,
   visitId: string,
   now: number,
+  human?: JudgmentResolution,
+  metadata: HumanResolutionMetadata = {},
 ): CheckpointChange<JudgmentApplied> {
   const checkpoint = structuredClone(previous);
   const judgment = checkpoint.judgment;
   const artifact = judgment?.report;
   const authorization = checkpoint.authorizedPlan;
-  const verdict = report.output.verdict;
+  const verdict = human?.decision ?? report.output.verdict;
   if (
     !judgment ||
     !artifact ||
@@ -31,6 +39,7 @@ export function reopenJudgment(
         ? "define"
         : "design";
   const decision: JudgmentReopened = {
+    ...metadata,
     reportId: artifact.artifact_id,
     reportDigest: artifact.digest,
     planArtifactId: judgment.evaluation.planArtifactId,
@@ -41,6 +50,7 @@ export function reopenJudgment(
     incrementIds: [...judgment.evaluation.incrementIds],
     appliedAt: now,
   };
+  validateResolutionMetadata({ ...decision }, report.output.verdict, artifact.artifact_id, now);
   checkpoint.judgmentHistory.push({
     state: judgment,
     decision,
@@ -49,6 +59,7 @@ export function reopenJudgment(
   });
   checkpoint.judgment = null;
   const facts: CheckpointChange<JudgmentApplied>["facts"] = [
+    ...humanResolutionFacts(decision),
     { type: "judgment.applied", data: { ...decision } },
     ...judgment.evaluation.artifacts
       .filter((input) => input.kind === "verification_result")
@@ -92,9 +103,10 @@ export function reopenJudgment(
       planArtifactId: authorization.artifactId,
       planDigest: authorization.digest,
       reason,
-      evidence: report.output.reason,
+      evidence: human?.reason ?? report.output.reason,
       paths: [],
       artifact,
+      ...(metadata.resolution ? { resolution: metadata.resolution } : {}),
     },
     now,
   );

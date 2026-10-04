@@ -47,6 +47,8 @@ export function validateHistoryReferences(
   for (const [id, imported] of Object.entries(knowledge.imports)) {
     const owner =
       judgments.find((entry) => entry.state.report?.artifact_id === id)?.state.report ??
+      judgments.find((entry) => entry.decision.resolution?.artifact_id === id)?.decision
+        .resolution ??
       Object.values(verifications)
         .flat()
         .map((state) => state.artifacts[id])

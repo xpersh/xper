@@ -132,6 +132,8 @@ for (const fixture of read("fixtures/judgment-v1.json")) {
     "REJECT",
   ]) {
     const report = structuredClone(fixture.artifact);
+    delete report.output.debts;
+    delete report.output.humanDecision;
     report.output.verdict = verdict;
     assert(validateJudgment(report), verdict);
   }
@@ -159,4 +161,23 @@ for (const fixture of read("fixtures/judgment-v1.json")) {
     mutate(report);
     assert(!validateJudgment(report), "reject malformed Judgment contract");
   }
+}
+
+const validateResolution = ajv.compile(read("schemas/judgment-resolution-v1.schema.json"));
+for (const { artifact } of read("fixtures/judgment-resolution-v1.json")) {
+  assert(validateResolution(artifact), ajv.errorsText(validateResolution.errors));
+  for (const invalid of [
+    { ...artifact, reason: " " },
+    { ...artifact, decision: "HUMAN_DECISION" },
+    { ...artifact, confirmedAt: -1 },
+    { ...artifact, evaluatedCommit: "HEAD" },
+    { ...artifact, extra: true },
+    { ...artifact, decision: "ACCEPT_WITH_DEBT", debts: [] },
+    {
+      ...artifact,
+      decision: "ACCEPT",
+      debts: [{ id: "debt", description: "Debt", owner: "Team", futureCondition: "Next release" }],
+    },
+  ])
+    assert(!validateResolution(invalid), "reject invalid human resolution");
 }

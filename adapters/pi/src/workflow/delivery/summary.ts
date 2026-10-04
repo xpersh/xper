@@ -1,4 +1,8 @@
+import type { JudgmentResolution } from "../types.js";
 import type { JudgmentReport } from "../judgment/contract.js";
+
+const literal = (text: string) =>
+  text.replace(/\s+/g, " ").replace(/[\\`*_{}\[\]<>()|#!]/g, "\\$&");
 
 /** A bounded excerpt preserves the original as the authoritative linked evidence. */
 const excerpt = (text: string) =>
@@ -12,8 +16,10 @@ export function closureSummary(
   reportId: string,
   reportPath: string,
   report: JudgmentReport,
+  resolution?: JudgmentResolution,
 ): string {
   const { evaluation, output } = report;
+  const verdict = resolution?.decision ?? output.verdict;
   const link = (id: string) => {
     const artifact = evaluation.artifacts.find((item) => item.artifact_id === id);
     return artifact ? `[${excerpt(id)}](${artifact.path.split("/").at(-1)})` : `\`${id}\``;
@@ -25,7 +31,7 @@ export function closureSummary(
   return [
     "# Run summary",
     "",
-    `Run: ${excerpt(runId)}. Result: **${output.verdict === "ACCEPT" ? "accepted" : "rejected"}**.`,
+    `Run: ${excerpt(runId)}. Result: **${verdict === "ACCEPT" ? "accepted" : verdict === "ACCEPT_WITH_DEBT" ? "accepted_with_debt" : "rejected"}**.`,
     "",
     `Judge report: [${excerpt(reportId)}](${reportPath.split("/").at(-1)}).`,
     "",
@@ -37,6 +43,33 @@ export function closureSummary(
     "",
     `Diff: \`git:${evaluation.baseCommit}..${evaluation.evaluatedCommit}\`.`,
     "",
+    ...(resolution
+      ? [
+          "## Human resolution",
+          "",
+          `Recommendation: ${output.verdict}. Decision: ${resolution.decision}.`,
+          "",
+          `[Recorded human resolution](judgment-resolution-${reportId}.json)`,
+          "",
+          literal(resolution.reason),
+          "",
+          ...(resolution.humanDecision
+            ? [
+                `Question: ${literal(resolution.humanDecision.question)}`,
+                "",
+                ...resolution.humanDecision.evidence.map(link),
+                "",
+              ]
+            : []),
+          "## Debt",
+          "",
+          ...resolution.debts.map(
+            (debt) =>
+              `- ${literal(debt.id)}: ${literal(debt.description)} — Owner: ${literal(debt.owner)}. Future condition: ${literal(debt.futureCondition)}.`,
+          ),
+          "",
+        ]
+      : []),
     "## Criteria",
     "",
     "| Criterion | Outcome | Finding and evidence |",

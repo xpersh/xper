@@ -149,7 +149,7 @@ Pi applies supported verdicts only through `/xper approve <reportId> <commit>`.
 and covered `incrementIds`. ACCEPT also emits one `increment.accepted` per covered
 increment with those identity references and its `incrementId`,
 `implementationArtifactId` and `verificationArtifactId`. `run.finished` reports
-`status: "accepted" | "rejected"`, the report/Plan/commit references, and
+`status: "accepted" | "accepted_with_debt" | "rejected"`, the report/Plan/commit references, and
 `summaryArtifactId`/`summaryPath`. The Markdown `run_summary` is registered as an
 artifact; its content stays local. These are extensible event data under protocol
 v1, not new RPCs or Rust workflow rules. Reapplying an identical decision emits
@@ -162,4 +162,36 @@ Knowledge feedback retains its existing transition events. These decisions do
 not emit `increment.accepted` or `run.finished`. Existing verification-sourced
 reconciliation events retain `verificationArtifactId`; Judge-sourced events use
 `judgmentArtifactId` and covered `incrementIds`. Reports remain `judgment-v1`;
-checkpoint format 8 is opaque adapter data. Rust needs no new parser or policy.
+checkpoint format 9 is opaque adapter data. Rust needs no new parser or policy.
+
+`judgment-v1` additionally permits structured `debts` (unique report-local IDs,
+nonempty descriptions, logical owners and future conditions) and `humanDecision`
+(question and evidence references) on ACCEPT_WITH_DEBT or HUMAN_DECISION reports.
+Their absence remains valid for historical v1 artifacts. Pi requires the respective
+fields when registering new special reports; it validates reference membership
+and unique debt IDs beyond JSON Schema.
+
+[judgment-resolution-v1.schema.json](judgment-resolution-v1.schema.json) describes
+Pi's immutable human resolution artifact. It binds the original report ID/digest,
+Plan and evaluated commit to the recommendation, effective decision, human reason,
+debt list, question/evidence and confirmation time. `completedByHuman` identifies
+legacy details supplied by the person. It does not assert an authenticated identity.
+Pi verifies that structured Judge details are preserved and all debt is accepted
+before allowing ACCEPT_WITH_DEBT; debt cannot accompany unconditional ACCEPT.
+
+The existing approval command obtains this input through Pi's interactive UI.
+`prepareJudgmentApproval` returns validated context or an existing decision;
+`applyJudgment` accepts an optional `JudgmentResolutionInput`, required for an
+unresolved special recommendation unless recovering its already saved confirmation.
+These are local adapter methods, not new JSON-RPC endpoints or execution tools.
+
+`judgment.resolved` records the original recommendation, effective `verdict`, report,
+revision and `resolutionArtifactId`, plus the accepted debt IDs. Its artifact is
+registered through the existing event vocabulary. Applied decisions retain their
+original recommendation and resolution reference. ACCEPT_WITH_DEBT emits
+`increment.accepted` with `verdict: "ACCEPT_WITH_DEBT"`, resolution and debt references,
+and `run.finished` with `status: "accepted_with_debt"`. HUMAN_DECISION can resolve to
+ordinary acceptance, rejection, acceptance with listed debt, or any existing feedback
+route. Rust preserves these extensible facts without deciding their meaning.
+Checkpoint 9 stores resolution metadata on closures and historical decisions;
+artifact text remains local. Existing checkpoints migrate without new decisions.

@@ -144,6 +144,7 @@ export function transitionJudgment<E extends Event>(
           event.evidence.content,
           state.evaluation,
           state.assignmentId,
+          true,
         );
         state.report = {
           artifact_id: event.artifactId,

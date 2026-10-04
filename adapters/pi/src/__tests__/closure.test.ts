@@ -6,61 +6,12 @@ import test from "node:test";
 import { ProtocolFailure } from "../bridge/protocol.js";
 import { connectBridge } from "../bridge/client.js";
 import { XperClient } from "../bridge/xper-client.js";
-import { registerXperCommand } from "../pi/xper-command.js";
-import { XperSession } from "../pi/session.js";
 import { decodeAdapterCheckpoint } from "../workflow/checkpoint/decode.js";
-import type { AdapterCheckpoint } from "../workflow/checkpoint/types.js";
 import { PiWorkflow } from "../workflow/controller.js";
 import { closeRun } from "../workflow/delivery/closure.js";
-import { WorkflowJournal } from "../workflow/journal.js";
-import type { JudgmentReport, Verdict } from "../workflow/judgment/contract.js";
-import { ready, reportFor } from "./judgment-harness.js";
-import { binary, fakePi, workspace } from "./extension-harness.js";
+import { judged, checkpoint, commands } from "./judgment-harness.js";
+import { binary, workspace } from "./extension-harness.js";
 import { setup } from "./workflow-harness.js";
-
-async function judged(verdict: Verdict = "ACCEPT") {
-  const h = await ready();
-  try {
-    const started = await h.controller.startAssignment(undefined, "provider/judge");
-    assert(started.workflow === "judgment" && started.artifactPath);
-    const report = JSON.parse(reportFor(started)) as JudgmentReport;
-    report.output.verdict = verdict;
-    if (verdict === "REJECT") {
-      const criterion = report.output.criteria[0];
-      assert(criterion);
-      criterion.outcome = "uncertain";
-      report.output.criticisms = [
-        { reason: "Integration risk remains unresolved", evidence: criterion.evidence },
-      ];
-    }
-    const content = JSON.stringify(report);
-    h.artifacts.set(started.artifactPath, { content, digest: content });
-    const finished = await h.controller.finishAttempt({
-      attemptId: started.attemptId,
-      outcome: "succeeded",
-      artifactPath: started.artifactPath,
-    });
-    assert(!finished.replayed && finished.artifactId);
-    return {
-      ...h,
-      reportId: finished.artifactId,
-      reportPath: started.artifactPath,
-      revision: started.evaluation.evaluatedCommit,
-      started,
-      report,
-    };
-  } catch (error) {
-    await h.cleanup();
-    throw error;
-  }
-}
-async function checkpoint(h: Awaited<ReturnType<typeof ready>>): Promise<AdapterCheckpoint> {
-  const journal = new WorkflowJournal(h.cwd, "session", h.recorder);
-  await journal.load();
-  const state = decodeAdapterCheckpoint(journal.state);
-  assert(state);
-  return state;
-}
 
 test("explicit ACCEPT and REJECT persist one closure and summary, with immutable replay after reload", async () => {
   for (const verdict of ["ACCEPT", "REJECT"] as const) {
@@ -180,13 +131,13 @@ test("first application rejects wrong identities, revisions, changed reports, in
   }
 });
 
-test("unsupported recommendations stay pending without summary writes or closure", async () => {
+test("recommendations requiring human resolution stay pending without summary writes or closure", async () => {
   for (const verdict of ["ACCEPT_WITH_DEBT", "HUMAN_DECISION"] as const) {
     const h = await judged(verdict);
     try {
       await assert.rejects(
         h.controller.applyJudgment(h.reportId, h.revision),
-        /unsupported.*pending/,
+        /human resolution.*pending/,
       );
       assert.equal((await h.controller.getRunStatus()).judgment?.applied, false);
       assert.equal((await h.controller.getRunStatus()).closure, undefined);
@@ -307,25 +258,6 @@ test("closure and local recovery finish before missing, rejecting or unanswered 
   }
 });
 
-function commands(workflow: PiWorkflow) {
-  const ui = fakePi();
-  const session = {
-    workflow,
-    lastRun: undefined as Awaited<ReturnType<PiWorkflow["getRunStatus"]>> | undefined,
-    async refreshRun() {
-      this.lastRun = await workflow.getRunStatus();
-    },
-    phaseSummary() {
-      return XperSession.prototype.phaseSummary.call(this as unknown as XperSession);
-    },
-  };
-  registerXperCommand(ui.pi, {
-    ...session,
-    configurationSummary: () => "Pi defaults",
-  } as unknown as XperSession);
-  return ui;
-}
-
 test("Pi approval presents Judge feedback as reopening and exposes exhausted delivery budgets", async () => {
   const h = await judged("REWORK_IMPLEMENTATION");
   try {
@@ -373,13 +305,27 @@ test("Pi approve preserves human gates and requires an exact report and revision
   }
 });
 
-test("the real bridge records acceptance and rejection facts and projects closure without workflow rules", async () => {
+test("the real bridge records direct and human-resolved closure without workflow rules", async () => {
   execFileSync("cargo", ["build", "--quiet", "-p", "xper-cli"], { cwd: workspace });
-  for (const verdict of ["ACCEPT", "REJECT"] as const) {
+  for (const verdict of ["ACCEPT", "REJECT", "ACCEPT_WITH_DEBT", "HUMAN_DECISION"] as const) {
     const h = await judged(verdict);
     let bridge: Awaited<ReturnType<typeof connectBridge>>["client"] | undefined;
     try {
-      const decision = await h.controller.applyJudgment(h.reportId, h.revision);
+      const resolution =
+        verdict === "ACCEPT_WITH_DEBT" || verdict === "HUMAN_DECISION"
+          ? {
+              decision:
+                verdict === "ACCEPT_WITH_DEBT"
+                  ? ("ACCEPT_WITH_DEBT" as const)
+                  : ("ACCEPT" as const),
+              reason: "Explicit human approval",
+              debts: h.report.output.debts ?? [],
+              ...(h.report.output.humanDecision
+                ? { humanDecision: h.report.output.humanDecision }
+                : {}),
+            }
+          : undefined;
+      const decision = await h.controller.applyJudgment(h.reportId, h.revision, resolution);
       await h.controller.waitForRecording();
       const home = join(h.cwd, "home");
       await mkdir(home);
@@ -398,9 +344,13 @@ test("the real bridge records acceptance and rejection facts and projects closur
       });
       const client = new XperClient(bridge);
       const facts = h.recorder.events.filter((event) =>
-        ["run.started", "judgment.applied", "increment.accepted", "run.finished"].includes(
-          event.type,
-        ),
+        [
+          "run.started",
+          "judgment.resolved",
+          "judgment.applied",
+          "increment.accepted",
+          "run.finished",
+        ].includes(event.type),
       );
       assert.equal((await client.appendEvents(facts)).durability, "persistent");
       assert.equal((await client.appendEvents(facts)).accepted, 0);

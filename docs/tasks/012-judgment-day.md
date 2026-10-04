@@ -1,9 +1,9 @@
 # XP-012: Judgment and explicit closure
 
-- Status: `in_progress`
+- Status: `review`
 - Milestone: M3
 - Entry dependency: XP-011.3
-- Next slice: XP-012.4
+- Next slice: none; the group is ready for review
 
 ## Outcome and boundary
 
@@ -200,10 +200,18 @@ Acceptance:
 
 ## XP-012.4 — Resolve debt and human decisions
 
-- Status: `pending`
+- Status: `review`
 - Depends on: XP-012.3
 - Example: `ACCEPT_WITH_DEBT` stays pending until a human explicitly accepts
   the listed debt for the evaluated revision.
+
+Implementation note: extend the existing approve command with a Pi dialog that
+records an immutable human resolution of the exact report and revision. Accept
+all listed debt together, or reuse closure and Implementation/Define/Design
+feedback. Complete missing legacy details explicitly without changing reports.
+Reuse artifact writing, pure delivery coordination, checkpoint/outbox and budgets;
+verify cancellation, stale evidence, replay, interrupted writes, migration and
+offline recording before the full check suite.
 
 Acceptance:
 
@@ -213,6 +221,45 @@ Acceptance:
   resolution; the agent cannot silently approve on the user's behalf.
 - Resolution uses the existing closure or feedback path. Unresolved debt or
   ambiguity never appears as unconditional acceptance.
+
+### Delivery evidence
+
+- The existing approve command now presents a human dialog for ACCEPT_WITH_DEBT
+  and HUMAN_DECISION, with the exact report, revision, evidence, question and debt.
+  A reason and final confirmation are mandatory; cancellation, incomplete input
+  and missing UI preserve the pending recommendation. Delegation cannot approve.
+- Structured debt records its description, logical owner and future condition.
+  Acceptance covers the complete list and closes as `accepted_with_debt` with
+  explicit acceptance facts. Human decisions also reuse rejection or existing
+  Implementation/Design/Define feedback. Subsequent agents receive both the
+  unchanged Judge report and the human resolution.
+- Additive judgment-v1 details and the new judgment_resolution v1 artifact retain
+  report/Plan/revision bindings and mark human-completed legacy fields. Checkpoint
+  9 stores only decision metadata and artifact references; supported older formats
+  migrate without changing history. The original recommendation remains distinct
+  from the applied verdict. Interrupted writes resume only through explicit
+  approval; conflicting or corrupted resolutions cannot replace a decision.
+- `npm run check` passes formatting, lint, strict types, shared schema fixtures,
+  12 architecture tests, 67 Rust tests and 232 adapter tests. Coverage includes
+  every human outcome, multiple debts, legacy completion, stale evidence during
+  dialogs, cancellation/headless operation, detached preflight context, replay,
+  checkpoint and artifact corruption, interrupted resolution/summary writes,
+  exhausted budgets, feedback across judgments and missing/rejecting/unanswered
+  recording. The real bridge projects `accepted_with_debt` and human-resolved
+  closure without workflow rules. Tests use synthetic agents and isolated
+  resources without model credentials. Changed documentation links and
+  `git diff --check` also pass.
+- Diff size: 2134 additions and 169 removals across 49 files:
+  912 production, 630 test, 421 contract/check, and 171 documentation additions.
+  This exceeds the roadmap's scope alarms. The explicitly approved XP-012.4 plan
+  includes both verdicts, the interactive dialog, legacy completion and immutable
+  recovery evidence. Review the complete slice together; no subsequent feature
+  is included.
+- Public additions are `prepareJudgmentApproval`, optional human input to
+  `applyJudgment`, resolution/status types, extensible recording facts, additive
+  report fields, a resolution schema and checkpoint 9. No dependency, new command
+  or tool, scheduler, workflow definition, Rust policy or JSON-RPC method changed.
+  External debt tracking, retrospectives and publication remain deferred.
 
 ## Deferred work
 

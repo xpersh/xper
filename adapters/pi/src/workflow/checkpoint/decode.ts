@@ -10,7 +10,7 @@ import { decodeEnvelope } from "./validate.js";
 
 export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | null {
   if (value === null) return null;
-  if (object(value) && [4, 5, 6, 7, 8].some((version) => value.version === version)) {
+  if (object(value) && [4, 5, 6, 7, 8, 9].some((version) => value.version === version)) {
     const knowledge = decodeCheckpoint(value.knowledge);
     if (!knowledge || !object(value.implementations) || !object(value.verifications))
       throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
@@ -28,10 +28,9 @@ export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | nul
     if (
       !(value.authorizedPlan === null || object(value.authorizedPlan)) ||
       !Array.isArray(value.reconciliations) ||
-      ((value.version === 6 || value.version === 7 || value.version === 8) &&
-        !Object.hasOwn(value, "judgment")) ||
-      ([7, 8].includes(Number(value.version)) && !Object.hasOwn(value, "closure")) ||
-      (value.version === 8 && !Array.isArray(value.judgmentHistory))
+      ([6, 7, 8, 9].includes(Number(value.version)) && !Object.hasOwn(value, "judgment")) ||
+      ([7, 8, 9].includes(Number(value.version)) && !Object.hasOwn(value, "closure")) ||
+      ([8, 9].includes(Number(value.version)) && !Array.isArray(value.judgmentHistory))
     )
       throw new WorkflowValidationError("invalid Pi adapter checkpoint envelope");
     const authorizedPlan = value.authorizedPlan as DeliveryPlanAuthorization | null;
@@ -48,9 +47,9 @@ export function decodeAdapterCheckpoint(value: unknown): AdapterCheckpoint | nul
       value.verifications,
       authorizedPlan,
       value.reconciliations as DeliveryReconciliation[],
-      value.version === 6 || value.version === 7 || value.version === 8 ? value.judgment : null,
-      value.version === 7 || value.version === 8 ? value.closure : null,
-      value.version === 8 ? value.judgmentHistory : [],
+      [6, 7, 8, 9].includes(Number(value.version)) ? value.judgment : null,
+      [7, 8, 9].includes(Number(value.version)) ? value.closure : null,
+      [8, 9].includes(Number(value.version)) ? value.judgmentHistory : [],
     );
   }
   if (object(value) && value.version === 3 && Object.hasOwn(value, "knowledge")) {

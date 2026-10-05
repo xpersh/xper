@@ -1,12 +1,13 @@
 //! Full-screen infrastructure; application operations run on background workers.
 
 mod catalog;
+mod inventory;
 mod model;
 mod view;
 mod worker;
 
 use crossterm::event::{self, Event as TerminalEvent, KeyCode, KeyEventKind, KeyModifiers};
-use model::{App, Effect, Section, Stage};
+use model::{Action, App, Effect, Section, Stage, scope_label};
 use std::{
     io,
     path::PathBuf,
@@ -55,7 +56,7 @@ pub(crate) fn run(root: PathBuf, ascii: bool) -> io::Result<bool> {
                     }],
                 );
             }
-            if app.section == Section::Configuration
+            if app.section.authoring()
                 && app.editor.stage == Stage::Picker
                 && app.search_pending
                 && search.elapsed() >= Duration::from_millis(150)
@@ -150,7 +151,7 @@ fn dispatch(workers: &mut Workers, effects: Vec<Effect>) {
 fn apply_event(app: &mut App, event: Event) {
     match event {
         Event::CatalogRoles(result) => {
-            if app.section == Section::Configuration {
+            if app.section.authoring() {
                 match result {
                     Ok(roles) => app.roles = roles,
                     Err(error) => app.catalog_error = Some(error),
@@ -166,7 +167,7 @@ fn apply_event(app: &mut App, event: Event) {
                     app.notice = if app.dirty() {
                         "Files reloaded. Review your draft again before saving.".into()
                     } else {
-                        "Ready. Enter opens configuration; Tab changes section.".into()
+                        "Ready. Enter opens Profiles; Tab changes section.".into()
                     };
                 }
                 Err(error) => app.notice = error,
@@ -230,12 +231,43 @@ fn apply_event(app: &mut App, event: Event) {
             app.busy = false;
             match result {
                 Ok(snapshot) => {
+                    let name = if app.editor.section == Section::Settings {
+                        app.editor.context.clone()
+                    } else {
+                        app.editor.profile.clone()
+                    };
+                    let selection = snapshot
+                        .effective_profile
+                        .as_deref()
+                        .unwrap_or("Pi defaults");
+                    let notice = match app.editor.action {
+                        Action::ActivateProfile | Action::ClearSelection => format!(
+                            "Selection saved in {}. Effective profile here: {selection}. Start a new Pi session to prepare it.",
+                            scope_label(app.editor.scope)
+                        ),
+                        Action::NewProfile | Action::EditProfile => format!(
+                            "Profile '{name}' saved in {}. Activate it from its actions; changes apply to new Pi sessions.",
+                            scope_label(app.editor.scope)
+                        ),
+                        Action::NewContext | Action::EditContext => format!(
+                            "Context '{name}' saved in {}.",
+                            scope_label(app.editor.scope)
+                        ),
+                        _ => format!(
+                            "Removed '{name}' from {}. Inherited definitions may remain.",
+                            scope_label(app.editor.scope)
+                        ),
+                    };
                     app.editor.changes.clear();
                     app.configuration_loaded(snapshot);
                     app.reset_editor();
-                    app.notice =
-                        "Configuration saved. Start a new Pi session to prepare these selections."
-                            .into();
+                    app.editor.cursor = if app.editor.section == Section::Profiles {
+                        app.profiles().iter().position(|p| p.name == name)
+                    } else {
+                        app.contexts().iter().position(|c| c.name == name)
+                    }
+                    .unwrap_or(0);
+                    app.notice = notice;
                 }
                 Err(error) => {
                     app.editor.preview = None;
@@ -249,16 +281,22 @@ fn apply_event(app: &mut App, event: Event) {
             app.busy = false;
             match result {
                 Ok(snapshot) => {
+                    let notice = format!(
+                        "Legacy project override removed. Effective profile: {}. Applies to new Pi sessions.",
+                        snapshot
+                            .effective_profile
+                            .as_deref()
+                            .unwrap_or("Pi defaults")
+                    );
                     app.configuration_loaded(snapshot);
-                    app.notice =
-                        "Activation updated for new Pi sessions. Running selections are unchanged."
-                            .into();
+                    app.reset_editor();
+                    app.notice = notice;
                 }
                 Err(error) => app.notice = error,
             }
         }
         Event::CatalogOpened(result) => {
-            if app.section == Section::Configuration {
+            if app.section.authoring() {
                 app.catalog_loading = false;
                 match result {
                     Ok((roles, models)) => {
@@ -275,7 +313,7 @@ fn apply_event(app: &mut App, event: Event) {
             }
         }
         Event::CatalogRefreshed(result) => {
-            if app.section == Section::Configuration {
+            if app.section.authoring() {
                 app.catalog_loading = false;
                 match result {
                     Ok(models) => {
@@ -291,7 +329,7 @@ fn apply_event(app: &mut App, event: Event) {
             }
         }
         Event::CatalogSearch { sequence, result } => {
-            if app.section == Section::Configuration && sequence == app.search_sequence {
+            if app.section.authoring() && sequence == app.search_sequence {
                 app.catalog_loading = false;
                 match result {
                     Ok(models) => {

@@ -45,16 +45,34 @@ change models automatically. Pi owns any recovery and uses the recorded model
 selection when resuming an interrupted assignment. Opening the Rust store does
 not mark attempts failed or start new attempts.
 
-Activate or inspect a profile with:
+The dashboard selects a profile for a configuration scope by writing its name
+to that file's `profile` key. Global selection applies across projects; project
+selection is shared through `.xper/config.yaml`; local selection is private in
+`.xper/config.local.yaml`. Local overrides project, which overrides global.
+Removing a scope's selection restores the inherited choice without deleting
+profile definitions. Review shows the final selection and any higher-priority
+override before saving.
+
+The selected profile and its context must exist in the destination scope or a
+lower-precedence scope. For example, a project-only profile cannot be selected
+globally. A global profile can be selected in the project or local scope without
+copying its definition. Contexts enforce provider policy and are managed
+separately from profile selection; neither operation configures Pi credentials.
+
+The existing CLI can activate or inspect a profile with:
 
 ```bash
 xper profile activate local
 xper profile inspect --resolved
 ```
 
-Activation writes only the chosen name to `.xper/active-profile`. A `profile`
-key in configuration acts as the default when there is no local activation.
-Start a new Pi session after activation. The adapter prepares configuration in
+CLI activation retains its legacy behavior: it writes only the chosen name to
+`.xper/active-profile`. This workspace override takes precedence over the YAML
+`profile` key in every scope. Scoped dashboard saves preserve it and report its
+effect. Explicitly clearing the legacy override returns to the merged YAML
+selection; saving a different scoped selection does not clear it automatically.
+
+Start a new Pi session after changing selection. The adapter prepares configuration in
 the background using Pi's model catalog and `configuration.resolve`. Rust checks
 that configured models are available and support their requested thinking levels.
 

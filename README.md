@@ -218,11 +218,12 @@ The `xper` CLI configures, diagnoses, and queries recorded information;
 interactive workflow execution stays inside Pi.
 
 Run `xper` without arguments in an interactive terminal to open the Ratatui
-dashboard. Home, Configuration, Status, and Metrics share keyboard navigation.
-The configuration wizard chooses a global, project, or private-local file;
-creates contexts and profiles; and selects exact models with Pi's native fuzzy
-search. Model selection is always manual. Review the proposed file before
-saving, and distinguish a configured default from workspace activation.
+dashboard. Home, Profiles, Status, Metrics, and Settings share keyboard navigation.
+Profiles lists saved profiles with their origin scope, overrides and active state.
+Enter opens Activate, Edit, Delete and Remove activation; each action chooses
+Global, Project or Local and shows a review before writing. Settings manages
+provider contexts independently. Profile creation selects exact models with Pi's
+native fuzzy search; saving a profile and activating it are separate actions.
 Pi supplies the catalog and role guidance; credentials stay in Pi.
 
 ```bash

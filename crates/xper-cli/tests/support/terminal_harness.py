@@ -238,24 +238,29 @@ def check_plain_output(root):
         assert b"\x1b" not in result.stdout + result.stderr, "Plain CLI emitted terminal controls"
 
 
-def draft_profile(terminal):
-    terminal.expect("Project overview")
-    terminal.expect("Effective profile:")
-    terminal.enter(b"2", "Choose configuration scope")
+def draft_context(terminal):
+    terminal.enter(b"5", "Settings / Contexts")
+    terminal.enter(b"n", "Choose destination scope")
     # Project is the initial scope; navigation waits for actual completed frames.
-    terminal.enter(b"\r", "Choose a context")
-    terminal.enter(b"n", "New context")
+    terminal.enter(b"\r", "New context")
     terminal.enter(b"personal\r", "Allowed providers")
     terminal.expect("[ ] example")
     terminal.enter(b" ", "[x] example")
+    terminal.enter(b"\r", "Review configuration")
+    terminal.expect("file will change")
+
+
+def draft_profile(terminal):
+    terminal.enter(b"2", "No profiles yet.")
+    terminal.enter(b"n", "Choose destination scope")
+    terminal.enter(b"\r", "Choose a context")
+    terminal.expect("personal")
     terminal.enter(b"\r", "New profile")
-    terminal.expect("Context: personal")
     terminal.enter(b"daily\r", "Models by role")
     terminal.enter(b"a", "Choose a model from Pi")
     terminal.expect("example / synthetic-fast")
     terminal.enter(b"\r", "Models by role")
     terminal.expect("example/synthetic-fast")
-    terminal.enter(b"d", "Default profile updated in draft")
 
 
 def config_paths(root):
@@ -263,13 +268,17 @@ def config_paths(root):
             root / "home" / ".config" / "xper" / "config.yaml"]
 
 
-def expected_project_config():
+def expected_context_config():
+    return 'contexts:\n  personal:\n    allowed_providers:\n      - "example"\n'
+
+
+def expected_project_config(active=False):
     return (
-        'contexts:\n  personal:\n    allowed_providers:\n      - "example"\n'
-        'profiles:\n  daily:\n    context: "personal"\n    roles:\n'
+        expected_context_config()
+        + 'profiles:\n  daily:\n    context: "personal"\n    roles:\n'
         + "".join(f'      {role}:\n        provider: "example"\n'
                   '        model: "synthetic-fast"\n        thinking: "off"\n' for role in roles)
-        + 'profile: "daily"\n'
+        + ('profile: "daily"\n' if active else '')
     )
 
 
@@ -295,8 +304,10 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-") as directory:
         terminal.set_size(60, 24)
         terminal.expect("Project overview", offset)
         offset = terminal.send(b"2")
-        terminal.expect("Choose configuration scope", offset)
+        terminal.expect("No profiles yet.", offset)
         terminal.expect("Pi executable is missing", offset)
+        terminal.enter(b"5", "Settings / Contexts")
+        terminal.expect("No contexts yet.")
         offset = terminal.send(b"3")
         terminal.expect("Workflows execute in Pi.", offset)
         terminal.finish(b"q")
@@ -310,7 +321,7 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-pending-") as directory:
     try:
         terminal.expect("Project overview")
         offset = terminal.send(b"2")
-        terminal.expect("Choose configuration scope", offset)
+        terminal.expect("No profiles yet.", offset)
         limit = time.monotonic() + 5
         while not (root / "catalog-requested").exists():
             terminal.pump()
@@ -326,9 +337,8 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-cancel-") as directory:
     install_fake_adapter(root, available=True)
     terminal = Terminal(root)
     try:
-        draft_profile(terminal)
-        terminal.enter(b"v", "Review configuration")
-        terminal.expect("file will change")
+        terminal.expect("Effective profile:")
+        draft_context(terminal)
         assert not any(path.exists() for path in config_paths(root)), "Draft review wrote a configuration"
         terminal.enter(b"q", "Unsaved configuration")
         terminal.finish(b"y")
@@ -341,15 +351,45 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-save-") as directory:
     install_fake_adapter(root, available=True)
     terminal = Terminal(root)
     try:
+        terminal.expect("Effective profile:")
+        draft_context(terminal)
+        assert not any(path.exists() for path in config_paths(root)), "Context review wrote a configuration"
+        terminal.enter(b"\r", "Context 'personal' saved in Project.")
+        terminal.expect("Settings / Contexts")
+        project, local, global_config = config_paths(root)
+        context_baseline = project.read_bytes()
+        assert project.read_text() == expected_context_config(), project.read_text()
+
+        # Cancelling a profile leaves the previously saved standalone context intact.
         draft_profile(terminal)
         terminal.enter(b"v", "Review configuration")
         terminal.expect("file will change")
-        assert not any(path.exists() for path in config_paths(root)), "Draft review wrote a configuration"
-        terminal.enter(b"\r", "Configuration saved.")
-        project, local, global_config = config_paths(root)
+        assert project.read_bytes() == context_baseline, "Profile review changed the saved context"
+        terminal.enter(b"\x1b", "Models by role")
+        terminal.enter(b"\x1b", "Unsaved configuration")
+        terminal.enter(b"y", "No profiles yet.")
+        assert project.read_bytes() == context_baseline, "Discarded profile changed configuration"
+        assert not local.exists() and not global_config.exists(), "Discard wrote another scope"
+
+        draft_profile(terminal)
+        terminal.enter(b"v", "Review configuration")
+        terminal.expect("file will change")
+        assert project.read_bytes() == context_baseline, "Profile review changed configuration"
+        terminal.enter(b"\r", "Profile 'daily' saved in Project.")
         assert project.read_text() == expected_project_config(), project.read_text()
         assert not local.exists() and not global_config.exists(), "Saving project configuration wrote another scope"
-        assert not (root / ".xper" / "active-profile").exists(), "Default selection unexpectedly activated a profile"
+        assert not (root / ".xper" / "active-profile").exists(), "Saving a profile unexpectedly activated it"
+
+        # Activation is a separately reviewed scoped YAML selection, without copying roles.
+        terminal.enter(b"\r", "Profile actions")
+        terminal.enter(b"\r", "Choose destination scope")
+        terminal.enter(b"\r", "Review configuration")
+        terminal.expect("file will change")
+        assert project.read_text() == expected_project_config(), "Activation wrote before confirmation"
+        terminal.enter(b"\r", 'Selection saved in Project.')
+        terminal.expect("ACTIVE")
+        assert project.read_text() == expected_project_config(active=True), project.read_text()
+        assert not (root / ".xper" / "active-profile").exists(), "Activation created a legacy override"
         terminal.finish(b"q")
     finally:
         terminal.close()
@@ -363,10 +403,10 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-save-") as directory:
     try:
         terminal.expect("Project overview")
         terminal.expect("Effective profile:")
-        terminal.enter(b"2", "Choose configuration scope")
-        terminal.enter(b"j\r", "Choose a context")
-        terminal.enter(b"\r", "Choose or create a profile")
-        terminal.enter(b"\r", "Models by role")
+        terminal.enter(b"2", "daily")
+        terminal.enter(b"\r", "Profile actions")
+        terminal.enter(b"j\r", "Choose destination scope")
+        terminal.enter(b"j\r", "Models by role")
         terminal.enter(b"\r", "Choose a model from Pi")
         terminal.expect("example / synthetic-fast")
         terminal.enter(b"deep", "Search: deep_")
@@ -376,7 +416,7 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-save-") as directory:
         terminal.enter(b"v", "Review configuration")
         terminal.expect("file will change")
         assert not local.exists(), "Local draft wrote before confirmation"
-        terminal.enter(b"\r", "Configuration saved.")
+        terminal.enter(b"\r", "Profile 'daily' saved in Local (private).")
         assert local.read_text() == (
             'profiles:\n  daily:\n    roles:\n      discovery.explorer:\n'
             '        model: "synthetic-deep"\n'
@@ -401,4 +441,4 @@ for mode in ("error", "panic"):
         finally:
             terminal.close()
 
-print("PTY lifecycle, errors/panics, resize, catalog failures, wizard save/discard/override, and plain output passed")
+print("PTY lifecycle, resize, catalog failures, context/profile save/discard/activation/override, and plain output passed")

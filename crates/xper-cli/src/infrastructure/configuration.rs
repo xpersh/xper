@@ -347,9 +347,26 @@ impl ConfigurationRepository for LocalConfiguration {
         let mut effective = parse(DEFAULT_CONFIG).map_err(dependency)?;
         let mut authoring = None;
         let mut diagnostics = Vec::new();
+        let selects_profile = changes.iter().any(|change| {
+            let path = match change {
+                ConfigurationChange::Set { path, .. } | ConfigurationChange::Remove { path } => {
+                    path
+                }
+            };
+            path.is_empty() || path.first().is_some_and(|key| key == "profile")
+        });
         for item in &snapshot.documents {
             if item.scope == scope {
                 merge(&mut effective, proposed.clone());
+                if selects_profile
+                    && let Some(name) = effective.get("profile").and_then(Value::as_str)
+                {
+                    resolve_profile(&effective, name).map_err(|error| {
+                        io::Error::other(format!(
+                            "Cannot select profile '{name}' at {scope:?} scope: {error}. Only definitions from that scope and lower-precedence scopes are available."
+                        ))
+                    })?;
+                }
                 validate_profiles(&effective).map_err(dependency)?;
                 authoring = Some(effective.clone());
             } else if let Some(error) = &item.error {
@@ -365,14 +382,27 @@ impl ConfigurationRepository for LocalConfiguration {
                     path
                 }
             };
-            if snapshot
-                .origins
-                .get(&pointer(path))
-                .is_some_and(|origin| *origin > scope)
+            if let Some(origin) = snapshot.origins.get(&pointer(path))
+                && *origin > scope
             {
                 diagnostics.push(format!(
-                    "{} remains overridden by a higher-precedence scope",
+                    "{} remains overridden by the {origin:?} scope",
                     pointer(path)
+                ));
+            }
+        }
+        if selects_profile {
+            if let Some(origin) = snapshot.origins.get("/profile")
+                && *origin > scope
+                && let Some(name) = effective.get("profile").and_then(Value::as_str)
+            {
+                diagnostics.push(format!(
+                    "The {origin:?} scope keeps YAML profile '{name}' selected for this workspace."
+                ));
+            }
+            if let Some(name) = &snapshot.active_profile {
+                diagnostics.push(format!(
+                    "Legacy workspace activation .xper/active-profile keeps '{name}' selected over the YAML scopes. Saving preserves this file; clear it explicitly to use the configured selection."
                 ));
             }
         }
@@ -563,6 +593,161 @@ mod tests {
             fs::read_to_string(repository.path(ConfigurationScope::Project)).unwrap(),
             source
         );
+    }
+
+    #[test]
+    fn scoped_profile_selection_follows_precedence_and_removal_restores_inheritance() {
+        let workspace = Workspace::new();
+        let mut repository = workspace.repository();
+        let mut config = profile();
+        config["profiles"]["shared"] = config["profiles"]["personal"].clone();
+        config["profiles"]["private"] = config["profiles"]["personal"].clone();
+        let snapshot = repository.inspect().unwrap();
+        let global = repository
+            .save(&snapshot, ConfigurationScope::Global, &[set(&[], config)])
+            .unwrap();
+        assert_eq!(global.effective_profile.as_deref(), Some("personal"));
+        let project = repository
+            .save(
+                &global,
+                ConfigurationScope::Project,
+                &[set(&["profile"], json!("shared"))],
+            )
+            .unwrap();
+        assert_eq!(project.effective_profile.as_deref(), Some("shared"));
+        let local = repository
+            .save(
+                &project,
+                ConfigurationScope::Local,
+                &[set(&["profile"], json!("private"))],
+            )
+            .unwrap();
+        assert_eq!(local.effective_profile.as_deref(), Some("private"));
+        assert!(local.active_profile.is_none());
+        assert!(!workspace.0.join(".xper/active-profile").exists());
+
+        let preview = repository
+            .preview(
+                &local,
+                ConfigurationScope::Global,
+                &[set(&["profile"], json!("shared"))],
+            )
+            .unwrap();
+        assert_eq!(preview.authoring["profile"], "shared");
+        assert_eq!(preview.effective["profile"], "private");
+        assert!(
+            preview
+                .diagnostics
+                .iter()
+                .any(|message| { message.contains("Local scope keeps YAML profile 'private'") })
+        );
+
+        let remove = [ConfigurationChange::Remove {
+            path: vec!["profile".into()],
+        }];
+        let project_again = repository
+            .save(&local, ConfigurationScope::Local, &remove)
+            .unwrap();
+        assert_eq!(project_again.effective_profile.as_deref(), Some("shared"));
+        let global_again = repository
+            .save(&project_again, ConfigurationScope::Project, &remove)
+            .unwrap();
+        assert_eq!(global_again.effective_profile.as_deref(), Some("personal"));
+        let unselected = repository
+            .save(&global_again, ConfigurationScope::Global, &remove)
+            .unwrap();
+        assert!(unselected.effective_profile.is_none());
+        assert!(unselected.effective.unwrap()["profiles"]["personal"].is_object());
+    }
+
+    #[test]
+    fn scoped_selection_rejects_profiles_available_only_in_a_higher_scope() {
+        for (target, definitions) in [
+            (ConfigurationScope::Global, ConfigurationScope::Project),
+            (ConfigurationScope::Project, ConfigurationScope::Local),
+        ] {
+            let workspace = Workspace::new();
+            let mut repository = workspace.repository();
+            let before = repository.inspect().unwrap();
+            let snapshot = repository
+                .save(&before, definitions, &[set(&[], profile())])
+                .unwrap();
+            let error = repository
+                .preview(&snapshot, target, &[set(&["profile"], json!("personal"))])
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(&format!("Cannot select profile 'personal' at {target:?}")));
+            assert!(error.contains("lower-precedence scopes"));
+            assert!(!repository.path(target).exists());
+        }
+    }
+
+    #[test]
+    fn scoped_selection_rejects_a_profile_whose_context_exists_only_above_it() {
+        let workspace = Workspace::new();
+        let mut repository = workspace.repository();
+        let global_path = repository.path(ConfigurationScope::Global);
+        fs::create_dir_all(global_path.parent().unwrap()).unwrap();
+        let global_source = json!({"profiles":profile()["profiles"]}).to_string();
+        fs::write(global_path, &global_source).unwrap();
+        let before = repository.inspect().unwrap();
+        let snapshot = repository
+            .save(
+                &before,
+                ConfigurationScope::Project,
+                &[set(&["contexts"], profile()["contexts"].clone())],
+            )
+            .unwrap();
+        let selection = [set(&["profile"], json!("personal"))];
+        let error = repository
+            .preview(&snapshot, ConfigurationScope::Global, &selection)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Cannot select profile 'personal' at Global scope"));
+        assert!(error.contains("home"));
+        assert_eq!(
+            fs::read_to_string(repository.path(ConfigurationScope::Global)).unwrap(),
+            global_source
+        );
+        assert!(
+            repository
+                .preview(&snapshot, ConfigurationScope::Project, &selection)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn scoped_selection_reports_and_preserves_legacy_activation_until_explicitly_cleared() {
+        let workspace = Workspace::new();
+        let mut repository = workspace.repository();
+        let mut config = profile();
+        config["profiles"]["work"] = config["profiles"]["personal"].clone();
+        let before = repository.inspect().unwrap();
+        repository
+            .save(&before, ConfigurationScope::Global, &[set(&[], config)])
+            .unwrap();
+        let snapshot = repository.activate(Some("personal")).unwrap();
+        let selection = [set(&["profile"], json!("work"))];
+        let preview = repository
+            .preview(&snapshot, ConfigurationScope::Local, &selection)
+            .unwrap();
+        assert_eq!(preview.effective["profile"], "work");
+        assert!(preview.diagnostics.iter().any(|message| {
+            message.contains(".xper/active-profile keeps 'personal' selected")
+                && message.contains("clear it explicitly")
+        }));
+        let saved = repository
+            .save(&snapshot, ConfigurationScope::Local, &selection)
+            .unwrap();
+        assert_eq!(saved.default_profile.as_deref(), Some("work"));
+        assert_eq!(saved.effective_profile.as_deref(), Some("personal"));
+        assert_eq!(
+            fs::read_to_string(workspace.0.join(".xper/active-profile")).unwrap(),
+            "personal\n"
+        );
+        let cleared = repository.activate(None).unwrap();
+        assert!(cleared.active_profile.is_none());
+        assert_eq!(cleared.effective_profile.as_deref(), Some("work"));
     }
 
     #[test]

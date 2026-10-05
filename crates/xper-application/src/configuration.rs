@@ -41,9 +41,9 @@ pub struct ConfigurationSnapshot {
     pub scoped: BTreeMap<ConfigurationScope, Value>,
     /// Winning file scope for JSON-pointer paths in the merged value.
     pub origins: BTreeMap<String, ConfigurationScope>,
-    /// Configured default, before workspace activation takes precedence.
+    /// YAML profile selected by scope precedence, before legacy workspace activation.
     pub default_profile: Option<String>,
-    /// Explicit workspace activation, if present.
+    /// Legacy explicit workspace activation, if present; overrides every YAML scope.
     pub active_profile: Option<String>,
     /// Activation or the configured default.
     pub effective_profile: Option<String>,
@@ -117,6 +117,7 @@ pub trait ConfigurationRepository {
         changes: &[ConfigurationChange],
     ) -> Result<ConfigurationSnapshot, Self::Error>;
 
-    /// Activate a valid profile, or clear activation to use the YAML default.
+    /// Activate a valid profile through the legacy workspace override, or clear it.
+    /// Scoped selection uses preview/save with a set or removal of the YAML `profile` key.
     fn activate(&mut self, name: Option<&str>) -> Result<ConfigurationSnapshot, Self::Error>;
 }

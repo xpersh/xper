@@ -103,12 +103,22 @@ not locks respected by arbitrary external editors. Private local configuration i
 added to `.gitignore`. A malformed document requires explicit replacement; errors
 never echo credential values.
 
-The YAML `profile` default and `.xper/active-profile` selection are distinct.
-Activation takes precedence and can be cleared to return to the default.
-Changing either applies to preparation for future runs; it does not modify a
-running adapter's frozen selection. Initial dashboard setup uses installation
-preflight before its first save. Editing existing configuration remains available
-without Pi, and validation of the proposed document permits configuration repair.
+Scoped profile activation sets the YAML `profile` key through the existing
+preview/save operations. Removing that key removes only the selected scope's
+choice and restores inheritance. Defaults, global, project and local precedence
+apply to the selector just as they do to profile definitions. A selected profile,
+its context and its routes must resolve using definitions available at the
+destination scope; project-only definitions cannot support a global selection.
+Preview reports a higher scope that keeps a different workspace selection.
+
+The legacy `.xper/active-profile` selection takes precedence over every YAML
+scope. The existing `xper profile activate` command continues to write this
+workspace override. Scoped preview reports it, saving preserves it, and clearing
+it remains an explicit separate operation. Changing either selection applies to
+preparation for future runs; it does not modify a running adapter's frozen
+selection. Initial dashboard setup uses installation preflight before its first
+save. Editing existing configuration remains available without Pi, and validation
+of the proposed document permits configuration repair.
 
 The model picker consumes a separate, versioned adapter inspection contract;
 it does not import a harness SDK into Rust. The Pi-owned helper describes role

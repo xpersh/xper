@@ -9,7 +9,7 @@ use ratatui::{
 };
 use serde_json::Value;
 
-use super::model::{App, METRIC_FIXED_ROWS, NameKind, SCOPES, Section, Stage, scope_label};
+use super::model::{Action, App, METRIC_FIXED_ROWS, NameKind, SCOPES, Section, Stage, scope_label};
 
 #[derive(Clone, Copy)]
 pub(super) struct Theme {
@@ -71,7 +71,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
     }
     let rows = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(2),
+        Constraint::Length(if area.width >= 120 { 0 } else { 2 }),
         Constraint::Min(1),
         Constraint::Length(2),
         Constraint::Length(1),
@@ -88,24 +88,40 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
         .iter()
         .position(|s| *s == app.section)
         .unwrap_or(0);
-    frame.render_widget(
-        Tabs::new(
-            Section::ALL
-                .iter()
-                .enumerate()
-                .map(|(i, s)| format!("{} {}", i + 1, s.label())),
-        )
-        .select(selected)
-        .highlight_style(theme.selected())
-        .divider("  "),
-        rows[1],
-    );
+    if area.width < 80 {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{} {}  |  Tab / 1-5: sections",
+                selected + 1,
+                app.section.label()
+            ))
+            .style(theme.accent()),
+            rows[1],
+        );
+    } else if area.width < 120 {
+        frame.render_widget(
+            Tabs::new(
+                Section::ALL
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| format!("{} {}", i + 1, s.label())),
+            )
+            .select(selected)
+            .highlight_style(theme.selected())
+            .divider("  "),
+            rows[1],
+        );
+    }
     let content = if area.width >= 120 {
         let cols = Layout::horizontal([Constraint::Length(19), Constraint::Min(1)]).split(rows[2]);
         list(
             frame,
             cols[0],
-            Section::ALL.iter().map(|s| s.label().to_owned()).collect(),
+            Section::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, s)| format!("{} {}", i + 1, s.label()))
+                .collect(),
             selected,
             theme,
         );
@@ -115,7 +131,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
     };
     match app.section {
         Section::Home => home(frame, content, app, theme),
-        Section::Configuration => configuration(frame, content, app, theme),
+        Section::Profiles | Section::Settings => configuration(frame, content, app, theme),
         Section::Status | Section::Metrics => history(frame, content, app, theme),
     }
     let mut notice = app.notice.clone();
@@ -133,20 +149,21 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
             area,
             "Keyboard help",
             vec![
-                "Tab / Shift+Tab or 1-4   Change section",
+                "Tab / Shift+Tab or 1-5   Change section",
                 "Arrows / j,k              Navigate lists",
                 "Enter                    Open, choose or confirm",
                 "Esc                      Back; keep or discard draft",
                 "n                        New context/profile; next history page",
                 "e / Space                Edit context / toggle provider",
-                "a                        Activate profile / assign all roles",
-                "t / d / c                Thinking / default / selected context",
+                "Enter on a profile       Activate, edit, delete or clear selection",
+                "a on profiles / roles    Activate / assign model to all roles",
+                "t / c on roles           Thinking / choose context",
                 "Delete                   Remove selected scope override",
-                "F5 in configuration      Reload files after external edits",
-                "v                        Review configuration before saving",
+                "F5 in Profiles/Settings  Reload files after external edits",
+                "v on roles               Review profile before saving",
                 "F4 in model search       Change provider filter",
                 "r                        Refresh data or Pi model catalog",
-                "u on profiles            Clear local profile activation",
+                "u on profiles            Review removal of legacy local override",
                 "q                        Quit (confirm unsaved changes)",
                 "Ctrl+C                   Interrupt and exit without saving",
                 "? / Enter / Esc          Close this help",
@@ -162,7 +179,11 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
                 &app.editor.name,
                 "",
                 "A context defines which providers are allowed.",
-                "Next: choose providers, then create a profile.",
+                if app.editor.action == Action::NewProfile {
+                    "Next: choose providers, then name the profile."
+                } else {
+                    "Next: choose providers, then review and save."
+                },
                 "Enter continues. Esc cancels.",
             ]
         } else {
@@ -172,7 +193,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
                 "",
                 &context,
                 "Next: choose a model for each role, then review and save.",
-                "Enter creates a draft. Esc returns to profiles.",
+                "Enter creates a draft. Esc returns to contexts.",
             ]
         };
         overlay(
@@ -244,27 +265,21 @@ fn home(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                 .unwrap_or("Pi defaults")
         )));
         lines.push(line(format!(
-            "Workspace activation: {}",
+            "Legacy project override: {}",
             snapshot.active_profile.as_deref().unwrap_or("none")
         )));
         lines.push(line(""));
-        for doc in &snapshot.documents {
-            lines.push(line(format!(
-                "{}  {}  {}",
-                scope_label(doc.scope),
-                if doc.source.is_some() {
-                    "present"
-                } else {
-                    "not created"
-                },
-                doc.path
-            )));
-        }
+        lines.push(line(format!(
+            "{} profiles  |  {} contexts",
+            app.profiles().len(),
+            app.contexts().len()
+        )));
+        lines.push(line("Enter: manage Profiles    5: Settings and contexts"));
         lines.extend(snapshot.diagnostics.iter().map(|s| line(s.clone())));
         if snapshot.documents.iter().all(|d| d.source.is_none()) {
             lines.push(line(""));
             lines.push(Line::styled(
-                "Get started: press Enter to create a configuration.",
+                "Get started: Enter opens Profiles; n creates your first profile.",
                 theme.accent(),
             ));
         }
@@ -293,24 +308,52 @@ fn home(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
 fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
     let editor = &app.editor;
     let rows = Layout::vertical([
-        Constraint::Length(2),
+        Constraint::Length(3),
         Constraint::Min(1),
         Constraint::Length(4),
     ])
     .split(area);
     let title = match editor.stage {
-        Stage::Scope => "Choose configuration scope",
+        Stage::Scope => "Choose destination scope",
+        Stage::ContextList => "Settings / Contexts",
+        Stage::Actions => "Profile actions",
+        Stage::LegacyOverride => "Remove legacy project override",
         Stage::Contexts => "Choose a context",
         Stage::Providers => "Allowed providers",
-        Stage::Profiles => "Choose or create a profile",
+        Stage::Profiles => "Profiles",
         Stage::Roles => "Models by role",
         Stage::Picker => "Choose a model from Pi",
         Stage::Review => "Review configuration",
     };
+    let title = if editor.stage == Stage::Actions {
+        format!(
+            "{}: {}",
+            if editor.section == Section::Settings {
+                "Context actions"
+            } else {
+                title
+            },
+            if editor.section == Section::Settings {
+                &editor.context
+            } else {
+                &editor.profile
+            }
+        )
+    } else if editor.stage == Stage::Scope {
+        format!("{title}: {}", editor.action.label())
+    } else {
+        title.to_owned()
+    };
     frame.render_widget(
         Paragraph::new(format!(
-            "{title}{}",
-            if app.dirty() { "  [unsaved]" } else { "" }
+            "{}{}\n{}",
+            title,
+            if app.dirty() {
+                "  [unsaved changes]"
+            } else {
+                ""
+            },
+            hints(app),
         ))
         .style(theme.accent()),
         rows[0],
@@ -321,19 +364,121 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             let entries = SCOPES
                 .iter()
                 .map(|scope| {
-                    let path = app
-                        .snapshot
-                        .as_ref()
-                        .and_then(|s| s.documents.iter().find(|d| d.scope == *scope))
-                        .map(|d| d.path.as_str())
-                        .unwrap_or("loading...");
-                    format!("{:<16} {path}", scope_label(*scope))
+                    let purpose = match scope {
+                        xper_application::configuration::ConfigurationScope::Global => {
+                            "All projects for this user"
+                        }
+                        xper_application::configuration::ConfigurationScope::Project => {
+                            "This project, shared configuration"
+                        }
+                        xper_application::configuration::ConfigurationScope::Local => {
+                            "This project, private to this checkout"
+                        }
+                    };
+                    format!("{:<16} {purpose}", scope_label(*scope))
                 })
                 .collect();
             list(frame, rows[1], entries, editor.cursor, theme);
-            help.push(line("Precedence: defaults < global < project < local."));
+            let name = if editor.section == Section::Settings {
+                &editor.context
+            } else {
+                &editor.profile
+            };
+            help.push(line(format!(
+                "{}: {}",
+                editor.action.label(),
+                if name.is_empty() { "new item" } else { name }
+            )));
             help.push(line(
-                "Edits target one file. Inherited values remain in their original scope.",
+                "Precedence: Global < Project < Local. Review before saving.",
+            ));
+            help.push(line(
+                "Activating a profile selects its name; it does not copy models between scopes.",
+            ));
+        }
+        Stage::Actions => {
+            let name = if editor.section == Section::Settings {
+                &editor.context
+            } else {
+                &editor.profile
+            };
+            list(
+                frame,
+                rows[1],
+                app.actions().iter().map(|a| a.label().to_owned()).collect(),
+                editor.cursor,
+                theme,
+            );
+            help.push(line(format!("Selected: {name}")));
+            help.push(line(
+                "Choose an action, then its scope. Changes are reviewed before saving.",
+            ));
+            help.push(line(
+                "Deleting removes one scope's definition or override; inherited values can remain.",
+            ));
+        }
+        Stage::LegacyOverride => {
+            let name = app
+                .snapshot
+                .as_ref()
+                .and_then(|s| s.active_profile.as_deref())
+                .unwrap_or("none");
+            paragraph(
+                frame,
+                rows[1],
+                vec![
+                    line(format!("Current legacy override: {name}")),
+                    line(""),
+                    line("This project override takes priority over all scoped selections."),
+                    line("Enter removes it so Global / Project / Local selections can apply."),
+                    line("Esc keeps it. Existing runs retain their frozen models."),
+                ],
+            );
+        }
+        Stage::ContextList => {
+            let contexts = app.contexts();
+            if app.snapshot.is_none() {
+                paragraph(frame, rows[1], vec![line("Loading contexts...")]);
+            } else if contexts.is_empty() {
+                paragraph(
+                    frame,
+                    rows[1],
+                    vec![
+                        line("No contexts yet. Enter or n creates one."),
+                        line("Contexts define which providers profiles may use."),
+                    ],
+                );
+            } else {
+                list(
+                    frame,
+                    rows[1],
+                    contexts
+                        .iter()
+                        .map(|c| format!("{}  [{}]", c.name, c.source_label()))
+                        .collect(),
+                    editor.cursor,
+                    theme,
+                );
+                if let Some(context) = contexts.get(editor.cursor) {
+                    let providers = context
+                        .value
+                        .get("allowed_providers")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_else(|| "not configured".into());
+                    help.push(line(format!("Allowed providers: {providers}")));
+                }
+            }
+            help.push(line(
+                "Enter opens Edit / Delete. n creates a context independently of profiles.",
+            ));
+            help.push(line(
+                "Provider credentials remain in Pi. Manage model roles under Profiles.",
             ));
         }
         Stage::Contexts => {
@@ -381,48 +526,78 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             }
             help.push(line(format!("Context: {}", editor.context)));
             help.push(line(
-                "Space toggles a provider. Enter keeps the selection in your draft.",
+                "Space toggles providers. Enter continues to review or profile naming.",
             ));
         }
         Stage::Profiles => {
-            let names = app.names("profiles");
-            if names.is_empty() {
+            let profiles = app.profiles();
+            if app.snapshot.is_none() {
+                paragraph(frame, rows[1], vec![line("Loading profiles...")]);
+            } else if profiles.is_empty() {
                 paragraph(
                     frame,
                     rows[1],
                     vec![
-                        line(format!("Context: {}", editor.context)),
-                        line("No profile has been created yet."),
-                        line("Enter / n: name a profile, then choose its models."),
-                        line("v: review and save context changes only."),
+                        line("No profiles yet. Enter or n creates one."),
+                        line("Choose a scope, a context and the models for each role."),
                     ],
                 );
             } else {
                 list(
                     frame,
                     rows[1],
-                    names
+                    profiles
                         .iter()
-                        .map(|name| {
-                            let context = editor.draft["profiles"][name]["context"]
-                                .as_str()
-                                .unwrap_or("unknown");
-                            format!("{name}  [{context}]")
+                        .map(|p| {
+                            format!(
+                                "{}  [{}]{}",
+                                p.name,
+                                p.source_label(),
+                                if p.effective_active { "  ACTIVE" } else { "" }
+                            )
                         })
                         .collect(),
                     editor.cursor,
                     theme,
                 );
+                if let Some(profile) = profiles.get(editor.cursor) {
+                    help.push(line(format!(
+                        "Context: {}  |  Created in: {}",
+                        profile
+                            .value
+                            .get("context")
+                            .and_then(Value::as_str)
+                            .unwrap_or("not configured"),
+                        scope_label(profile.origin)
+                    )));
+                }
             }
-            help.push(line(format!(
-                "Context for new profiles: {}",
-                editor.context
-            )));
+            if let Some(snapshot) = &app.snapshot {
+                let selections = snapshot
+                    .documents
+                    .iter()
+                    .filter_map(|d| {
+                        d.value
+                            .as_ref()
+                            .and_then(|v| v.get("profile"))
+                            .and_then(Value::as_str)
+                            .map(|name| format!("{}: {name}", scope_label(d.scope)))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                help.push(line(if selections.is_empty() {
+                    "No scoped activation. Enter a profile to activate it.".into()
+                } else {
+                    selections
+                }));
+                if let Some(name) = &snapshot.active_profile {
+                    help.push(line(format!(
+                        "Legacy override: {name}. u reviews its removal."
+                    )));
+                }
+            }
             help.push(line(
-                "a activates a saved profile. u returns to the configured default.",
-            ));
-            help.push(line(
-                "Activation applies to new Pi sessions; running selections stay frozen.",
+                "Enter: Activate / Edit / Delete / Remove activation. n: New profile.",
             ));
         }
         Stage::Roles => {
@@ -529,6 +704,32 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         Stage::Review => {
             if let Some(preview) = &editor.preview {
                 let mut lines = vec![
+                    Line::styled(
+                        format!("{} in {}", editor.action.label(), scope_label(editor.scope)),
+                        theme.accent(),
+                    ),
+                    line(format!(
+                        "{}{}",
+                        if editor.section == Section::Settings {
+                            "Context: "
+                        } else {
+                            "Profile: "
+                        },
+                        if editor.section == Section::Settings {
+                            &editor.context
+                        } else {
+                            &editor.profile
+                        }
+                    )),
+                    line(format!(
+                        "Effective profile after save: {}",
+                        app.snapshot
+                            .as_ref()
+                            .and_then(|s| s.active_profile.as_deref())
+                            .or_else(|| preview.effective.get("profile").and_then(Value::as_str))
+                            .unwrap_or("Pi defaults")
+                    )),
+                    line("Applies to new Pi sessions; existing runs retain their models."),
                     line(format!("Destination: {}", preview.path)),
                     line(format!(
                         "{} draft changes; {}",
@@ -541,6 +742,8 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                     )),
                     line(""),
                 ];
+                lines.extend(preview.diagnostics.iter().map(|s| line(s.clone())));
+                lines.push(line(""));
                 if let Some(doc) = app
                     .snapshot
                     .as_ref()
@@ -567,7 +770,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                         .unwrap_or("none (Pi defaults)")
                 )));
                 lines.push(line(format!(
-                    "Workspace activation: {}",
+                    "Legacy project override: {}",
                     app.snapshot
                         .as_ref()
                         .and_then(|s| s.active_profile.as_deref())
@@ -582,9 +785,9 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                     rows[1],
                 );
                 help.push(line(
-                    "Enter saves. d sets this profile as default; activation is separate.",
+                    "Enter confirms this change. Esc returns without saving.",
                 ));
-                help.push(line("Higher-precedence values may mask this file; review diagnostics below the preview."));
+                help.push(line("Creating or editing a profile does not activate it. Use its Activate action after saving."));
             } else {
                 paragraph(
                     frame,
@@ -839,24 +1042,35 @@ fn detail(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
 }
 
 pub(super) fn hints(app: &App) -> &'static str {
-    if app.editor.naming.is_some() && app.section == Section::Configuration {
+    if app.editor.naming.is_some() && app.section.authoring() {
         return "Enter: create draft  Esc: cancel";
     }
-    if app.section == Section::Configuration {
+    if app.section.authoring() {
         return match app.editor.stage {
-            Stage::Scope => "Enter: choose  Tab: section  ?: help  q: quit",
-            Stage::Contexts => "n: new  e: providers  Enter: profiles  Esc: back",
+            Stage::Scope => "Enter: choose scope  Esc: back  ?: help",
+            Stage::ContextList => "Enter: actions  n: new context  F5: reload  ?: help",
+            Stage::Actions => "Up/Down: choose action  Enter: continue  Esc: back",
+            Stage::LegacyOverride => "Enter: remove override  Esc: cancel",
+            Stage::Contexts => "Enter: choose context  n: new context  Esc: back",
             Stage::Providers => "Space: toggle  Enter: continue  r: refresh  Esc: back",
-            Stage::Profiles => "Enter: open/create  n: new  v: review/save  ?: help",
+            Stage::Profiles
+                if app
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|s| s.active_profile.is_some()) =>
+            {
+                "Enter: actions  n: new  u: legacy override  F5: reload"
+            }
+            Stage::Profiles => "Enter: actions  n: new profile  F5: reload  ?: help",
             Stage::Roles => "Enter: model  a: all  t: thinking  v: review  ?: help",
             Stage::Picker => "Type: search  F4: provider  Enter: select  Esc: back",
-            Stage::Review => "Up/Down: scroll  d: default  Enter: save  Esc: edit",
+            Stage::Review => "Enter: confirm and save  Up/Down: scroll  Esc: back",
         };
     }
     if matches!(app.section, Section::Status | Section::Metrics) {
         "Enter: detail  Esc: back  r: refresh  Tab: section  ?: help"
     } else {
-        "Enter: configure  Tab: section  ?: help  q: quit"
+        "Enter: Profiles  5: Settings  Tab: section  ?: help"
     }
 }
 

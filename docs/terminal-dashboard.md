@@ -7,13 +7,13 @@ All user-interface state and rendering belong to CLI infrastructure.
 
 ## Navigation
 
-Home shows configuration locations, the effective profile, and the latest
-recording. Configuration authors scoped files. Status and Metrics share a
-project history and selected recording.
+Home shows the effective profile, saved profile/context counts, and the latest
+recording. Profiles manages model routing and activation. Settings manages
+provider contexts. Status and Metrics share a project history and selected recording.
 
 | Key | Action |
 | --- | --- |
-| Tab / Shift+Tab, 1–4 | Switch section |
+| Tab / Shift+Tab, 1–5 | Switch section |
 | Arrows, j/k in lists | Move selection |
 | Enter | Open detail, choose an item, or confirm the displayed action |
 | Esc | Go back; keep or explicitly discard an unsaved draft |
@@ -21,7 +21,7 @@ project history and selected recording.
 | q | Quit, with an unsaved-draft choice |
 | Ctrl+C | Interrupt and exit without saving the draft |
 | r | Refresh recorded data or the Pi catalog |
-| F5 in Configuration | Reload files, retaining draft edits for a fresh review |
+| F5 in Profiles / Settings | Reload files, retaining draft edits for a fresh review |
 
 Printable shortcuts become ordinary text in name and model-search fields.
 Wide terminals show navigation and details alongside content. At 80 columns,
@@ -30,47 +30,87 @@ resize message preserves the current draft and suspends actions except Ctrl+C.
 `--ascii` avoids decorative Unicode;
 `NO_COLOR` disables automatic colors while selection remains visible.
 
-## Configuration
+## Profiles
 
-Choose Global, Project, or Local (private). The destination is shown before
-editing. Precedence remains defaults, global, project, then local. Editing an
-inherited value creates an override in the chosen file, never a flattened copy
-of the effective configuration.
+Open Profiles (`2`) to see every logical profile, its creation scope and any
+higher-scope overrides. `ACTIVE` identifies the effective selection in this
+project. A profile defined globally and adjusted locally appears once, with both
+sources shown. Scoped selections are displayed separately from definition scopes.
 
-1. Select a context, or press `n` to name one. `e` edits its allowed providers;
-   Space toggles providers and Enter keeps the selection in the draft.
-2. If there are no profiles, continuing from the context automatically asks for
-   the first profile's name. Otherwise, select a profile or press `n` to create
-   one. Contexts control allowed providers; profiles assign models to roles.
-   Cancelling the name prompt keeps the context draft; Enter on the empty profile
-   list opens it again.
-3. Select a role and press Enter to search Pi's available models. Type the query,
-   use F4 to filter provider, and Enter to choose an exact result. `a` explicitly
-   applies the chosen model to every listed role. `t` cycles thinking levels;
-   a known non-reasoning model permits only `off`.
-4. `d` sets the current profile as this scope's configured default. `c` changes
-   an existing profile to the context selected earlier in the wizard.
-5. `v` validates and shows the destination, before/after source and masking
-   diagnostics. Scroll to review; Enter saves. Esc returns to the draft.
+Select a profile and press Enter for visible actions:
 
-New guided profiles cover every role described by Pi. Existing partial profiles
-and unknown roles are retained. An absent route is labelled unconfigured: Pi
-stops when that role is needed, rather than silently selecting a default model.
-Advice about frontier models, strong reasoning and independent review is
-informational. Xper does not rank models or choose one for the user.
+| Action | Result after review and confirmation |
+| --- | --- |
+| Activate profile | Select this name in Global, Project or Local configuration |
+| Edit profile | Edit its context and role models in a chosen scope |
+| Delete profile | Remove that scope's definition or override; inherited definitions may remain |
+| Remove scoped activation | Remove that scope's selection and reveal the lower-precedence selection |
 
-Delete removes the selected context, profile, or role override from the chosen
-scope. Lower-scope values can reappear; the draft must still pass validation and
-be reviewed before any write. `v` also reviews context-only edits from the context
-or profile list. Unrelated settings and comments outside changed spans remain.
+Activating a profile does not copy its models into another scope. Global applies
+to all projects for this user, Project to the shared project configuration, and
+Local to this private checkout. Precedence is Global < Project < Local. A profile
+and its context must be available at the selected scope; a project-only profile
+cannot be activated globally. Review shows the effective selection and any
+higher-precedence masking before the destination's source diff.
+
+The legacy `.xper/active-profile` override used by `xper profile activate` remains
+compatible and takes priority over all scoped selections. When present it is
+labelled explicitly. `u` on the profile list opens a separate confirmation to
+remove it. Scoped activation never silently removes that override.
+
+Start a new Pi session after changing selections or models. Pi prepares xper's
+resolved profile in the background; check preparation before starting a run.
+Existing runs retain their frozen model selections. Activating a profile changes
+xper's routing selection, not Pi's authentication or the current chat model.
+
+Scoped activation does not install or register the Pi extension. To consume a
+global selection outside this checkout, Pi must load the xper extension there
+and be able to launch the xper bridge. The checkout's `.pi/extensions/xper.ts`
+only supplies the local development integration. Automatic integration setup
+for the selected scope remains pending.
+
+### Create or edit a profile
+
+1. Press `n` in Profiles, choose the scope, then select a context. If needed,
+   `n` in the context chooser creates one and selects its allowed providers.
+2. Name the profile. Contexts limit providers; profiles assign models to roles.
+3. Select a role and press Enter to search Pi's models. Type the query, use F4
+   to filter provider, and Enter to choose an exact result. `a` explicitly applies
+   a chosen model to all listed roles. `t` changes thinking; non-reasoning models
+   permit only `off`. `c` chooses another context for this profile.
+4. Press `v` to review the destination, changes and diagnostics. Enter saves;
+   Esc returns to the draft. Saving returns to the profile list with the saved
+   profile selected. Use its Activate action to choose where Pi should use it.
+
+New guided profiles cover every adapter role. Existing partial profiles and
+unknown roles remain intact. An absent route is labelled unconfigured: Pi stops
+when that role is needed. Advice about frontier models, reasoning and independent
+review is informational; xper does not rank or automatically assign models.
+
+Editing an inherited value creates an override in the chosen scope. Delete on a
+role removes only that scope's route override. Deleting a profile also removes a
+matching selection in the same scope; other scopes and legacy overrides remain
+explicit. Validation blocks deletion when it would leave unresolved references.
+
+## Settings and contexts
+
+Open Settings (`5`) to manage contexts directly, independently of profile creation.
+Each context shows its origin and overrides. Enter opens Edit / Delete. `n`
+creates a context: choose scope, name it, toggle allowed providers with Space,
+then Enter reviews the context and Enter again saves it. Editing follows the
+same review. Deleting a context is blocked while surviving profiles require it.
+Credentials remain in Pi.
+
+## Drafts and safe writes
+
+The editor keeps unsaved changes in memory. Esc returns or offers to discard a
+draft; cancellation never writes it. Switching to Status or Metrics preserves the
+draft. Finish or discard it before switching between Profiles and Settings.
+
+Unrelated settings, unknown roles and comments outside changed spans remain.
 If a source cannot be parsed, choosing that scope offers an explicit replacement
-draft; the original remains untouched until the replacement is reviewed and saved.
-Alternatively, correct the source externally and use F5 to reload it.
-
-Workspace activation is separate: `a` on the profile list activates a saved
-profile, and `u` clears the local activation so the configured default applies.
-Start a new Pi session after changing configuration or activation. Runs that have
-already started retain their frozen selections.
+draft; the original stays untouched until review and save. Alternatively, correct
+the source externally and use F5 to reload while retaining draft edits.
 
 The first configuration save runs installation preflight. Ordinary edits can
 be prepared without Pi; unavailable catalog validation is reported. Exact new

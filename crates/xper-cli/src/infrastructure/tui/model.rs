@@ -11,30 +11,47 @@ use xper_application::{
     use_cases::get_run_status,
 };
 
-use super::catalog::{Model, Role};
+use super::{
+    catalog::{Model, Role},
+    inventory,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Section {
     Home,
-    Configuration,
+    Profiles,
     Status,
     Metrics,
+    Settings,
 }
 
 impl Section {
-    pub const ALL: [Self; 4] = [Self::Home, Self::Configuration, Self::Status, Self::Metrics];
+    pub const ALL: [Self; 5] = [
+        Self::Home,
+        Self::Profiles,
+        Self::Status,
+        Self::Metrics,
+        Self::Settings,
+    ];
+    pub fn authoring(self) -> bool {
+        matches!(self, Self::Profiles | Self::Settings)
+    }
     pub fn label(self) -> &'static str {
         match self {
             Self::Home => "Home",
-            Self::Configuration => "Configuration",
+            Self::Profiles => "Profiles",
             Self::Status => "Status",
             Self::Metrics => "Metrics",
+            Self::Settings => "Settings",
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Stage {
+    ContextList,
+    Actions,
+    LegacyOverride,
     Scope,
     Contexts,
     Providers,
@@ -42,6 +59,32 @@ pub(super) enum Stage {
     Roles,
     Picker,
     Review,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Action {
+    NewProfile,
+    EditProfile,
+    DeleteProfile,
+    ActivateProfile,
+    ClearSelection,
+    NewContext,
+    EditContext,
+    DeleteContext,
+}
+impl Action {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NewProfile => "Create profile",
+            Self::EditProfile => "Edit profile",
+            Self::DeleteProfile => "Delete profile",
+            Self::ActivateProfile => "Activate profile",
+            Self::ClearSelection => "Remove scoped activation",
+            Self::NewContext => "Create context",
+            Self::EditContext => "Edit context",
+            Self::DeleteContext => "Delete context",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +122,8 @@ pub(super) enum Effect {
 }
 
 pub(super) struct Editor {
+    pub section: Section,
+    pub action: Action,
     pub stage: Stage,
     pub scope: Scope,
     pub draft: Value,
@@ -102,7 +147,9 @@ pub(super) struct Editor {
 impl Default for Editor {
     fn default() -> Self {
         Self {
-            stage: Stage::Scope,
+            section: Section::Profiles,
+            action: Action::NewProfile,
+            stage: Stage::Profiles,
             scope: Scope::Project,
             draft: json!({}),
             changes: vec![],
@@ -110,7 +157,7 @@ impl Default for Editor {
             profile: String::new(),
             allowed: vec![],
             new_profile: false,
-            cursor: 1,
+            cursor: 0,
             role_cursor: 0,
             query: String::new(),
             provider: None,
@@ -198,6 +245,15 @@ impl App {
     }
     pub fn dirty(&self) -> bool {
         !self.editor.changes.is_empty()
+            || (self.editor.stage == Stage::Providers
+                && self.editor.naming.is_none()
+                && self
+                    .editor
+                    .draft
+                    .get("contexts")
+                    .and_then(|contexts| contexts.get(&self.editor.context))
+                    .and_then(|context| context.get("allowed_providers"))
+                    != Some(&json!(self.editor.allowed)))
     }
     pub fn selected_run(&self) -> Option<String> {
         self.runs.get(self.run_cursor).map(|r| r.run_id.clone())
@@ -270,7 +326,16 @@ impl App {
         self.snapshot = Some(snapshot);
     }
     pub fn reset_editor(&mut self) {
-        self.editor = Editor::default();
+        let section = self.editor.section;
+        self.editor = Editor {
+            section,
+            ..Editor::default()
+        };
+        self.editor.stage = if section == Section::Settings {
+            Stage::ContextList
+        } else {
+            Stage::Profiles
+        };
         if let Some(snapshot) = &self.snapshot {
             self.editor.draft = snapshot
                 .scoped
@@ -295,17 +360,177 @@ impl App {
             field.into(),
         ]
     }
-    fn open_profiles(&mut self) {
-        self.editor.stage = Stage::Profiles;
-        self.editor.cursor = 0;
-        if self.names("profiles").is_empty() {
-            self.editor.naming = Some(NameKind::Profile);
-            self.editor.name.clear();
-            self.notice = format!(
-                "Context '{}' is ready. Name your first profile, then choose its models.",
-                self.editor.context
-            );
+    pub fn profiles(&self) -> Vec<inventory::Profile> {
+        self.snapshot
+            .as_ref()
+            .map(inventory::profiles)
+            .unwrap_or_default()
+    }
+    pub fn contexts(&self) -> Vec<inventory::Context> {
+        self.snapshot
+            .as_ref()
+            .map(inventory::contexts)
+            .unwrap_or_default()
+    }
+    pub fn actions(&self) -> Vec<Action> {
+        if self.editor.section == Section::Settings {
+            vec![Action::EditContext, Action::DeleteContext]
+        } else {
+            vec![
+                Action::ActivateProfile,
+                Action::EditProfile,
+                Action::DeleteProfile,
+                Action::ClearSelection,
+            ]
         }
+    }
+    fn start_action(&mut self, action: Action, scope: Scope) {
+        self.editor.action = action;
+        self.editor.stage = Stage::Scope;
+        self.editor.cursor = SCOPES.iter().position(|s| *s == scope).unwrap_or(1);
+        self.editor.preview = None;
+        self.editor.changes.clear();
+        self.editor.new_profile = action == Action::NewProfile;
+        if action == Action::NewProfile {
+            self.editor.profile.clear();
+        }
+        if action == Action::NewContext {
+            self.editor.context.clear();
+        }
+    }
+    fn review(&mut self, back: Stage) -> Vec<Effect> {
+        self.editor.review_return = back;
+        self.editor.stage = Stage::Review;
+        self.editor.preview_scroll = 0;
+        self.preview_effect(true)
+    }
+    fn choose_context(&mut self, name: String) {
+        self.editor.context = name;
+        self.editor.allowed =
+            self.editor.draft["contexts"][&self.editor.context]["allowed_providers"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+    }
+    fn bind_context(&mut self) {
+        self.set(
+            vec![
+                "profiles".into(),
+                self.editor.profile.clone(),
+                "context".into(),
+            ],
+            json!(self.editor.context),
+        );
+        for id in self.role_ids() {
+            if self
+                .route(&id)
+                .and_then(|route| route.get("context"))
+                .is_some_and(|context| context.as_str() != Some(self.editor.context.as_str()))
+            {
+                self.set(self.role_path(&id, "context"), json!(self.editor.context));
+            }
+        }
+        self.notice = "Profile context updated in draft".into();
+    }
+    fn after_scope(&mut self) -> Vec<Effect> {
+        self.editor.cursor = 0;
+        match self.editor.action {
+            Action::NewProfile => self.editor.stage = Stage::Contexts,
+            Action::NewContext => {
+                self.editor.stage = Stage::Providers;
+                self.editor.naming = Some(NameKind::Context);
+                self.editor.name.clear();
+            }
+            Action::EditProfile => {
+                if let Some(context) =
+                    self.editor.draft["profiles"][&self.editor.profile]["context"].as_str()
+                {
+                    self.editor.context = context.to_owned();
+                    self.editor.stage = Stage::Roles;
+                } else {
+                    if self.names("profiles").contains(&self.editor.profile) {
+                        self.editor.stage = Stage::Contexts;
+                        self.notice = "Choose a valid context to repair this profile.".into();
+                    } else {
+                        self.notice = "This profile is not available in this scope. Choose its origin or a higher scope.".into();
+                        self.editor.cursor = SCOPES
+                            .iter()
+                            .position(|s| *s == self.editor.scope)
+                            .unwrap_or(1);
+                    }
+                }
+            }
+            Action::EditContext => {
+                if self.names("contexts").contains(&self.editor.context) {
+                    self.choose_context(self.editor.context.clone());
+                    self.editor.stage = Stage::Providers;
+                } else {
+                    self.notice = "This context is not available in this scope. Choose its origin or a higher scope.".into();
+                    self.editor.cursor = SCOPES
+                        .iter()
+                        .position(|s| *s == self.editor.scope)
+                        .unwrap_or(1);
+                }
+            }
+            Action::ActivateProfile => {
+                self.set(vec!["profile".into()], json!(self.editor.profile));
+                return self.review(Stage::Scope);
+            }
+            Action::ClearSelection | Action::DeleteProfile | Action::DeleteContext => {
+                let (section, name) = if self.editor.action == Action::DeleteContext {
+                    ("contexts", self.editor.context.clone())
+                } else {
+                    ("profiles", self.editor.profile.clone())
+                };
+                let document = self
+                    .snapshot
+                    .as_ref()
+                    .and_then(|s| s.documents.iter().find(|d| d.scope == self.editor.scope))
+                    .and_then(|d| d.value.as_ref());
+                let exists = if self.editor.action == Action::ClearSelection {
+                    document
+                        .and_then(|d| d.get("profile"))
+                        .and_then(Value::as_str)
+                        == Some(name.as_str())
+                } else {
+                    document
+                        .and_then(|d| d.get(section))
+                        .and_then(|v| v.get(&name))
+                        .is_some()
+                };
+                if !exists {
+                    self.notice = "There is no matching definition or activation in this scope. Choose a listed source scope.".into();
+                    self.editor.cursor = SCOPES
+                        .iter()
+                        .position(|s| *s == self.editor.scope)
+                        .unwrap_or(1);
+                    return vec![];
+                }
+                if self.editor.action == Action::ClearSelection
+                    || (section == "profiles"
+                        && document
+                            .and_then(|d| d.get("profile"))
+                            .and_then(Value::as_str)
+                            == Some(name.as_str()))
+                {
+                    self.editor.changes.push(ConfigurationChange::Remove {
+                        path: vec!["profile".into()],
+                    });
+                }
+                if self.editor.action != Action::ClearSelection {
+                    self.editor.changes.push(ConfigurationChange::Remove {
+                        path: vec![section.into(), name],
+                    });
+                }
+                return self.review(Stage::Scope);
+            }
+        }
+        vec![]
     }
     fn assign(&mut self, id: &str, model: &Model) {
         let profile = self.editor.profile.clone();
@@ -366,16 +591,28 @@ impl App {
         if section == self.section {
             return vec![];
         }
+        if section.authoring() && section != self.editor.section {
+            if self.dirty() {
+                self.notice = format!(
+                    "Finish or discard the draft in {} before opening {}.",
+                    self.editor.section.label(),
+                    section.label()
+                );
+                return vec![];
+            }
+            self.editor.section = section;
+            self.reset_editor();
+        }
         let old = self.section;
         self.section = section;
         self.detail_open = false;
         self.timeline_cursor = 0;
         let mut effects = vec![];
-        if old == Section::Configuration {
+        if old.authoring() && !section.authoring() {
             effects.push(Effect::CloseCatalog);
             self.catalog_loading = false;
         }
-        if section == Section::Configuration {
+        if section.authoring() && !old.authoring() {
             self.catalog_loading = true;
             effects.push(Effect::OpenCatalog);
         }
@@ -402,9 +639,14 @@ impl App {
                         value: json!({}),
                     });
                     self.editor.draft = json!({});
-                    self.editor.stage = Stage::Contexts;
-                    self.editor.cursor = 0;
-                    return self.preview_effect(false);
+                    self.editor.action = if self.editor.section == Section::Settings {
+                        Action::NewContext
+                    } else {
+                        Action::NewProfile
+                    };
+                    self.editor.new_profile = self.editor.section == Section::Profiles;
+                    self.editor.profile.clear();
+                    return self.after_scope();
                 }
                 KeyCode::Esc | KeyCode::Char('n') => self.confirm_repair = false,
                 _ => {}
@@ -429,10 +671,10 @@ impl App {
             }
             return vec![];
         }
-        if self.section == Section::Configuration && self.editor.naming.is_some() {
+        if self.section.authoring() && self.editor.naming.is_some() {
             return self.name_key(key);
         }
-        if self.section == Section::Configuration && self.editor.stage == Stage::Picker {
+        if self.section.authoring() && self.editor.stage == Stage::Picker {
             return self.picker_key(key);
         }
         if self.busy {
@@ -458,17 +700,19 @@ impl App {
                     .position(|s| *s == self.section)
                     .unwrap_or(0);
                 self.select_section(
-                    Section::ALL[(i + if key.code == KeyCode::BackTab { 3 } else { 1 }) % 4],
+                    Section::ALL[(i + if key.code == KeyCode::BackTab {
+                        Section::ALL.len() - 1
+                    } else {
+                        1
+                    }) % Section::ALL.len()],
                 )
             }
-            KeyCode::Char(c @ '1'..='4') => {
+            KeyCode::Char(c @ '1'..='5') => {
                 self.select_section(Section::ALL[(c as u8 - b'1') as usize])
             }
             _ => match self.section {
                 Section::Home => match key.code {
-                    KeyCode::Enter | KeyCode::Char('c') => {
-                        self.select_section(Section::Configuration)
-                    }
+                    KeyCode::Enter | KeyCode::Char('c') => self.select_section(Section::Profiles),
                     KeyCode::Char('r') => {
                         self.busy = true;
                         vec![
@@ -481,7 +725,7 @@ impl App {
                     }
                     _ => vec![],
                 },
-                Section::Configuration => self.config_key(key),
+                Section::Profiles | Section::Settings => self.config_key(key),
                 Section::Status | Section::Metrics => self.history_key(key),
             },
         }
@@ -551,34 +795,40 @@ impl App {
             self.busy = true;
             return vec![Effect::LoadConfig];
         }
-        if key.code == KeyCode::Char('v')
-            && matches!(self.editor.stage, Stage::Contexts | Stage::Profiles)
-        {
-            self.editor.review_return = self.editor.stage;
-            self.editor.stage = Stage::Review;
-            return self.preview_effect(true);
-        }
         if key.code == KeyCode::Char('r') && self.editor.stage != Stage::Review {
             self.catalog_loading = true;
             return vec![Effect::RefreshCatalog];
         }
         if key.code == KeyCode::Esc {
-            if self.editor.stage == Stage::Review {
-                self.editor.stage = self.editor.review_return;
-            } else if self.dirty() {
-                self.confirm_discard = true;
-                self.discard_quits = false;
-            } else {
-                self.editor.stage = Stage::Scope;
-                self.editor.cursor = 1;
+            match self.editor.stage {
+                Stage::Review => {
+                    self.editor.stage = self.editor.review_return;
+                    if self.editor.stage == Stage::Scope {
+                        self.editor.changes.clear();
+                        self.editor.preview = None;
+                        self.editor.cursor = SCOPES
+                            .iter()
+                            .position(|s| *s == self.editor.scope)
+                            .unwrap_or(1);
+                    }
+                }
+                Stage::Actions | Stage::LegacyOverride => self.reset_editor(),
+                Stage::Profiles | Stage::ContextList => return self.select_section(Section::Home),
+                _ if self.dirty() => {
+                    self.confirm_discard = true;
+                    self.discard_quits = false;
+                }
+                _ => self.reset_editor(),
             }
             return vec![];
         }
         let length = match self.editor.stage {
+            Stage::Profiles => self.profiles().len(),
+            Stage::ContextList => self.contexts().len(),
+            Stage::Actions => self.actions().len(),
             Stage::Scope => 3,
             Stage::Contexts => self.names("contexts").len(),
             Stage::Providers => self.providers().len(),
-            Stage::Profiles => self.names("profiles").len(),
             Stage::Roles => self.role_ids().len(),
             _ => 0,
         };
@@ -600,6 +850,95 @@ impl App {
             _ => {}
         }
         match self.editor.stage {
+            Stage::Profiles | Stage::ContextList => {
+                let profiles = self.editor.stage == Stage::Profiles;
+                if key.code == KeyCode::Char('n') {
+                    self.start_action(
+                        if profiles {
+                            Action::NewProfile
+                        } else {
+                            Action::NewContext
+                        },
+                        Scope::Project,
+                    );
+                } else if key.code == KeyCode::Char('u')
+                    && profiles
+                    && self
+                        .snapshot
+                        .as_ref()
+                        .is_some_and(|s| s.active_profile.is_some())
+                {
+                    self.editor.stage = Stage::LegacyOverride;
+                } else if matches!(
+                    key.code,
+                    KeyCode::Enter | KeyCode::Char('a') | KeyCode::Char('e') | KeyCode::Delete
+                ) {
+                    let scope = if profiles {
+                        let Some(profile) = self.profiles().get(self.editor.cursor).cloned() else {
+                            if key.code == KeyCode::Enter {
+                                self.start_action(Action::NewProfile, Scope::Project);
+                            }
+                            return vec![];
+                        };
+                        self.editor.profile = profile.name.clone();
+                        profile.highest_scope()
+                    } else {
+                        let Some(context) = self.contexts().get(self.editor.cursor).cloned() else {
+                            if key.code == KeyCode::Enter {
+                                self.start_action(Action::NewContext, Scope::Project);
+                            }
+                            return vec![];
+                        };
+                        self.editor.context = context.name.clone();
+                        context.highest_scope()
+                    };
+                    let action = match key.code {
+                        KeyCode::Char('a') if profiles => Some(Action::ActivateProfile),
+                        KeyCode::Char('e') => Some(if profiles {
+                            Action::EditProfile
+                        } else {
+                            Action::EditContext
+                        }),
+                        KeyCode::Delete => Some(if profiles {
+                            Action::DeleteProfile
+                        } else {
+                            Action::DeleteContext
+                        }),
+                        _ => None,
+                    };
+                    if let Some(action) = action {
+                        self.start_action(action, scope);
+                    } else {
+                        self.editor.stage = Stage::Actions;
+                        self.editor.cursor = 0;
+                    }
+                }
+            }
+            Stage::Actions => {
+                if key.code == KeyCode::Enter
+                    && let Some(action) = self.actions().get(self.editor.cursor).copied()
+                {
+                    let scope = if self.editor.section == Section::Profiles {
+                        self.profiles()
+                            .iter()
+                            .find(|p| p.name == self.editor.profile)
+                            .map(|p| p.highest_scope())
+                    } else {
+                        self.contexts()
+                            .iter()
+                            .find(|c| c.name == self.editor.context)
+                            .map(|c| c.highest_scope())
+                    }
+                    .unwrap_or(Scope::Project);
+                    self.start_action(action, scope);
+                }
+            }
+            Stage::LegacyOverride => {
+                if key.code == KeyCode::Enter {
+                    self.busy = true;
+                    return vec![Effect::Activate(None)];
+                }
+            }
             Stage::Scope => {
                 if key.code == KeyCode::Enter && self.snapshot.is_some() {
                     self.editor.scope = SCOPES[self.editor.cursor.min(2)];
@@ -617,32 +956,24 @@ impl App {
                         self.confirm_repair = true;
                         return vec![];
                     }
-                    self.editor.stage = Stage::Contexts;
-                    self.editor.cursor = 0;
+                    return self.after_scope();
                 }
             }
             Stage::Contexts => match key.code {
-                KeyCode::Delete => {
-                    if let Some(name) = self.names("contexts").get(self.editor.cursor).cloned() {
-                        self.editor.changes.push(ConfigurationChange::Remove {
-                            path: vec!["contexts".into(), name],
-                        });
-                        return self.preview_effect(false);
-                    }
-                }
                 KeyCode::Char('n') => {
                     self.editor.naming = Some(NameKind::Context);
                     self.editor.name.clear();
                 }
-                KeyCode::Enter | KeyCode::Char('e') => {
+                KeyCode::Enter => {
                     if let Some(name) = self.names("contexts").get(self.editor.cursor).cloned() {
-                        self.editor.context = name;
-                        self.editor.allowed=self.editor.draft["contexts"][&self.editor.context]["allowed_providers"].as_array().map(|a|a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
-                        if key.code == KeyCode::Enter {
-                            self.open_profiles();
-                        } else {
-                            self.editor.stage = Stage::Providers;
+                        self.choose_context(name);
+                        if self.names("profiles").contains(&self.editor.profile) {
+                            self.bind_context();
+                            self.editor.stage = Stage::Roles;
                             self.editor.cursor = 0;
+                        } else {
+                            self.editor.naming = Some(NameKind::Profile);
+                            self.editor.name.clear();
                         }
                     }
                 }
@@ -670,56 +1001,26 @@ impl App {
                             ],
                             json!(self.editor.allowed),
                         );
-                        self.open_profiles();
-                    }
-                }
-                _ => {}
-            },
-            Stage::Profiles => match key.code {
-                KeyCode::Delete => {
-                    if let Some(name) = self.names("profiles").get(self.editor.cursor).cloned() {
-                        self.editor.changes.push(ConfigurationChange::Remove {
-                            path: vec!["profiles".into(), name],
-                        });
-                        return self.preview_effect(false);
-                    }
-                }
-                KeyCode::Char('n') => {
-                    self.editor.naming = Some(NameKind::Profile);
-                    self.editor.name.clear();
-                }
-                KeyCode::Char('u') => {
-                    self.busy = true;
-                    return vec![Effect::Activate(None)];
-                }
-                KeyCode::Char('a') => {
-                    if let Some(name) = self.names("profiles").get(self.editor.cursor).cloned() {
-                        if self.dirty() {
-                            self.notice = "Save the draft before activating a profile".into();
+                        if self.editor.section == Section::Profiles {
+                            if self.names("profiles").contains(&self.editor.profile) {
+                                self.bind_context();
+                                self.editor.stage = Stage::Roles;
+                                self.editor.cursor = 0;
+                            } else {
+                                self.editor.stage = Stage::Contexts;
+                                self.editor.naming = Some(NameKind::Profile);
+                                self.editor.name.clear();
+                                self.notice = "Context ready. Name the profile that will assign models to roles.".into();
+                            }
                         } else {
-                            self.busy = true;
-                            return vec![Effect::Activate(Some(name))];
+                            return self.review(Stage::Providers);
                         }
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(name) = self.names("profiles").get(self.editor.cursor).cloned() {
-                        self.editor.profile = name;
-                        self.editor.new_profile = false;
-                        self.editor.stage = Stage::Roles;
-                        self.editor.cursor = 0;
-                    } else if self.names("profiles").is_empty() {
-                        self.open_profiles();
                     }
                 }
                 _ => {}
             },
             Stage::Roles => return self.roles_key(key),
             Stage::Review => {
-                if key.code == KeyCode::Char('d') && !self.editor.profile.is_empty() {
-                    self.set(vec!["profile".into()], json!(self.editor.profile));
-                    return self.preview_effect(true);
-                }
                 if key.code == KeyCode::Char('v') {
                     return self.preview_effect(true);
                 }
@@ -781,31 +1082,16 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('d') => {
-                self.set(vec!["profile".into()], json!(self.editor.profile));
-                self.notice = "Default profile updated in draft; review and save to apply".into();
-            }
             KeyCode::Char('c') => {
-                self.set(
-                    vec![
-                        "profiles".into(),
-                        self.editor.profile.clone(),
-                        "context".into(),
-                    ],
-                    json!(self.editor.context),
-                );
-                for id in self.role_ids() {
-                    if self
-                        .route(&id)
-                        .and_then(|route| route.get("context"))
-                        .is_some_and(|context| {
-                            context.as_str() != Some(self.editor.context.as_str())
-                        })
-                    {
-                        self.set(self.role_path(&id, "context"), json!(self.editor.context));
-                    }
-                }
-                self.notice = "Profile context updated in draft".into();
+                self.editor.stage = Stage::Contexts;
+                self.editor.cursor = self
+                    .names("contexts")
+                    .iter()
+                    .position(|name| name == &self.editor.context)
+                    .unwrap_or(0);
+                self.notice =
+                    "Choose a context for this profile. Models must use its allowed providers."
+                        .into();
             }
             KeyCode::Delete => {
                 if let Some(id) = self.role_ids().get(self.editor.cursor).cloned() {
@@ -852,7 +1138,20 @@ impl App {
     }
     fn name_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         match key.code {
-            KeyCode::Esc => self.editor.naming = None,
+            KeyCode::Esc => {
+                self.editor.naming = None;
+                self.editor.stage = if self.editor.action == Action::NewProfile {
+                    Stage::Contexts
+                } else {
+                    Stage::Scope
+                };
+                if self.editor.stage == Stage::Scope {
+                    self.editor.cursor = SCOPES
+                        .iter()
+                        .position(|s| *s == self.editor.scope)
+                        .unwrap_or(1);
+                }
+            }
             KeyCode::Backspace => {
                 self.editor.name.pop();
             }

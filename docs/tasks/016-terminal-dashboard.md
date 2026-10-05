@@ -3,7 +3,7 @@
 - Status: `review`
 - Milestone: M4
 - Depends on: existing configuration, recording, and Pi routing
-- Scope: the complete four-slice delivery explicitly requested together
+- Scope: the requested four-slice dashboard plus the requested profile-management follow-up
 
 ## Outcome and boundary
 
@@ -17,6 +17,11 @@ Reuse scoped configuration, installation preflight, read-only SQLite inspection,
 generic projections, and Pi's model discovery. Do not add metric formulas or
 implement the workflow visualization and comparison backlog.
 
+Before the initial delivery, configuration requires hand-written identifiers
+and history has only latest/specific-run CLI queries. After: a user chooses
+scope, context, profile, and exact catalog models, reviews the result, saves it,
+and browses recorded status and usage from the same dashboard.
+
 ## Reviewable increments
 
 | Slice | Status | Observable result |
@@ -25,11 +30,23 @@ implement the workflow visualization and comparison backlog.
 | XP-016.2 | `review` | Model selection uses Pi's cached catalog and native search, with adapter-owned role guidance. |
 | XP-016.3 | `review` | A scoped configuration is previewed, validated, and explicitly saved from a complete profile wizard. |
 | XP-016.4 | `review` | Existing configuration is edited without flattening inheritance; activation, conflicts, and unrelated content are preserved. |
+| XP-016.5 | `review` | Profiles opens directly to an inventory with source scopes and visible actions; Settings manages contexts independently; activation selects Global, Project or Local explicitly. |
 
-Before: configuration requires hand-written identifiers and history has only
-latest/specific-run CLI queries. After: a user chooses scope, context, profile,
-and exact catalog models, reviews the result, saves it, and browses recorded
-status and usage from the same dashboard.
+### XP-016.5: Profile management and scoped activation
+
+Before: activating a profile requires navigating scope files and contexts, and
+the destination of activation differs from the chosen editing scope. After:
+Profiles lists logical profiles with their creation scope, overrides and active
+state. Enter exposes Activate, Edit, Delete and Remove activation; New profile
+starts directly from that section. Settings manages provider contexts separately.
+Actions choose a destination scope and reuse the existing preview/save operations.
+Scoped activation uses the YAML profile selector already consumed by Pi; legacy
+workspace overrides remain explicit and removable without silent migration.
+
+Verify source inventory, same-name overrides, scoped activation and masking,
+creation/edit/delete/back navigation, independent context authoring, draft
+preservation, compact rendering and end-to-end PTY flows. Reuse existing
+configuration authoring, catalog workers, projections and terminal lifecycle.
 
 ## Acceptance and verification
 
@@ -47,6 +64,33 @@ status and usage from the same dashboard.
   `npm run check`; record actual evidence before moving slices to `review`.
 
 ## Delivery evidence
+
+### Profile-management follow-up (XP-016.5)
+
+Verified on 2026-10-05 with a fresh `npm run check` (exit 0), including 50 CLI
+unit tests and two POSIX PTY checks. The PTY drives independent context creation,
+profile creation without activation, scoped activation, review cancellation,
+and a local model override. Regressions cover all three activation scopes,
+higher-only definitions, legacy override preservation, blocked deletion,
+profile/context isolation, context reassignment, and pending provider choices
+that must survive navigation before Enter. Inventory and rendering tests cover
+source scopes, same-name overrides, active state, visible actions at 80 and 60
+columns, and the existing terminal-size matrix.
+
+The requested UI reorganization is one follow-up across existing views and
+authoring operations. Its diff adds approximately 1,020 production lines,
+760 test lines and 170 documentation lines, and removes approximately 350 lines.
+There are no new dependencies, public protocol changes, persistence formats or
+workflow decisions. `git diff --check` and local Markdown target checks pass.
+The complete check reports existing non-failing Biome diagnostics in unchanged
+Pi workflow files; these are outside this follow-up.
+
+Known limitation: activating Global saves a global YAML selection but does not
+install or register xper in Pi globally. Other projects require the extension
+and a launchable bridge. Automatic integration setup for the selected scope is
+not included in this slice.
+
+### Initial dashboard delivery (XP-016.1–XP-016.4)
 
 Verified on 2026-10-05 with `npm run check` (exit 0): formatting, lint, architecture
 boundaries, shared contracts, type checking, the Rust workspace, and all 245 Pi

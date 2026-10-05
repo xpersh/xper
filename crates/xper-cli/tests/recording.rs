@@ -110,6 +110,109 @@ fn event(id: &str, kind: &str, data: Value) -> Value {
 }
 
 #[test]
+fn status_lists_pages_without_reordering_on_later_observations() {
+    let project = Project::new();
+    let mut bridge = Bridge::new(&project, "history-session");
+    for id in ["old", "middle", "new"] {
+        let mut fact = event(id, "run.started", json!({}));
+        fact["runId"] = json!(id);
+        let appended = bridge.request("event.append", json!({"events":[fact]}));
+        assert_eq!(appended["result"]["accepted"], 1);
+    }
+    let output = project
+        .command()
+        .args(["status", "--list", "--json", "--limit", "2"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["runs"].as_array().unwrap().len(), 2);
+    assert_eq!(page["runs"][0]["runId"], "new");
+    assert_eq!(page["runs"][1]["runId"], "middle");
+    assert_eq!(page["runs"][0]["metrics"]["costMicros"], Value::Null);
+    assert_eq!(page["nextCursor"], "middle");
+    let mut arrival = event("arrival", "run.started", json!({}));
+    arrival["runId"] = json!("arrival");
+    bridge.request("event.append", json!({"events":[arrival]}));
+
+    let next = project
+        .command()
+        .args([
+            "status", "--list", "--json", "--after", "middle", "--limit", "2",
+        ])
+        .output()
+        .unwrap();
+    assert!(next.status.success());
+    let page: Value = serde_json::from_slice(&next.stdout).unwrap();
+    assert_eq!(page["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(page["runs"][0]["runId"], "old");
+    assert_eq!(page["nextCursor"], Value::Null);
+
+    let text = project
+        .command()
+        .args(["status", "--list", "--limit", "1"])
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains("run arrival: running"));
+    assert!(text.contains("more history: use --after \"arrival\""));
+
+    for args in [
+        vec!["status", "--list", "--after", "unknown"],
+        vec!["status", "--list", "--limit", "0"],
+        vec!["status", "--list", "--limit", "101"],
+        vec!["status", "--list", "--run", "old"],
+        vec!["status", "--after", "old"],
+    ] {
+        assert!(
+            !project
+                .command()
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+}
+
+#[test]
+fn empty_status_history_does_not_create_configuration_or_recording_files() {
+    let project = Project::new();
+    fs::remove_dir(project.0.join(".xper")).unwrap();
+    let output = project
+        .command()
+        .args(["status", "--list", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"runs":[],"nextCursor":null})
+    );
+    let output = project
+        .command()
+        .args(["status", "--list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "no runs in this project\n"
+    );
+    assert!(!project.0.join(".xper").exists());
+}
+
+#[test]
 fn bridge_records_arbitrary_workflow_facts_and_never_authorizes_transitions() {
     let project = Project::new();
     let mut bridge = Bridge::new(&project, "session-a");

@@ -2,15 +2,24 @@
 
 use std::io;
 
-use crate::infrastructure::profile_config;
+use crate::infrastructure::{configuration::LocalConfiguration, profile_config};
+use xper_application::use_cases::activate_profile;
 
 pub(crate) fn activate(name: &str) -> io::Result<bool> {
-    let root = std::env::current_dir()?;
-    let snapshot = profile_config::activate(&root, name)?;
-    println!(
-        "Active xper profile: {} (context {})",
-        snapshot.profile, snapshot.context
-    );
+    let mut repository = LocalConfiguration::current()?;
+    let snapshot =
+        activate_profile::execute(&mut repository, Some(name)).map_err(io::Error::other)?;
+    let context = snapshot
+        .effective
+        .as_ref()
+        .and_then(|value| value.get("profiles"))
+        .and_then(|value| value.get(name))
+        .and_then(|value| value.get("context"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            io::Error::other("activated profile no longer resolves; inspect configuration")
+        })?;
+    println!("Active xper profile: {} (context {})", name, context);
     Ok(true)
 }
 

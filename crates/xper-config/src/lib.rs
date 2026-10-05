@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+pub mod authoring;
 mod routing;
 pub use routing::{AvailableModel, resolve_profile, validate_catalog};
 
@@ -115,11 +116,11 @@ pub fn parse(source: &str) -> Result<Value, ConfigError> {
                 index + 1
             )));
         }
-        let content = line.trim();
+        let content = strip_comment(line).trim();
         if content.is_empty() || content.starts_with('#') || content == "---" {
             continue;
         }
-        if content.contains(&['&', '*', '!', '|', '>'][..]) {
+        if unsupported_syntax(content) {
             return Err(ConfigError(format!(
                 "line {}: unsupported YAML syntax",
                 index + 1
@@ -170,11 +171,10 @@ fn parse_block(
                 *cursor += 1;
             }
         } else {
-            let (key, rest) = content
-                .split_once(':')
+            let (key, rest) = split_mapping(content)
                 .ok_or_else(|| ConfigError(format!("line {number}: expected key: value")))?;
-            let key = unquote(key.trim());
-            if key.is_empty() || object.contains_key(key) {
+            let key = mapping_key(key.trim(), *number)?;
+            if key.is_empty() || object.contains_key(&key) {
                 return Err(ConfigError(format!(
                     "line {number}: empty or duplicate key"
                 )));
@@ -187,7 +187,7 @@ fn parse_block(
                 *cursor += 1;
                 value
             };
-            object.insert(key.to_owned(), value);
+            object.insert(key, value);
         }
     }
     Ok(if sequence {
@@ -209,19 +209,69 @@ fn nested(
     }
 }
 
-fn unquote(value: &str) -> &str {
+fn mapping_key(value: &str, number: usize) -> Result<String, ConfigError> {
+    if value.starts_with(['"', '\'']) {
+        return scalar(value, number)?
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| ConfigError(format!("line {number}: invalid mapping key")));
+    }
+    Ok(value.to_owned())
+}
+
+// Keep token decisions outside quoted strings. This is deliberately not a
+// general YAML parser: anchors, tags and block scalars remain unsupported.
+fn outside_quotes(value: &str) -> Vec<(usize, char)> {
+    let mut quote = None;
+    let mut result = Vec::new();
+    let mut characters = value.char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        if (quote == Some('"') && character == '\\')
+            || (quote == Some('\'')
+                && character == '\''
+                && characters.peek().is_some_and(|(_, next)| *next == '\''))
+        {
+            characters.next();
+        } else if quote == Some(character) {
+            quote = None;
+        } else if quote.is_none()
+            && matches!(character, '\'' | '"')
+            && value[..offset].chars().next_back().is_none_or(|previous| {
+                previous.is_whitespace() || matches!(previous, ':' | '[' | '{' | ',' | '-')
+            })
+        {
+            quote = Some(character);
+        } else if quote.is_none() {
+            result.push((offset, character));
+        }
+    }
+    result
+}
+
+fn strip_comment(value: &str) -> &str {
+    for (offset, character) in outside_quotes(value) {
+        if character == '#' && (offset == 0 || value[..offset].ends_with(char::is_whitespace)) {
+            return &value[..offset];
+        }
+    }
     value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-        .unwrap_or(value)
+}
+
+fn split_mapping(value: &str) -> Option<(&str, &str)> {
+    outside_quotes(value)
+        .into_iter()
+        .find(|(_, character)| *character == ':')
+        .map(|(offset, _)| (&value[..offset], &value[offset + 1..]))
+}
+
+fn unsupported_syntax(value: &str) -> bool {
+    outside_quotes(value)
+        .iter()
+        .any(|(_, character)| matches!(character, '&' | '*' | '!' | '|' | '>'))
 }
 
 fn scalar(value: &str, number: usize) -> Result<Value, ConfigError> {
-    let value = value
-        .split_once(" #")
-        .map_or(value, |(before, _)| before)
-        .trim();
+    let value = strip_comment(value).trim();
     if value.starts_with('"') {
         return serde_json::from_str(value)
             .map_err(|_| ConfigError(format!("line {number}: invalid quoted value")));

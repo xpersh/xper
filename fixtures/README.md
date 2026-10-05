@@ -3,6 +3,10 @@
 Language-neutral protocol traces and golden messages belong here. Fixtures
 must not contain credentials, prompts, or user source code.
 
+`adapter-inspection-v1.json` contains synthetic requests, responses, empty results,
+errors, and invalid messages for the Pi configuration inspection helper. Both
+schema checks and adapter tests consume it; its model IDs are placeholders.
+
 `protocol-v1.json` is read by Rust and TypeScript contract tests. Each case
 contains a `message`; invalid envelopes also specify the expected `errorCode`.
 

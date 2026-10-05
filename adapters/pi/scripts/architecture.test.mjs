@@ -1,7 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { checkArchitecture, moduleImports } from "./architecture.mjs";
+
 const check = (files) => checkArchitecture(new Map(Object.entries(files)));
+test("configuration inspection reads definitions and models without executing a workflow", () => {
+  assert.deepEqual(
+    check({
+      "inspection/roles.ts":
+        'import { knowledgeDefinition } from "../workflow/knowledge/definition.js";',
+      "inspection/cli.ts": 'import { listAvailableModels } from "../execution/models.js";',
+    }),
+    [],
+  );
+  for (const dependency of [
+    "workflow/controller",
+    "bridge/client",
+    "extension",
+    "execution/child",
+  ]) {
+    assert.match(
+      check({ "inspection/cli.ts": `export * from "../${dependency}.js";` }).join("\n"),
+      /must not start workflow or recording/,
+    );
+  }
+});
 test("all workflow subdirectories inherit purity rules", () => {
   assert.match(
     check({ "workflow/knowledge/gate.ts": 'import { readFile } from "node:fs/promises";' }).join(

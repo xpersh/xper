@@ -7,6 +7,9 @@ diagram. These rules also guide changes to the checkout's `.pi/` integration.
 ## Where changes belong
 
 - `src/extension.ts` composes dependencies and registers the extension.
+- `src/inspection/` exposes adapter-owned role descriptions and cached native Pi
+  model search to the configuration screen. Follow [its contract](docs/inspection.md).
+  Keep it independent of workflow execution, recording, and credential handling.
 - `src/pi/` translates Pi commands, tools, and hooks, presents results, and
   manages the session and observations.
 - `src/actions/` coordinates an integration action with injected dependencies.

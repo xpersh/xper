@@ -46,16 +46,6 @@ pub(crate) fn resolved_active(root: &Path) -> io::Result<Option<RoutingSnapshot>
         .transpose()
 }
 
-pub(crate) fn activate(root: &Path, name: &str) -> io::Result<RoutingSnapshot> {
-    let snapshot = resolve_named(root, Some(name))?;
-    let directory = root.join(".xper");
-    fs::create_dir_all(&directory)?;
-    let temporary = directory.join("active-profile.tmp");
-    fs::write(&temporary, format!("{}\n", snapshot.profile))?;
-    fs::rename(temporary, directory.join("active-profile"))?;
-    Ok(snapshot)
-}
-
 /// Resolve routing and opaque adapter settings from one effective snapshot.
 pub(crate) fn configuration(root: &Path) -> io::Result<(Option<RoutingSnapshot>, Value)> {
     let config = effective(root)?;

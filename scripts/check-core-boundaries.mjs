@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,10 +53,16 @@ if (domainPackage && domainPackage.dependencies.length > 0) {
 }
 
 const forbiddenHarnessDependency = /(^|[-_])(pi|opencode|claude|codex)([-_]|$)/i;
+const terminalUiDependency = /^(?:ratatui|crossterm)(?:$|[-_])/;
 for (const rustPackage of packages.values()) {
   for (const dependency of rustPackage.dependencies) {
     if (forbiddenHarnessDependency.test(dependency.name)) {
       failures.push(`${rustPackage.name} imports harness dependency ${dependency.name}`);
+    }
+    if (rustPackage.name !== "xper-cli" && terminalUiDependency.test(dependency.name)) {
+      failures.push(
+        `${rustPackage.name} must not depend on terminal UI library ${dependency.name}`,
+      );
     }
   }
 }
@@ -113,6 +119,15 @@ for (const sourceFile of filesWithExtension(join(workspaceRoot, "crates"), ".rs"
   path.includes("/src/"),
 )) {
   const source = readFileSync(sourceFile, "utf8");
+  const path = relative(workspaceRoot, sourceFile).replaceAll("\\", "/");
+  // Views, input events and terminal lifecycle are infrastructure. The CLI
+  // composition root may call that adapter, but must not handle its UI types.
+  if (
+    !path.startsWith("crates/xper-cli/src/infrastructure/") &&
+    /\b(?:ratatui(?:_\w+)?|crossterm(?:_\w+)?)\s*(?:::|;)/.test(source)
+  ) {
+    failures.push(`${path} must keep terminal UI dependencies in CLI infrastructure`);
+  }
   if (
     /\b(?:WorkflowPolicy|KnowledgeArtifact|ArtifactReader|is_allowed_transition|DefinitionContract|ExecutionPlan)\b|\bPhase::/.test(
       source,

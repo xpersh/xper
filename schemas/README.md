@@ -1,5 +1,11 @@
 # Public configuration and recording protocol
 
+The separate [adapter inspection contract](adapter-inspection-v1.schema.json)
+supports the configuration TUI's Pi role and model selectors. Its bounded JSONL
+helper and advisory metadata are described in the
+[Pi inspection guide](../adapters/pi/docs/inspection.md); it is not a Rust bridge
+method and carries no workflow commands or credentials.
+
 `protocol-v1.schema.json` defines the JSON-RPC envelope and method payloads.
 Every frame has `jsonrpc: "2.0"`, `protocolVersion: "1"`, and a string correlation
 ID (null only for uncorrelated errors). Frames are LF-terminated and limited to

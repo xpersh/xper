@@ -4,6 +4,10 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 const read = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"));
 const ajv = new Ajv2020({ strict: false, allErrors: true });
+const validateInspection = ajv.compile(read("schemas/adapter-inspection-v1.schema.json"));
+for (const fixture of read("fixtures/adapter-inspection-v1.json")) {
+  assert.equal(validateInspection(fixture.message), fixture.valid, fixture.name);
+}
 const protocol = read("schemas/protocol-v1.schema.json");
 const validateProtocol = ajv.compile(protocol);
 for (const fixture of read("fixtures/protocol-v1.json")) {

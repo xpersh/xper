@@ -8,7 +8,7 @@ use xper_application::{
     events::RecordedEvent,
     ports::{RunReader, RunRepository},
     read_models::{RunProjection, replay},
-    use_cases::{append_events, get_run_status},
+    use_cases::{append_events, get_run_status, list_runs},
 };
 
 fn event(id: &str, kind: &str, data: Value) -> RecordedEvent {
@@ -45,9 +45,53 @@ impl RunReader for Recorder {
         Ok(replay(&self.owner, &self.events))
     }
 
+    fn list_runs(
+        &self,
+        after: Option<&str>,
+        _: usize,
+    ) -> Result<xper_application::read_models::RunPage, Self::Error> {
+        Ok(xper_application::read_models::RunPage {
+            runs: self
+                .latest_run()?
+                .filter(|_| after.is_none())
+                .into_iter()
+                .collect(),
+            next_cursor: None,
+        })
+    }
+
     fn session_run(&self, session_id: &str) -> Result<Option<String>, Self::Error> {
         Ok((session_id == self.owner).then(|| "run".into()))
     }
+}
+
+#[test]
+fn history_queries_preserve_unknown_metrics_and_validate_page_inputs() {
+    let recorder = Recorder {
+        owner: "owner".into(),
+        events: vec![event("start", "run.started", json!({}))],
+        ..Recorder::default()
+    };
+    let page = list_runs::execute(&recorder, list_runs::Query::default()).unwrap();
+    assert_eq!(page.runs.len(), 1);
+    assert_eq!(page.runs[0].metrics.input_tokens, None);
+    assert_eq!(page.next_cursor, None);
+    for limit in [0, list_runs::MAX_LIMIT + 1] {
+        assert!(matches!(
+            list_runs::execute(&recorder, list_runs::Query { after: None, limit }),
+            Err(ApplicationError::InvalidInput(_))
+        ));
+    }
+    assert!(matches!(
+        list_runs::execute(
+            &recorder,
+            list_runs::Query {
+                after: Some(" "),
+                limit: 1
+            }
+        ),
+        Err(ApplicationError::InvalidInput(_))
+    ));
 }
 
 impl RunRepository for Recorder {

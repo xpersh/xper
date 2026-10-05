@@ -50,6 +50,7 @@ this slice is complete.
 | XP-013 | [Metrics and inspection](013-metrics-inspection.md) | Existing recording and XP-010; acceptance metrics need XP-012.2 | Single-run inspection, safe export, formulas, then comparison |
 | XP-014 | [Packaging and compatibility](014-packaging-compatibility.md) | XP-006, XP-010 | One installable target, compatibility, separate ports, then maintenance |
 | XP-015 | [Workflow visualization](015-workflow-visualization.md) | XP-010; observed history needs XP-013.2 | One graph, one observed path, then multiple instances |
+| XP-016 | [Terminal dashboard](016-terminal-dashboard.md) | Existing configuration, recording, and Pi routing | Scoped authoring, model picker, project history, and existing usage metrics |
 
 XP-003 and XP-004 can proceed in parallel after XP-002. XP-006 and XP-007 can
 also overlap once their contracts are stable.

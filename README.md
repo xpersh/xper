@@ -19,8 +19,9 @@ and makes the execution history available for inspection and metrics.
 > implementation rework or a Define/Design revisit while retaining the open run.
 > Debt and human decisions use an explicit Pi dialog, retaining the human resolution
 > and distinguishing acceptance with debt from unconditional acceptance.
-> Basic event and usage summaries are available; full metric comparison and a
-> dashboard remain future work.
+> A terminal dashboard provides scoped configuration authoring, project history,
+> and existing event/usage summaries. Advanced metric formulas and comparisons
+> remain future work.
 
 ## Goal
 
@@ -216,6 +217,28 @@ event in the central recording database.
 The `xper` CLI configures, diagnoses, and queries recorded information;
 interactive workflow execution stays inside Pi.
 
+Run `xper` without arguments in an interactive terminal to open the Ratatui
+dashboard. Home, Configuration, Status, and Metrics share keyboard navigation.
+The configuration wizard chooses a global, project, or private-local file;
+creates contexts and profiles; and selects exact models with Pi's native fuzzy
+search. Model selection is always manual. Review the proposed file before
+saving, and distinguish a configured default from workspace activation.
+Pi supplies the catalog and role guidance; credentials stay in Pi.
+
+```bash
+xper                         # interactive dashboard
+xper --ascii                 # dashboard with ASCII symbols
+xper --no-tui                # plain command help
+xper status --list --json    # paginated project history
+xper status --list --after <nextCursor> --limit 50
+```
+
+Without interactive stdin/stdout (or with `TERM=dumb`), bare `xper` shows help.
+Existing commands remain noninteractive. Build the Pi adapter before using
+the model picker. Missing Pi/catalog data leaves dashboard navigation and
+recorded status available. See the [dashboard guide](docs/terminal-dashboard.md)
+for editing, keyboard controls, scope precedence, and history limitations.
+
 `xper doctor` inspects Pi, Pi settings, the adapter, and configuration without
 modifying files or packages. `--json` returns checks with stable IDs and exits
 with a nonzero code if any fail:
@@ -258,6 +281,8 @@ References:
 The repository requires Rust `1.97.0`, Node.js `24`, and npm `11`. The Rust
 toolchain is pinned in `rust-toolchain.toml`, and JavaScript dependencies are
 locked in `package-lock.json`.
+On POSIX systems, terminal integration tests also use Python 3's standard-library
+PTY support. Tests use synthetic helpers and isolated home/workspace directories.
 
 A clean installation runs all checks as follows:
 

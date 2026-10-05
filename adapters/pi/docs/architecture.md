@@ -69,6 +69,7 @@ flowchart LR
 | Typed configuration, recording, and inspection operations | `src/bridge/xper-client.ts` |
 | Transport, correlation, handshake, envelopes, and errors | `src/bridge/client.ts`, `protocol.ts` |
 | Shared role prompts, child Pi process, models and artifact writing | `src/execution/roles.ts`, `child.ts`, `models.ts`, `artifacts.ts` |
+| Configuration-screen role metadata and cached native Pi model search | `src/inspection/` |
 | Shared Git inspection and host-run commands | `src/execution/workspace.ts`, `test-command.ts` |
 | Implementer proposal validation, execution and canonical result construction | `src/execution/implementation-proposal.ts`, `implementation.ts` |
 | Verifier proposal validation, execution and canonical review construction | `src/execution/verification-proposal.ts`, `verification.ts` |
@@ -77,6 +78,14 @@ Actions receive their effects explicitly and remain testable without Pi,
 processes, or files. Workflow rules live in the adapter's workflow modules,
 not in the bridge client or Rust. The client validates the public boundary;
 it does not hide workflow commands behind recording calls.
+
+The [configuration inspection helper](inspection.md) is an adapter-owned JSONL
+child process for the Rust TUI. It presents role metadata from pure definitions
+and a cached Pi model catalog with native fuzzy search. It imports no workflow
+controller or recording connection, makes no model calls, and never chooses a
+route. Its advisory role guidance does not change execution policy. Its lifetime
+belongs to the screen; normal Pi catalog initialization remains outside every
+workflow operation's awaited path.
 
 ## Explicit state machine
 

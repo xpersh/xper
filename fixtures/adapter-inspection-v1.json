@@ -1,0 +1,17 @@
+[
+  { "name": "describe roles", "valid": true, "message": { "schemaVersion": 1, "id": "describe", "method": "describe" } },
+  { "name": "load models", "valid": true, "message": { "schemaVersion": 1, "id": "models", "method": "models", "params": {} } },
+  { "name": "refresh models", "valid": true, "message": { "schemaVersion": 1, "id": "refresh", "method": "refresh" } },
+  { "name": "fuzzy provider search", "valid": true, "message": { "schemaVersion": 1, "id": "search", "method": "search", "params": { "query": "fst", "provider": "example" } } },
+  { "name": "empty search", "valid": true, "message": { "schemaVersion": 1, "id": "empty", "method": "search", "params": { "query": "" } } },
+  { "name": "role response", "valid": true, "message": { "schemaVersion": 1, "id": "describe", "result": { "adapter": "pi", "version": "0.1.0", "roles": [{ "id": "discovery.explorer", "label": "Discovery", "guidance": "A fast, inexpensive model is usually sufficient for gathering context." }] } } },
+  { "name": "models response", "valid": true, "message": { "schemaVersion": 1, "id": "models", "result": { "models": [{ "provider": "example", "model": "fast", "reasoning": false }, { "provider": "example", "model": "strong", "reasoning": true }] } } },
+  { "name": "no matches", "valid": true, "message": { "schemaVersion": 1, "id": "search", "result": { "models": [] } } },
+  { "name": "catalog timeout", "valid": true, "message": { "schemaVersion": 1, "id": "models", "error": { "code": "CATALOG_TIMEOUT", "message": "Pi model catalog timed out; check Pi and retry" } } },
+  { "name": "uncorrelated parse error", "valid": true, "message": { "schemaVersion": 1, "id": null, "error": { "code": "INVALID_REQUEST", "message": "Inspection requests must be valid JSON" } } },
+  { "name": "unsupported version", "valid": false, "message": { "schemaVersion": 2, "id": "invalid", "method": "models" } },
+  { "name": "unknown method", "valid": false, "message": { "schemaVersion": 1, "id": "invalid", "method": "run.start" } },
+  { "name": "missing query", "valid": false, "message": { "schemaVersion": 1, "id": "invalid", "method": "search", "params": {} } },
+  { "name": "blank provider", "valid": false, "message": { "schemaVersion": 1, "id": "invalid", "method": "search", "params": { "query": "", "provider": " " } } },
+  { "name": "credential payload rejected", "valid": false, "message": { "schemaVersion": 1, "id": "invalid", "result": { "models": [{ "provider": "example", "model": "fast", "reasoning": false, "apiKey": "synthetic-test-secret" }] } } }
+]

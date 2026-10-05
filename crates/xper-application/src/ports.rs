@@ -1,6 +1,10 @@
 //! Dependencies required by configuration and passive recording use cases.
 
-use crate::{events::RecordedEvent, installation::Check, read_models::RunProjection};
+use crate::{
+    events::RecordedEvent,
+    installation::Check,
+    read_models::{RunPage, RunProjection},
+};
 
 /// Read access to reported execution facts. Inspection requires no write access.
 pub trait RunReader {
@@ -15,6 +19,11 @@ pub trait RunReader {
 
     /// Reads the most recently created recording in this workspace.
     fn latest_run(&self) -> Result<Option<RunProjection>, Self::Error>;
+
+    /// Reads up to 100 runs in stable creation order, newest recordings first,
+    /// then legacy history. New arrivals must not shift an existing cursor.
+    /// The cursor is a previous page's continuation identity, never an offset.
+    fn list_runs(&self, after: Option<&str>, limit: usize) -> Result<RunPage, Self::Error>;
 
     /// Resolves the most recently created run belonging to a session.
     fn session_run(&self, session_id: &str) -> Result<Option<String>, Self::Error>;

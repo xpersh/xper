@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xper.dev/schemas/adapter-inspection-v1.schema.json",
+  "title": "Pi adapter configuration inspection v1",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+    "request": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["schemaVersion", "id", "method"],
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "id": { "$ref": "#/$defs/id" },
+            "method": { "enum": ["describe", "models", "refresh"] },
+            "params": { "type": "object", "maxProperties": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["schemaVersion", "id", "method", "params"],
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "id": { "$ref": "#/$defs/id" },
+            "method": { "const": "search" },
+            "params": {
+              "type": "object",
+              "required": ["query"],
+              "additionalProperties": false,
+              "properties": {
+                "query": { "type": "string" },
+                "provider": { "type": "string", "pattern": "\\S" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "role": {
+      "type": "object",
+      "required": ["id", "label", "guidance"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "\\S" },
+        "label": { "type": "string", "pattern": "\\S" },
+        "guidance": { "type": "string", "pattern": "\\S" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "model", "reasoning"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "pattern": "\\S" },
+        "model": { "type": "string", "pattern": "\\S" },
+        "reasoning": { "type": "boolean" }
+      }
+    },
+    "result": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["adapter", "version", "roles"],
+          "additionalProperties": false,
+          "properties": {
+            "adapter": { "const": "pi" },
+            "version": { "type": "string", "pattern": "\\S" },
+            "roles": { "type": "array", "items": { "$ref": "#/$defs/role" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["models"],
+          "additionalProperties": false,
+          "properties": {
+            "models": { "type": "array", "items": { "$ref": "#/$defs/model" } }
+          }
+        }
+      ]
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["schemaVersion", "id", "result"],
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "id": { "$ref": "#/$defs/id" },
+            "result": { "$ref": "#/$defs/result" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["schemaVersion", "id", "error"],
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "id": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+            "error": {
+              "type": "object",
+              "required": ["code", "message"],
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "enum": ["INVALID_REQUEST", "UNSUPPORTED_VERSION", "UNKNOWN_METHOD", "CATALOG_UNAVAILABLE", "CATALOG_TIMEOUT", "CATALOG_INVALID", "RESPONSE_TOO_LARGE"]
+                },
+                "message": { "type": "string", "pattern": "\\S" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

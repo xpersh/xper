@@ -1,8 +1,8 @@
 # xper core architecture
 
 The Rust core resolves configuration and records execution facts reported by
-adapters. It exposes terminal commands and a JSONL bridge. Workflow decisions
-belong to the adapter: Rust has no knowledge-phase state machine, artifact
+adapters. It exposes terminal commands, an interactive dashboard, and a JSONL
+bridge. Workflow decisions belong to the adapter: Rust has no knowledge-phase state machine, artifact
 gates, execution-plan validator, or budget admission policy.
 
 [RFC 0006](rfcs/0006-configuration-recording-and-adapter-workflows.md) explains
@@ -18,11 +18,12 @@ from proceeding; its response determines delivery status only.
 flowchart LR
     Adapter[Adapter workflow] --> Bridge[JSONL bridge]
     Terminal[CLI commands] --> Cases[Application operations]
+    Dashboard[Terminal dashboard infrastructure] --> Cases
     Bridge --> Cases
     Cases --> Domain[Generic primitives]
-    Cases --> Ports[Recording and installation ports]
+    Cases --> Ports[Recording, configuration and installation ports]
     SQLite[SQLite] -. implements .-> Ports
-    Local[Local installation] -. implements .-> Ports
+    Local[Local configuration and installation] -. implements .-> Ports
     Bridge --> Config[Configuration resolution]
     Terminal --> Config
 ```
@@ -34,24 +35,28 @@ flowchart LR
 | Process entry point | `crates/xper-cli/src/main.rs` | Arguments and exit code |
 | Bridge | `crates/xper-cli/src/bridge/` | Framing, handshake, sessions, RPC translation |
 | CLI presentation | `crates/xper-cli/src/status.rs`, `setup.rs` | Text/JSON presentation |
+| Terminal dashboard | `crates/xper-cli/src/infrastructure/tui/` | Ratatui views, input state, terminal lifecycle and background workers |
 | Composition | `crates/xper-cli/src/composition.rs` | Concrete configuration and recording resources |
-| Local adapters | `crates/xper-cli/src/infrastructure/` | Installation and active-profile files |
-| System operations | `crates/xper-application/src/use_cases/` | Append/query records and coordinate setup |
+| Local adapters | `crates/xper-cli/src/infrastructure/` | Installation, scoped configuration files and active-profile selection |
+| System operations | `crates/xper-application/src/use_cases/` | Append/query records, author configuration and coordinate setup |
 | Dependencies | `crates/xper-application/src/ports.rs` | Recording and installation guarantees |
+| Configuration authoring port | `crates/xper-application/src/configuration.rs` | Scope/document snapshots, edits, previews and repository guarantees |
 | Event envelope | `crates/xper-application/src/events.rs` | Versioned reported event |
 | Queryable state | `crates/xper-application/src/read_models/` | Generic projections and replay |
 | Generic primitives | `crates/xper-domain/src/` | Identifiers and timestamps |
 | Persistence | `crates/xper-store-sqlite/` | Atomic batches, deduplication, queries, and legacy inspection |
-| Configuration | `crates/xper-config/` | Scope merge, profiles, context policy, model resolution |
+| Configuration | `crates/xper-config/` | Scope merge, profiles, context policy, model resolution and source-preserving edits |
 
 ## Public operations
 
 | Entry point | Responsibility |
 | --- | --- |
+| Bare `xper` on an interactive terminal | Open configuration, recorded status and basic metrics in the dashboard |
 | `configuration.resolve` | Resolve routing against an optional model catalog; return adapter configuration |
 | `profile.inspect`, `xper profile` | Inspect a profile or resolve its routes; activation is a CLI operation |
 | `event.append` | Record a batch of adapter-reported events |
 | `run.status`, `xper status` | Read the recorded projection and timeline; the bridge also reports recording durability |
+| `xper status --list` | Read a bounded page of recorded runs using a stable history cursor |
 | `xper doctor` | Diagnose installation and configuration without modifying them |
 | `xper init` | Run preflight and prepare configuration while preserving existing files |
 
@@ -65,6 +70,62 @@ or command bus. The interface handles RPC envelopes, terminal arguments, and
 error presentation; application operations work with typed inputs and ports.
 An event's arbitrary JSON `data` is a reported value, not an RPC request for
 the application to execute.
+
+## Terminal dashboard and configuration authoring
+
+Views, terminal events, focus, navigation and draft state belong to CLI
+infrastructure. Ratatui and Crossterm are dependencies of `xper-cli` only;
+their types do not cross into configuration, application, domain, protocol or
+storage crates. Composition starts the adapter, while its background workers
+invoke the same application operations used by terminal commands. Opening the
+dashboard reads existing state; it does not initialize configuration or create
+an empty recording database.
+
+`ConfigurationRepository` supplies inspect, preview, save and profile activation
+operations with neutral values. Its snapshot contains the physical global,
+project and local documents, authoring values merged through each scope, final
+effective values, field origins, diagnostics and an opaque revision. A draft edits
+one physical scope without inheriting higher-scope overrides. Preview validates the edited
+scope with its inherited values and the final merged result; a higher scope
+cannot hide an invalid new configuration. Model-catalog checks apply to affected
+profiles when catalog information is available. Adapter configuration and unknown
+role identifiers remain data, never Rust workflow policy.
+
+`xper-config` parses and modifies the supported YAML subset. Scoped edits retain
+unrelated fields and source outside changed nodes, including comments. Replacing
+a node may format that subtree; JSON input remains supported. Unsupported YAML
+features continue to fail, while quoted model identifiers and comment markers
+are decoded correctly. The filesystem adapter writes a unique sibling temporary
+file, preserves existing permissions, checks revisions across every scope and
+activation immediately before replacement, and atomically renames the file.
+Revision checks detect changes made since inspection; they are optimistic checks,
+not locks respected by arbitrary external editors. Private local configuration is
+added to `.gitignore`. A malformed document requires explicit replacement; errors
+never echo credential values.
+
+The YAML `profile` default and `.xper/active-profile` selection are distinct.
+Activation takes precedence and can be cleared to return to the default.
+Changing either applies to preparation for future runs; it does not modify a
+running adapter's frozen selection. Initial dashboard setup uses installation
+preflight before its first save. Editing existing configuration remains available
+without Pi, and validation of the proposed document permits configuration repair.
+
+The model picker consumes a separate, versioned adapter inspection contract;
+it does not import a harness SDK into Rust. The Pi-owned helper describes role
+metadata, loads model metadata, and performs Pi's native fuzzy search. The
+dashboard manages that child process in a background worker with bounded I/O,
+correlated requests and cancellation of obsolete searches. Provider allowlists
+filter choices without managing authentication. The
+[inspection contract](../adapters/pi/docs/inspection.md) documents its schema,
+catalog lifecycle and Pi initialization behavior. This contract is independent
+of Rust's configuration/recording JSON-RPC bridge and does not change protocol v1.
+
+Status and metrics query the recorded projections through application use cases.
+`RunReader::list_runs` exposes bounded pages ordered by run creation, with run IDs
+as opaque continuation cursors; later observations do not reorder existing runs.
+The dashboard renders existing metrics and their completeness/provenance without
+interpreting Pi checkpoints or inferring workflow progress. Missing history and
+unavailable catalogs leave navigation and other independent views usable.
 
 ## Recording guarantees
 
@@ -143,8 +204,8 @@ responses do not mutate that active run.
 5. Update the protocol, fixtures, and consumers when the public contract changes.
 
 Add workflow rules to the adapter that owns them. Add generic metric formulas
-only when the reported inputs and completeness semantics are defined. A future
-UI should query facts and projections rather than reconstruct execution policy.
+only when the reported inputs and completeness semantics are defined. Future
+UI changes must query facts and projections rather than reconstruct execution policy.
 
 ## Core verification
 
@@ -158,8 +219,8 @@ cargo test --workspace --all-targets
 ```
 
 [check-core-boundaries.mjs](../scripts/check-core-boundaries.mjs) checks crate
-dependencies and protects the configuration/recording boundary against
-workflow-policy modules. Static checks complement responsibility review;
+dependencies, confines terminal libraries to CLI infrastructure, and protects the
+configuration/recording boundary against workflow-policy modules. Static checks complement responsibility review;
 they cannot establish the semantics of every event field.
 
 Application tests use explicit dependencies, while SQLite and bridge tests

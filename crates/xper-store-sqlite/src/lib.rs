@@ -16,8 +16,8 @@ use serde_json::Value;
 use xper_application::{
     events::RecordedEvent,
     ports::{RunReader, RunRepository},
-    read_models::{RunProjection, replay},
-    use_cases::append_events::validate_batch,
+    read_models::{RunPage, RunProjection, replay},
+    use_cases::{append_events::validate_batch, list_runs::MAX_LIMIT},
 };
 
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -352,31 +352,67 @@ impl SqliteEventStore {
 
     /// Reads the latest newly recorded run, falling back to legacy recordings.
     pub fn latest_run(&self) -> Result<Option<RunProjection>, StoreError> {
-        if table_exists(&self.connection, "recording_runs")? {
-            let run_id: Option<String> = self
-                .connection
-                .query_row(
-                    "SELECT run_id FROM recording_runs ORDER BY created_sequence DESC LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(run_id) = run_id {
-                return self.load_run(&run_id);
-            }
+        Ok(self.list_runs(None, 1)?.runs.into_iter().next())
+    }
+
+    /// Reads a bounded history page using stable creation identities. Producer
+    /// timestamps do not reorder history, and new arrivals do not shift cursors.
+    pub fn list_runs(&self, after: Option<&str>, limit: usize) -> Result<RunPage, StoreError> {
+        if !(1..=MAX_LIMIT).contains(&limit) {
+            return Err(StoreError::InvalidInput(
+                "history limit must be between 1 and 100",
+            ));
         }
-        let run_id: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT run_id FROM events GROUP BY run_id ORDER BY MIN(sequence) DESC LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        run_id
-            .map(|id| self.load_run(&id))
-            .transpose()
-            .map(Option::flatten)
+        let history = if table_exists(&self.connection, "recording_runs")? {
+            "SELECT run_id, created_sequence, 0 AS format FROM recording_runs \
+             UNION ALL SELECT run_id, MIN(sequence), 1 FROM events \
+             WHERE run_id NOT IN (SELECT run_id FROM recording_runs) GROUP BY run_id"
+        } else {
+            "SELECT run_id, MIN(sequence) AS created_sequence, 1 AS format \
+             FROM events GROUP BY run_id"
+        };
+        let cursor = after
+            .map(|id| {
+                self.connection.query_row(
+                    &format!("WITH history AS ({history}) SELECT format, created_sequence FROM history WHERE run_id = ?1"),
+                    [id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                ).optional()?.ok_or(StoreError::InvalidInput("unknown history cursor"))
+            })
+            .transpose()?;
+        let mut statement = self.connection.prepare(&format!(
+            "WITH history AS ({history}) SELECT run_id FROM history \
+                 WHERE ?1 IS NULL OR format > ?2 OR \
+                 (format = ?2 AND (created_sequence < ?3 OR \
+                 (created_sequence = ?3 AND run_id > ?1))) \
+                 ORDER BY format, created_sequence DESC, run_id LIMIT ?4"
+        ))?;
+        let mut ids = statement
+            .query_map(
+                params![
+                    after,
+                    cursor.map(|c| c.0),
+                    cursor.map(|c| c.1),
+                    (limit + 1) as i64
+                ],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_cursor = if ids.len() > limit {
+            ids.pop();
+            ids.last().cloned()
+        } else {
+            None
+        };
+        let runs = ids
+            .iter()
+            .map(|id| {
+                self.load_run(id)?.ok_or_else(|| {
+                    StoreError::InvalidHistory(format!("recorded run has no events: {id}"))
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(RunPage { runs, next_cursor })
     }
 
     /// Replays the authoritative log, without relying on a stored projection.
@@ -437,6 +473,10 @@ impl RunReader for SqliteEventStore {
 
     fn latest_run(&self) -> Result<Option<RunProjection>, Self::Error> {
         Self::latest_run(self)
+    }
+
+    fn list_runs(&self, after: Option<&str>, limit: usize) -> Result<RunPage, Self::Error> {
+        Self::list_runs(self, after, limit)
     }
 
     fn session_run(&self, session_id: &str) -> Result<Option<String>, Self::Error> {

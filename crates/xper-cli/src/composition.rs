@@ -6,6 +6,20 @@ use std::{
 };
 use xper_store_sqlite::SqliteEventStore;
 
+use crate::infrastructure::configuration::LocalConfiguration;
+
+pub(crate) fn dashboard(ascii: bool) -> io::Result<bool> {
+    crate::infrastructure::tui::run(std::env::current_dir()?, ascii)
+}
+
+pub(crate) fn configuration_repository(root: &Path) -> io::Result<LocalConfiguration> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::other("HOME is not set"))?;
+    let xdg = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    Ok(LocalConfiguration::new(root.to_path_buf(), home, xdg))
+}
+
 pub(crate) struct RecordingRuntime {
     pub(crate) store: SqliteEventStore,
     pub(crate) root: PathBuf,

@@ -51,6 +51,128 @@ fn event(id: &str, kind: &str, data: Value) -> RecordedEvent {
     }
 }
 
+fn append_run(store: &mut SqliteEventStore, id: &str, timestamp: u64) {
+    let mut fact = event(id, "run.started", json!({}));
+    fact.run_id = id.into();
+    fact.occurred_at = timestamp;
+    store.append_events("history-session", &[fact]).unwrap();
+}
+
+#[test]
+fn history_pages_use_creation_order_and_survive_new_arrivals_and_equal_timestamps() {
+    let mut store = SqliteEventStore::in_memory().unwrap();
+    assert_eq!(store.list_runs(None, 2).unwrap().runs, vec![]);
+    assert_eq!(store.list_runs(None, 2).unwrap().next_cursor, None);
+    append_run(&mut store, "old", 100);
+    append_run(&mut store, "middle", 100);
+    append_run(&mut store, "latest", 1);
+    let first = store.list_runs(None, 2).unwrap();
+    assert_eq!(
+        first
+            .runs
+            .iter()
+            .map(|run| run.run_id.as_str())
+            .collect::<Vec<_>>(),
+        ["latest", "middle"]
+    );
+    assert_eq!(first.next_cursor.as_deref(), Some("middle"));
+    assert_eq!(store.latest_run().unwrap(), Some(first.runs[0].clone()));
+
+    append_run(&mut store, "new-arrival", 0);
+    let mut update = event(
+        "late-event",
+        "run.status",
+        json!({"status":"still running"}),
+    );
+    update.run_id = "old".into();
+    update.occurred_at = 999;
+    store.append_events("history-session", &[update]).unwrap();
+    let last = store.list_runs(first.next_cursor.as_deref(), 2).unwrap();
+    assert_eq!(last.runs.len(), 1);
+    assert_eq!(last.runs[0].run_id, "old");
+    assert_eq!(last.runs[0].last_event_at, 999);
+    assert_eq!(last.next_cursor, None);
+    assert!(store.list_runs(Some("old"), 2).unwrap().runs.is_empty());
+    assert!(matches!(
+        store.list_runs(Some("absent"), 2),
+        Err(StoreError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.list_runs(None, 0),
+        Err(StoreError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.list_runs(None, 101),
+        Err(StoreError::InvalidInput(_))
+    ));
+}
+
+#[test]
+fn history_breaks_equal_creation_sequence_ties_by_run_identity() {
+    let directory = Directory::new();
+    let path = directory.database();
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    append_run(&mut store, "b", 100);
+    append_run(&mut store, "a", 100);
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE recording_runs SET created_sequence = 1", [])
+        .unwrap();
+    let first = store.list_runs(None, 1).unwrap();
+    assert_eq!(first.runs[0].run_id, "a");
+    let second = store.list_runs(first.next_cursor.as_deref(), 1).unwrap();
+    assert_eq!(second.runs[0].run_id, "b");
+    assert_eq!(second.next_cursor, None);
+}
+
+#[test]
+fn history_pages_include_legacy_after_recordings_without_mutating_inspected_files() {
+    let directory = Directory::new();
+    let path = directory.database();
+    create_legacy_database(&path);
+    let connection = Connection::open(&path).unwrap();
+    connection.execute("INSERT INTO events(event_id,run_id,event_type,schema_version,occurred_at_ms,event_json) VALUES('legacy-new','legacy-new','custom',1,1,'{}')", []).unwrap();
+    drop(connection);
+    let bytes = fs::read(&path).unwrap();
+    let inspected = SqliteEventStore::inspect(&path).unwrap();
+    let page = inspected.list_runs(None, 1).unwrap();
+    assert_eq!(page.runs[0].run_id, "legacy-new");
+    assert_eq!(page.runs[0].status, "legacy");
+    let next = inspected.list_runs(page.next_cursor.as_deref(), 1).unwrap();
+    assert_eq!(next.runs[0].run_id, "legacy-run");
+    assert_eq!(next.next_cursor, None);
+    drop(inspected);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+
+    let mut store = SqliteEventStore::open(&path).unwrap();
+    append_run(&mut store, "modern", 0);
+    drop(store);
+    let bytes = fs::read(&path).unwrap();
+    let inspected = SqliteEventStore::inspect(&path).unwrap();
+    let page = inspected.list_runs(None, 2).unwrap();
+    assert_eq!(
+        page.runs
+            .iter()
+            .map(|run| run.run_id.as_str())
+            .collect::<Vec<_>>(),
+        ["modern", "legacy-new"]
+    );
+    assert_eq!(page.runs[1].status, "legacy");
+    let next = inspected.list_runs(page.next_cursor.as_deref(), 2).unwrap();
+    assert_eq!(next.runs[0].run_id, "legacy-run");
+    assert_eq!(next.next_cursor, None);
+    drop(inspected);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+fn inspecting_a_missing_history_database_never_creates_it() {
+    let directory = Directory::new();
+    let path = directory.database();
+    assert!(SqliteEventStore::inspect(&path).is_err());
+    assert!(!path.exists());
+}
+
 #[test]
 fn accepts_arbitrary_transitions_and_checkpoints_without_creating_workflow_facts() {
     let mut store = SqliteEventStore::in_memory().unwrap();

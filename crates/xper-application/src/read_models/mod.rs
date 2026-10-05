@@ -7,6 +7,16 @@ use serde::{Deserialize, Serialize};
 mod replay;
 pub use replay::replay;
 
+/// A bounded page of recorded runs, newest recordings before legacy history.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPage {
+    /// Recorded projections in stable creation order, newest first.
+    pub runs: Vec<RunProjection>,
+    /// Opaque continuation identity; absent when this is the final page.
+    pub next_cursor: Option<String>,
+}
+
 /// Generic measurements derived from reported facts, with versioned formulas.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

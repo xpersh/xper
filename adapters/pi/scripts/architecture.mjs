@@ -123,6 +123,18 @@ export function checkArchitecture(sources) {
       failures.push(`${adapterPath} must not await telemetry delivery`);
     }
     for (const { specifier, typeOnly, target } of imports) {
+      if (
+        adapterPath.startsWith("inspection/") &&
+        !typeOnly &&
+        target &&
+        !target.startsWith("inspection/") &&
+        target !== "execution/models.ts" &&
+        !/^workflow\/(knowledge|implementation|verification|judgment)\/definition\.ts$/.test(target)
+      ) {
+        failures.push(
+          `${adapterPath} may inspect definitions and models, but must not start workflow or recording services`,
+        );
+      }
       if (adapterPath.startsWith("workflow/") && specifier?.endsWith("/bridge/client.js")) {
         failures.push(`${adapterPath} must not depend on the bridge process`);
       }

@@ -206,6 +206,7 @@ fn activating_an_inventory_profile_reviews_a_yaml_selection_in_the_chosen_scope(
             Effect::Preview {
                 scope: selected,
                 changes,
+                integrate_global,
                 ..
             },
         ] = effects.as_slice()
@@ -213,6 +214,7 @@ fn activating_an_inventory_profile_reviews_a_yaml_selection_in_the_chosen_scope(
             panic!("Scoped activation must only request a preview");
         };
         assert_eq!(*selected, scope);
+        assert_eq!(*integrate_global, scope == Scope::Global);
         assert_eq!(
             changes,
             &[ConfigurationChange::Set {
@@ -345,11 +347,16 @@ fn deleting_a_referenced_definition_requires_a_successful_preview_before_saving(
                 snapshot,
                 scope,
                 changes,
+                integrate_global,
             },
         ] = effects.as_slice()
         else {
             panic!("Deletion must be reviewed before writing");
         };
+        assert!(
+            !integrate_global,
+            "Deletion must not register Pi integration"
+        );
         assert!(
             changes
                 .iter()
@@ -575,16 +582,16 @@ fn configuration_reload_blocks_preview_and_rejects_stale_preview_results() {
         changed: true,
         diagnostics: vec![],
     };
-    apply_event(&mut app, Event::Preview(Ok(preview.clone())));
+    apply_event(&mut app, Event::Preview(Ok((preview.clone(), None))));
     assert!(app.editor.preview.is_none());
     assert!(app.handle(key(KeyCode::Enter)).is_empty());
     preview.revision = 2;
     let reviewed_changes = preview.changes.clone();
     preview.changes.clear();
-    apply_event(&mut app, Event::Preview(Ok(preview.clone())));
+    apply_event(&mut app, Event::Preview(Ok((preview.clone(), None))));
     assert!(app.editor.preview.is_none());
     preview.changes = reviewed_changes;
-    apply_event(&mut app, Event::Preview(Ok(preview)));
+    apply_event(&mut app, Event::Preview(Ok((preview, None))));
     assert!(
         matches!(app.handle(key(KeyCode::Enter)).as_slice(), [Effect::Save { snapshot, .. }] if snapshot.revision == 2)
     );

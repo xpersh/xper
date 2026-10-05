@@ -15,6 +15,7 @@ use super::{
     catalog::{Model, Role},
     inventory,
 };
+use crate::infrastructure::pi_integration::GlobalIntegration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Section {
@@ -112,11 +113,13 @@ pub(super) enum Effect {
         snapshot: Box<ConfigurationSnapshot>,
         scope: Scope,
         changes: Vec<ConfigurationChange>,
+        integrate_global: bool,
     },
     Save {
         snapshot: Box<ConfigurationSnapshot>,
         scope: Scope,
         changes: Vec<ConfigurationChange>,
+        integration: Option<GlobalIntegration>,
     },
     Activate(Option<String>),
 }
@@ -140,6 +143,7 @@ pub(super) struct Editor {
     pub naming: Option<NameKind>,
     pub name: String,
     pub preview: Option<ConfigurationPreview>,
+    pub integration: Option<GlobalIntegration>,
     pub preview_scroll: u16,
     pub review_return: Stage,
 }
@@ -165,6 +169,7 @@ impl Default for Editor {
             naming: None,
             name: String::new(),
             preview: None,
+            integration: None,
             preview_scroll: 0,
             review_return: Stage::Roles,
         }
@@ -350,6 +355,7 @@ impl App {
             .changes
             .push(ConfigurationChange::Set { path, value });
         self.editor.preview = None;
+        self.editor.integration = None;
     }
     fn role_path(&self, id: &str, field: &str) -> Vec<String> {
         vec![
@@ -1030,11 +1036,19 @@ impl App {
                     && preview.scope == self.editor.scope
                     && preview.changes == self.editor.changes
                 {
+                    if self.editor.action == Action::ActivateProfile
+                        && self.editor.scope == Scope::Global
+                        && self.editor.integration.is_none()
+                    {
+                        self.notice = "Review the global Pi integration before saving.".into();
+                        return vec![];
+                    }
                     self.busy = true;
                     return vec![Effect::Save {
                         snapshot: Box::new(snapshot.clone()),
                         scope: self.editor.scope,
                         changes: self.editor.changes.clone(),
+                        integration: self.editor.integration.clone(),
                     }];
                 }
             }
@@ -1131,6 +1145,8 @@ impl App {
                 snapshot: Box::new(snapshot.clone()),
                 scope: self.editor.scope,
                 changes: self.editor.changes.clone(),
+                integrate_global: self.editor.action == Action::ActivateProfile
+                    && self.editor.scope == Scope::Global,
             }]
         } else {
             vec![]

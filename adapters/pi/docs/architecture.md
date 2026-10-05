@@ -79,6 +79,13 @@ processes, or files. Workflow rules live in the adapter's workflow modules,
 not in the bridge client or Rust. The client validates the public boundary;
 it does not hide workflow commands behind recording calls.
 
+Global and project loaders can both reference the adapter. The first extension
+factory loaded into a Pi runtime registers the commands, tools, and hooks;
+subsequent factories use a synchronous claim on Pi's shared event bus and return.
+Pi removes that subscription when invalidating its runtime during reload, and a
+failed registration releases its claim immediately. Independent Pi event buses
+remain independent. This registration guard starts no processes or workflow work.
+
 The [configuration inspection helper](inspection.md) is an adapter-owned JSONL
 child process for the Rust TUI. It presents role metadata from pure definitions
 and a cached Pi model catalog with native fuzzy search. It imports no workflow

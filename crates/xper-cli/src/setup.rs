@@ -35,15 +35,15 @@ fn report(checks: &[Check], json_output: bool) {
     }
 }
 
-pub(crate) fn doctor(json_output: bool) -> io::Result<bool> {
-    let installation = LocalInstallation::current(false)?;
+pub(crate) fn doctor(json_output: bool, global: bool) -> io::Result<bool> {
+    let installation = LocalInstallation::current(global)?;
     let outcome = inspect_installation::execute(&installation);
     report(&outcome.checks, json_output);
     Ok(outcome.ready)
 }
 
 pub(crate) fn init(global: bool) -> io::Result<bool> {
-    let mut installation = LocalInstallation::current(global)?;
+    let mut installation = LocalInstallation::initialization(global)?;
     let outcome = initialize_workspace::execute(&mut installation, |checks| report(checks, false))
         .map_err(io::Error::other)?;
     match outcome {

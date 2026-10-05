@@ -38,6 +38,9 @@ enum Commands {
     },
     /// Inspect the installation without modifying it.
     Doctor {
+        /// Inspect the user-wide Pi integration instead of this project.
+        #[arg(long)]
+        global: bool,
         /// Emit machine-readable JSON checks.
         #[arg(long)]
         json: bool,
@@ -104,7 +107,7 @@ fn main() -> ExitCode {
         None => composition::dashboard(cli.ascii),
         Some(Commands::Bridge { stdio: true }) => bridge::run().map(|()| true),
         Some(Commands::Bridge { stdio: false }) => unreachable!("clap requires --stdio"),
-        Some(Commands::Doctor { json }) => setup::doctor(json),
+        Some(Commands::Doctor { json, global }) => setup::doctor(json, global),
         Some(Commands::Init { global, yes: _ }) => setup::init(global),
         Some(Commands::Status {
             json,

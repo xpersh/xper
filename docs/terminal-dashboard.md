@@ -63,11 +63,20 @@ resolved profile in the background; check preparation before starting a run.
 Existing runs retain their frozen model selections. Activating a profile changes
 xper's routing selection, not Pi's authentication or the current chat model.
 
-Scoped activation does not install or register the Pi extension. To consume a
-global selection outside this checkout, Pi must load the xper extension there
-and be able to launch the xper bridge. The checkout's `.pi/extensions/xper.ts`
-only supplies the local development integration. Automatic integration setup
-for the selected scope remains pending.
+Global activation also reviews and registers Pi's global extension, linking the
+built adapter and current xper executable by absolute path. Review shows these
+paths before any write. `xper init --global` performs the same registration without
+changing an existing profile selection; `xper doctor --global` checks it.
+Pi settings and unrelated extensions are preserved. Custom or externally changed
+registration files are never overwritten. The linked build must remain available;
+rerun initialization from a new built checkout if those paths change.
+
+Open Pi in another project and check `/xper status`: preparation should report
+the resolved profile. The ordinary Pi model selector remains independent. Global
+and project xper loaders share one registration per Pi runtime. Project/Local
+activation continues to select the YAML scope and does not install another loader;
+it can use the global integration or the checkout's existing extension. Removing
+a scoped selection leaves the integration registered.
 
 ### Create or edit a profile
 
@@ -124,6 +133,10 @@ permissions and replace the destination atomically. A conflict retains the draft
 reload and review again. Revision checks are optimistic, not a lock shared with
 external editors. Private-local configuration is added to `.gitignore`; that
 ignore entry can remain if a later file-save step fails. Credentials are rejected.
+Global activation validates both proposed changes before writing, then registers
+Pi before saving the selection. These files do not share a transaction: if the
+configuration write subsequently fails, the error reports that the integration
+remains prepared and the profile was not saved. Reload and review to retry.
 
 ## Recorded history and metrics
 

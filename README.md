@@ -128,6 +128,20 @@ pi
 The Rust binary enables central recording and configuration preparation. Pi's
 local workflow remains usable when that binary is unavailable.
 
+To use this build from Pi in other projects, register the global integration:
+
+```bash
+./target/debug/xper init --global
+./target/debug/xper doctor --global
+```
+
+This adds a managed extension in `${PI_CODING_AGENT_DIR:-~/.pi/agent}/extensions/xper.ts`
+that links this built adapter and the executable by absolute path. Pi settings,
+credentials and unrelated extensions remain intact. Keep the linked checkout
+and build available; rerun initialization from a new built checkout if it moves.
+This is development integration, not a standalone distribution. In another
+project, open a new Pi session and use `/xper status` to inspect preparation.
+
 Start a workflow in the Pi session:
 
 ```text
@@ -247,6 +261,7 @@ with a nonzero code if any fail:
 ```bash
 xper doctor
 xper doctor --json
+xper doctor --global --json
 ```
 
 Installation checks accept Pi `0.85.1` through `0.87.1`, both inclusive,
@@ -255,11 +270,12 @@ versions are accepted; prerelease and build suffixes are rejected. The same
 Pi version check applies to `xper init` preflight.
 
 `xper init` prepares configuration in the current project; `xper init --global`
-prepares the user scope. It writes only after preflight passes, preserves valid
-existing configuration, and is idempotent. It does not install agent packages,
-create a primary-agent definition, or change user-managed Pi packages and
-settings. If Pi or the adapter is missing, diagnostics explain how to prepare
-it.
+also registers the built adapter and bridge for all Pi projects. It writes only
+after preflight passes, preserves valid existing configuration, and is idempotent.
+It does not install packages or change user-managed Pi settings. Missing or
+incompatible builds block global registration; a custom `extensions/xper.ts`
+is preserved and reported. `doctor --global` checks the registered adapter and
+executable independently of this project's configuration.
 
 Configuration is merged by key in this order: defaults, global
 (`${XDG_CONFIG_HOME:-~/.config}/xper/config.yaml`), project

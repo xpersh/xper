@@ -57,8 +57,8 @@ flowchart LR
 | `event.append` | Record a batch of adapter-reported events |
 | `run.status`, `xper status` | Read the recorded projection and timeline; the bridge also reports recording durability |
 | `xper status --list` | Read a bounded page of recorded runs using a stable history cursor |
-| `xper doctor` | Diagnose installation and configuration without modifying them |
-| `xper init` | Run preflight and prepare configuration while preserving existing files |
+| `xper doctor [--global]` | Diagnose installation and configuration without modifying them |
+| `xper init [--global]` | Run preflight and prepare configuration; global initialization also registers Pi integration |
 
 `run.start`, `assignment.start`, `attempt.finish`, and `run.advance` are no
 longer core operations. Their decisions are local Pi workflow operations.
@@ -119,6 +119,18 @@ preparation for future runs; it does not modify a running adapter's frozen
 selection. Initial dashboard setup uses installation preflight before its first
 save. Editing existing configuration remains available without Pi, and validation
 of the proposed document permits configuration repair.
+
+Global activation additionally prepares a reviewed `GlobalIntegration` through
+the existing installation port/use case. Its CLI infrastructure adapter registers
+a managed Pi extension referencing the existing built adapter and current executable
+by absolute path, without rewriting Pi settings. `init --global` shares that
+preparation. Doctor and the catalog helper reuse managed-registration discovery;
+an incompatible checkout remains an explicit error. The registration embeds an
+internal versioned descriptor, validates its generated body and linked targets,
+and rejects custom files, symlinks and optimistic revision conflicts. Global
+registration and the YAML selection are separate atomic replacements; a failure
+of the second reports the already prepared integration. This links a development
+build and does not implement the standalone distribution in XP-014.
 
 The model picker consumes a separate, versioned adapter inspection contract;
 it does not import a harness SDK into Rust. The Pi-owned helper describes role

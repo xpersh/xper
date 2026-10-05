@@ -42,15 +42,41 @@ impl Workspace {
         Self { root, bin }
     }
     fn command(&self, args: &[&str]) -> Output {
+        self.command_at(&self.root, args)
+    }
+    fn command_at(&self, directory: &Path, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_xper"))
             .args(args)
-            .current_dir(&self.root)
+            .current_dir(directory)
             .env("HOME", self.root.join("home"))
             .env("PI_CODING_AGENT_DIR", self.root.join("home/.pi/agent"))
             .env("XDG_CONFIG_HOME", self.root.join("home/.config"))
             .env("PATH", &self.bin)
             .output()
             .unwrap()
+    }
+    fn built_adapter(&self) -> PathBuf {
+        let adapter = self.root.join("adapters/pi");
+        fs::create_dir_all(adapter.join("dist/inspection")).unwrap();
+        fs::write(
+            adapter.join("package.json"),
+            r#"{"name":"@xper/adapter-pi","version":"0.1.0","type":"module"}"#,
+        )
+        .unwrap();
+        fs::write(
+            adapter.join("dist/extension.js"),
+            "export function createXperExtension() { return () => {}; }\n",
+        )
+        .unwrap();
+        fs::write(
+            adapter.join("dist/inspection/cli.js"),
+            "// Synthetic inspection helper; setup never executes it.\n",
+        )
+        .unwrap();
+        adapter
+    }
+    fn global_extension(&self) -> PathBuf {
+        self.root.join("home/.pi/agent/extensions/xper.ts")
     }
 }
 impl Drop for Workspace {
@@ -99,6 +125,36 @@ fn snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     walk(root, &mut result);
     result.sort_by(|a, b| a.0.cmp(&b.0));
     result
+}
+
+#[test]
+fn global_init_can_relink_a_moved_build_without_changing_configuration() {
+    let workspace = Workspace::fixture("valid", Some("0.87.1"));
+    workspace.built_adapter();
+    assert!(workspace.command(&["init", "--global"]).status.success());
+    let config = workspace.root.join("home/.config/xper/config.yaml");
+    let before = fs::read(&config).unwrap();
+    let destination = workspace.root.join("moved-checkout");
+    fs::create_dir_all(&destination).unwrap();
+    fs::rename(
+        workspace.root.join("adapters"),
+        destination.join("adapters"),
+    )
+    .unwrap();
+    assert!(!workspace.command(&["doctor", "--global"]).status.success());
+    let output = workspace.command_at(&destination, &["init", "--global"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read(&config).unwrap(), before);
+    assert!(workspace.command(&["doctor", "--global"]).status.success());
+    assert!(
+        fs::read_to_string(workspace.global_extension())
+            .unwrap()
+            .contains("moved-checkout")
+    );
 }
 
 #[test]
@@ -307,13 +363,28 @@ fn mismatched_adapter_version_still_blocks_init_without_writes() {
 }
 
 #[test]
-fn global_init_writes_only_global_configuration_and_is_idempotent() {
+fn global_init_registers_the_built_adapter_and_preserves_pi_files_idempotently() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
+    let adapter = workspace.built_adapter();
+    let pi_home = workspace.root.join("home/.pi/agent");
+    fs::create_dir_all(pi_home.join("extensions")).unwrap();
+    fs::write(
+        pi_home.join("settings.json"),
+        "{\n  \"packages\": [\"npm:example-package@1.0.0\"],\n  \"theme\": \"light\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        pi_home.join("extensions/custom.ts"),
+        "export default function custom() {}\n",
+    )
+    .unwrap();
+    let global_pi_before = snapshot(&pi_home);
     let pi_before = snapshot(&workspace.root.join(".pi"));
     let first = workspace.command(&["init", "--global"]);
     assert!(
         first.status.success(),
-        "{}",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&first.stdout),
         String::from_utf8_lossy(&first.stderr)
     );
     assert!(
@@ -322,7 +393,41 @@ fn global_init_writes_only_global_configuration_and_is_idempotent() {
             .join("home/.config/xper/config.yaml")
             .is_file()
     );
-    assert!(!workspace.root.join("home/.pi").exists());
+    let extension = workspace.global_extension();
+    let source = fs::read_to_string(&extension).unwrap();
+    let registration: Value = serde_json::from_str(
+        source
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("// xper-managed-integration-v1 ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        registration["adapterRoot"],
+        fs::canonicalize(&adapter).unwrap().to_str().unwrap()
+    );
+    assert_eq!(
+        registration["bridge"],
+        fs::canonicalize(env!("CARGO_BIN_EXE_xper"))
+            .unwrap()
+            .to_str()
+            .unwrap()
+    );
+    assert!(
+        source.contains(
+            fs::canonicalize(adapter.join("dist/extension.js"))
+                .unwrap()
+                .to_str()
+                .unwrap()
+        ),
+        "{source}"
+    );
+    let mut global_pi_expected = global_pi_before;
+    global_pi_expected.push((extension, source.into_bytes()));
+    global_pi_expected.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(snapshot(&pi_home), global_pi_expected);
     assert!(!workspace.root.join(".xper/config.yaml").exists());
     assert!(!workspace.root.join(".gitignore").exists());
     assert_eq!(snapshot(&workspace.root.join(".pi")), pi_before);
@@ -330,6 +435,138 @@ fn global_init_writes_only_global_configuration_and_is_idempotent() {
     let second = workspace.command(&["init", "--yes", "--global"]);
     assert!(second.status.success());
     assert_eq!(snapshot(&workspace.root), before);
+}
+
+#[test]
+fn global_doctor_reports_missing_registration_without_writing_it() {
+    let workspace = Workspace::fixture("partial", Some("0.85.1"));
+    workspace.built_adapter();
+    let before = snapshot(&workspace.root);
+    let output = workspace.command(&["doctor", "--global", "--json"]);
+    let json = report(&output);
+    assert!(output.status.success(), "{json}");
+    assert_eq!(status(&json, "ADAPTER").as_deref(), Some("WARN"), "{json}");
+    assert!(
+        json["checks"].as_array().unwrap().iter().any(|check| {
+            check["id"] == "ADAPTER"
+                && check["action"]
+                    .as_str()
+                    .is_some_and(|a| a.contains("init --global"))
+        }),
+        "{json}"
+    );
+    assert!(!workspace.global_extension().exists());
+    assert!(!workspace.root.join("home/.pi").exists());
+    assert!(
+        !workspace
+            .root
+            .join("home/.config/xper/config.yaml")
+            .exists()
+    );
+    assert_eq!(snapshot(&workspace.root), before);
+}
+
+#[test]
+fn global_doctor_detects_a_broken_registered_adapter_without_writes() {
+    let workspace = Workspace::fixture("partial", Some("0.85.1"));
+    let adapter = workspace.built_adapter();
+    let initialized = workspace.command(&["init", "--global"]);
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stdout)
+    );
+    fs::remove_file(adapter.join("dist/extension.js")).unwrap();
+    let before = snapshot(&workspace.root);
+    let output = workspace.command(&["doctor", "--global", "--json"]);
+    let json = report(&output);
+    assert!(!output.status.success(), "{json}");
+    assert_eq!(status(&json, "ADAPTER").as_deref(), Some("FAIL"), "{json}");
+    assert_eq!(snapshot(&workspace.root), before);
+}
+
+#[test]
+fn global_init_rejects_incompatible_or_unbuilt_adapters_before_writing() {
+    for broken in ["version", "extension", "inspection"] {
+        let workspace = Workspace::fixture("partial", Some("0.85.1"));
+        let adapter = workspace.built_adapter();
+        match broken {
+            "version" => fs::write(
+                adapter.join("package.json"),
+                r#"{"name":"@xper/adapter-pi","version":"0.0.1","type":"module"}"#,
+            )
+            .unwrap(),
+            "extension" => fs::remove_file(adapter.join("dist/extension.js")).unwrap(),
+            "inspection" => fs::remove_file(adapter.join("dist/inspection/cli.js")).unwrap(),
+            _ => unreachable!(),
+        }
+        let before = snapshot(&workspace.root);
+        let output = workspace.command(&["init", "--global", "--yes"]);
+        assert!(
+            !output.status.success(),
+            "{broken}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(!workspace.global_extension().exists(), "{broken}");
+        assert!(!workspace.root.join("home/.pi").exists(), "{broken}");
+        assert!(!workspace.root.join("home/.config").exists(), "{broken}");
+        assert!(
+            !workspace
+                .root
+                .join("home/.config/xper/config.yaml")
+                .exists()
+        );
+        assert_eq!(snapshot(&workspace.root), before, "{broken}");
+    }
+}
+
+#[test]
+fn global_init_preserves_an_unmanaged_extension_and_fails_without_writes() {
+    let workspace = Workspace::fixture("partial", Some("0.85.1"));
+    workspace.built_adapter();
+    let extension = workspace.global_extension();
+    fs::create_dir_all(extension.parent().unwrap()).unwrap();
+    fs::write(&extension, "export default function userExtension() {}\n").unwrap();
+    let before = snapshot(&workspace.root);
+    let doctor = workspace.command(&["doctor", "--global", "--json"]);
+    let json = report(&doctor);
+    assert!(!doctor.status.success(), "{json}");
+    assert_eq!(status(&json, "ADAPTER").as_deref(), Some("FAIL"), "{json}");
+    assert!(!workspace.command(&["init", "--global"]).status.success());
+    assert!(
+        !workspace
+            .root
+            .join("home/.config/xper/config.yaml")
+            .exists()
+    );
+    assert_eq!(snapshot(&workspace.root), before);
+}
+
+#[test]
+fn doctor_uses_the_managed_global_registration_from_another_project() {
+    let workspace = Workspace::fixture("partial", Some("0.85.1"));
+    workspace.built_adapter();
+    let initialized = workspace.command(&["init", "--global"]);
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stdout)
+    );
+    let other_project = workspace.root.join("other-project");
+    fs::create_dir(&other_project).unwrap();
+    let before = snapshot(&workspace.root);
+    for args in [
+        vec!["doctor", "--json"],
+        vec!["doctor", "--global", "--json"],
+    ] {
+        let output = workspace.command_at(&other_project, &args);
+        let json = report(&output);
+        assert!(output.status.success(), "{json}");
+        assert_eq!(status(&json, "ADAPTER").as_deref(), Some("PASS"), "{json}");
+        assert_eq!(status(&json, "CONFIG").as_deref(), Some("PASS"), "{json}");
+        assert_eq!(snapshot(&workspace.root), before);
+        assert!(snapshot(&other_project).is_empty());
+    }
 }
 
 #[test]
@@ -375,6 +612,7 @@ fn init_does_not_create_pi_settings_agents_or_packages() {
 #[test]
 fn global_agent_packages_and_existing_backups_are_preserved() {
     let workspace = Workspace::fixture("valid", Some("0.85.1"));
+    workspace.built_adapter();
     let pi_home = workspace.root.join("home/.pi/agent");
     fs::create_dir_all(pi_home.join("agents")).unwrap();
     fs::write(
@@ -397,12 +635,17 @@ fn global_agent_packages_and_existing_backups_are_preserved() {
             .status
             .success()
     );
-    assert_eq!(snapshot(&pi_home), pi_before);
+    let mut pi_expected = pi_before;
+    let extension = workspace.global_extension();
+    pi_expected.push((extension.clone(), fs::read(extension).unwrap()));
+    pi_expected.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(snapshot(&pi_home), pi_expected);
 }
 
 #[test]
 fn global_init_ignores_invalid_project_config() {
     let workspace = Workspace::fixture("partial", Some("0.85.1"));
+    workspace.built_adapter();
     let project_config = workspace.root.join(".xper/config.yaml");
     fs::create_dir_all(project_config.parent().unwrap()).unwrap();
     fs::write(&project_config, "api_key: forbidden-value\n").unwrap();
@@ -416,6 +659,20 @@ fn global_init_ignores_invalid_project_config() {
         fs::read_to_string(project_config).unwrap(),
         "api_key: forbidden-value\n"
     );
+    let before = snapshot(&workspace.root);
+    let global_doctor = workspace.command(&["doctor", "--global", "--json"]);
+    assert!(
+        global_doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&global_doctor.stdout)
+    );
+    let project_doctor = workspace.command(&["doctor", "--json"]);
+    assert!(!project_doctor.status.success());
+    assert_eq!(
+        status(&report(&project_doctor), "CONFIG").as_deref(),
+        Some("FAIL")
+    );
+    assert_eq!(snapshot(&workspace.root), before);
 }
 
 #[test]

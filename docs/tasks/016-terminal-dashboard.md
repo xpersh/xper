@@ -3,7 +3,7 @@
 - Status: `review`
 - Milestone: M4
 - Depends on: existing configuration, recording, and Pi routing
-- Scope: the requested four-slice dashboard plus the requested profile-management follow-up
+- Scope: the requested dashboard, profile-management follow-up, and global Pi integration
 
 ## Outcome and boundary
 
@@ -31,6 +31,21 @@ and browses recorded status and usage from the same dashboard.
 | XP-016.3 | `review` | A scoped configuration is previewed, validated, and explicitly saved from a complete profile wizard. |
 | XP-016.4 | `review` | Existing configuration is edited without flattening inheritance; activation, conflicts, and unrelated content are preserved. |
 | XP-016.5 | `review` | Profiles opens directly to an inventory with source scopes and visible actions; Settings manages contexts independently; activation selects Global, Project or Local explicitly. |
+| XP-016.6 | `review` | Global activation prepares Pi's global integration using the existing built adapter and bridge; another project can load the selected profile. |
+
+### XP-016.6: Global Pi integration
+
+Before: a global profile resolves outside the checkout, but Pi has no extension
+registered there and cannot find the development bridge. After: `init --global`
+or a reviewed global activation links the built adapter and current executable
+into Pi's global extension directory. Existing Pi settings remain intact; the
+checkout and its build remain the installation source until packaged distribution.
+
+Reuse installation preflight, the installation port, configuration preview/save,
+adapter discovery and Pi's extension loader. Verify isolated global registration,
+idempotence, custom-file preservation, missing/mismatched builds, read-only doctor,
+catalog discovery outside the checkout, duplicate-load prevention, and a new Pi
+session resolving the global profile without model credentials. Run `npm run check`.
 
 ### XP-016.5: Profile management and scoped activation
 
@@ -65,6 +80,39 @@ configuration authoring, catalog workers, projections and terminal lifecycle.
 
 ## Delivery evidence
 
+### Global Pi integration (XP-016.6)
+
+Verified on 2026-10-05 with a fresh `npm run check` (exit 0): 56 CLI unit tests,
+24 installation integration tests, two POSIX PTY checks and 251 Pi tests, plus
+formatting, lint, architecture boundaries, contracts and type checking. Local
+Markdown targets and `git diff --check` pass. Existing non-failing Biome findings
+in unchanged workflow files remain outside this slice.
+
+The global PTY flow covers preview, cancellation, a known external YAML conflict
+without registration, reload and successful activation while preserving Pi
+settings. Installation checks cover scoped doctor output, idempotence, missing or
+incompatible sources, custom and modified files, permissions and relinking a moved
+build. A synthetic session loads the Rust-generated extension from another empty
+project, resolves all eight global routes through the real bridge outside PATH,
+and starts no workflow or model call. A separate smoke check with Pi 0.87.1's
+official loader covers the generated global extension together with a project
+loader, reload, runtime isolation and registration failure cleanup.
+
+The development-host registration was applied and `doctor --global` passed from
+outside the checkout. Existing global Pi settings and configuration hashes were
+unchanged, and read-only profile inspection resolved all eight routes without
+creating project files. Runtime claims are limited to the exercised macOS host
+and Pi 0.87.1; packaged distribution remains XP-014.
+
+The user confirmed a new Pi session reports a connected bridge and resolved
+configuration for the selected global profile.
+
+This slice adds approximately 580 production lines, 840 test lines and 130
+documentation lines. It reuses installation and configuration operations, adds
+`doctor --global`, and introduces no dependencies or bridge protocol changes.
+Registration and configuration replacements are individually atomic, with an
+explicit partial-result error if saving configuration fails after registration.
+
 ### Profile-management follow-up (XP-016.5)
 
 Verified on 2026-10-05 with a fresh `npm run check` (exit 0), including 50 CLI
@@ -85,10 +133,9 @@ workflow decisions. `git diff --check` and local Markdown target checks pass.
 The complete check reports existing non-failing Biome diagnostics in unchanged
 Pi workflow files; these are outside this follow-up.
 
-Known limitation: activating Global saves a global YAML selection but does not
-install or register xper in Pi globally. Other projects require the extension
-and a launchable bridge. Automatic integration setup for the selected scope is
-not included in this slice.
+The original XP-016.5 limitation was that global activation saved only YAML,
+without registering Pi. XP-016.6 adds global development integration; Project and
+Local selection reuse that integration or the existing checkout loader.
 
 ### Initial dashboard delivery (XP-016.1–XP-016.4)
 

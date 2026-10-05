@@ -128,19 +128,23 @@ fn dispatch(workers: &mut Workers, effects: Vec<Effect>) {
                 snapshot,
                 scope,
                 changes,
+                integrate_global,
             } => DataRequest::Preview {
                 snapshot: *snapshot,
                 scope,
                 changes,
+                integrate_global,
             },
             Effect::Save {
                 snapshot,
                 scope,
                 changes,
+                integration,
             } => DataRequest::Save {
                 snapshot: *snapshot,
                 scope,
                 changes,
+                integration,
             },
             Effect::Activate(name) => DataRequest::Activate(name),
         };
@@ -164,6 +168,7 @@ fn apply_event(app: &mut App, event: Event) {
                 Ok(snapshot) => {
                     app.configuration_loaded(snapshot);
                     app.editor.preview = None;
+                    app.editor.integration = None;
                     app.notice = if app.dirty() {
                         "Files reloaded. Review your draft again before saving.".into()
                     } else {
@@ -199,9 +204,13 @@ fn apply_event(app: &mut App, event: Event) {
         Event::Preview(result) => {
             app.busy = false;
             match result {
-                Ok(preview) => {
+                Ok((preview, integration)) => {
                     if preview.scope != app.editor.scope
                         || preview.changes != app.editor.changes
+                        || integration.is_some()
+                            != (app.editor.action == Action::ActivateProfile
+                                && app.editor.scope
+                                    == xper_application::configuration::ConfigurationScope::Global)
                         || app
                             .snapshot
                             .as_ref()
@@ -220,9 +229,11 @@ fn apply_event(app: &mut App, event: Event) {
                         preview.diagnostics.join("; ")
                     };
                     app.editor.preview = Some(preview);
+                    app.editor.integration = integration;
                 }
                 Err(error) => {
                     app.editor.preview = None;
+                    app.editor.integration = None;
                     app.notice = format!("Cannot save: {error}");
                 }
             }
@@ -241,6 +252,9 @@ fn apply_event(app: &mut App, event: Event) {
                         .as_deref()
                         .unwrap_or("Pi defaults");
                     let notice = match app.editor.action {
+                        Action::ActivateProfile if app.editor.integration.is_some() => format!(
+                            "Selection saved in Global. Pi integration registered. Effective profile: {selection}. Open a new Pi session and check /xper status."
+                        ),
                         Action::ActivateProfile | Action::ClearSelection => format!(
                             "Selection saved in {}. Effective profile here: {selection}. Start a new Pi session to prepare it.",
                             scope_label(app.editor.scope)

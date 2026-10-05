@@ -1,7 +1,6 @@
 //! Child-process client for the public, adapter-owned inspection contract.
 
 use std::{
-    fs,
     io::{self, BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -106,37 +105,10 @@ pub(super) fn models(value: Value) -> io::Result<Vec<Model>> {
 }
 
 fn helper_path(root: &Path) -> io::Result<PathBuf> {
-    let home = std::env::var_os("PI_CODING_AGENT_DIR")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".pi/agent")))
-        .ok_or_else(|| io::Error::other("HOME is not set"))?;
-    for directory in [
-        root.join("adapters/pi"),
-        home.join("npm/node_modules/@xper/adapter-pi"),
-    ] {
-        let manifest = directory.join("package.json");
-        if !manifest.exists() {
-            continue;
-        }
-        let package: Value = serde_json::from_str(&fs::read_to_string(manifest)?)?;
-        if package.get("name").and_then(Value::as_str) != Some("@xper/adapter-pi")
-            || package.get("version").and_then(Value::as_str) != Some(env!("CARGO_PKG_VERSION"))
-        {
-            return Err(io::Error::other(
-                "Incompatible Pi adapter; install the matching xper adapter",
-            ));
-        }
-        let entry = directory.join("dist/inspection/cli.js");
-        if entry.is_file() {
-            return Ok(entry);
-        }
-        return Err(io::Error::other(
-            "Pi inspection helper is not built; run npm run build --workspace @xper/adapter-pi",
-        ));
-    }
-    Err(io::Error::other(
-        "Pi adapter not found; run xper doctor for installation guidance",
-    ))
+    Ok(
+        crate::infrastructure::pi_integration::adapter_directory(root)?
+            .join("dist/inspection/cli.js"),
+    )
 }
 
 pub(super) struct Catalog {

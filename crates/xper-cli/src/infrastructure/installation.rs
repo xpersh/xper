@@ -13,6 +13,8 @@ use xper_application::{
 };
 use xper_config::{DEFAULT_CONFIG, ScopePaths, load_effective, load_global};
 
+use super::pi_integration::{self, GlobalIntegration};
+
 const MIN_PI_VERSION: &str = "0.85.1";
 const MAX_PI_VERSION: &str = "0.87.1";
 
@@ -156,57 +158,7 @@ fn inspect(context: &Context, global: bool) -> Vec<Check> {
         )),
     }
 
-    let extension = if global {
-        context.pi_home.join("extensions/xper.ts")
-    } else {
-        context.root.join(".pi/extensions/xper.ts")
-    };
-    let adapter = if global {
-        context
-            .pi_home
-            .join("npm/node_modules/@xper/adapter-pi/package.json")
-    } else {
-        context.root.join("adapters/pi/package.json")
-    };
-    let built = if global {
-        context
-            .pi_home
-            .join("npm/node_modules/@xper/adapter-pi/dist/extension.js")
-    } else {
-        context.root.join("adapters/pi/dist/extension.js")
-    };
-    let adapter_version = fs::read_to_string(&adapter)
-        .ok()
-        .and_then(|source| serde_json::from_str::<Value>(&source).ok())
-        .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_owned));
-    if extension.is_file()
-        && built.is_file()
-        && adapter_version.as_deref() == Some(env!("CARGO_PKG_VERSION"))
-    {
-        checks.push(Check::new(
-            "ADAPTER",
-            Status::Pass,
-            format!("xper Pi adapter {}", env!("CARGO_PKG_VERSION")),
-            None,
-        ));
-    } else if adapter_version.is_some()
-        && adapter_version.as_deref() != Some(env!("CARGO_PKG_VERSION"))
-    {
-        checks.push(Check::new(
-            "ADAPTER",
-            Status::Fail,
-            format!(
-                "xper Pi adapter version {}; expected {}",
-                adapter_version.unwrap_or_default(),
-                env!("CARGO_PKG_VERSION")
-            ),
-            Some("Install the matching xper Pi adapter version"),
-        ));
-    } else {
-        checks.push(Check::new("ADAPTER", Status::Warn,
-            "xper Pi extension or built adapter not found",
-            Some("Install the xper Pi adapter and build its extension; in this checkout run npm ci && npm run build --workspace @xper/adapter-pi")));
-    }
+    checks.push(adapter_check(context, global));
 
     let config = if global {
         load_global(&context.scopes)
@@ -258,6 +210,84 @@ fn inspect(context: &Context, global: bool) -> Vec<Check> {
     checks
 }
 
+fn adapter_check(context: &Context, global: bool) -> Check {
+    let extension = context.root.join(".pi/extensions/xper.ts");
+    if global || !extension.is_file() {
+        match pi_integration::registered() {
+            Ok(Some(registration)) => {
+                return Check::new(
+                    "ADAPTER",
+                    Status::Pass,
+                    format!(
+                        "Global Pi integration: {}; bridge {}",
+                        registration.adapter_root.display(),
+                        registration.bridge.display()
+                    ),
+                    None,
+                );
+            }
+            Err(error) => {
+                return Check::new(
+                    "ADAPTER",
+                    Status::Fail,
+                    error.to_string(),
+                    Some(
+                        "Repair the global integration or restore its linked build; inspect with xper doctor --global",
+                    ),
+                );
+            }
+            Ok(None) if global => {
+                return Check::new(
+                    "ADAPTER",
+                    Status::Warn,
+                    "Global xper Pi extension is not registered",
+                    Some("Run xper init --global from the built xper checkout"),
+                );
+            }
+            Ok(None) => {}
+        }
+    }
+    let adapter = context.root.join("adapters/pi/package.json");
+    let built = context.root.join("adapters/pi/dist/extension.js");
+    let adapter_version = fs::read_to_string(&adapter)
+        .ok()
+        .and_then(|source| serde_json::from_str::<Value>(&source).ok())
+        .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_owned));
+    if extension.is_file()
+        && built.is_file()
+        && adapter_version.as_deref() == Some(env!("CARGO_PKG_VERSION"))
+    {
+        Check::new(
+            "ADAPTER",
+            Status::Pass,
+            format!("xper Pi adapter {}", env!("CARGO_PKG_VERSION")),
+            None,
+        )
+    } else if adapter_version.is_some()
+        && adapter_version.as_deref() != Some(env!("CARGO_PKG_VERSION"))
+    {
+        Check::new(
+            "ADAPTER",
+            Status::Fail,
+            format!(
+                "xper Pi adapter version {}; expected {}",
+                adapter_version.unwrap_or_default(),
+                env!("CARGO_PKG_VERSION")
+            ),
+            Some("Install the matching xper Pi adapter version"),
+        )
+    } else {
+        Check::new(
+            "ADAPTER",
+            Status::Warn,
+            "xper Pi extension or built adapter not found",
+            Some(
+                "Install the xper Pi adapter and build its extension; in this checkout run npm ci && npm run build --workspace @xper/adapter-pi",
+            ),
+        )
+    }
+}
+
 fn write_new(path: &Path, content: &str) -> io::Result<bool> {
     if path.exists() {
         return Ok(false);
@@ -298,6 +328,7 @@ fn ignore_local_config(root: &Path) -> io::Result<bool> {
 pub(crate) struct LocalInstallation {
     context: Context,
     global: bool,
+    integration: Option<Result<GlobalIntegration, String>>,
 }
 
 impl LocalInstallation {
@@ -305,7 +336,19 @@ impl LocalInstallation {
         Ok(Self {
             context: Context::current()?,
             global,
+            integration: None,
         })
+    }
+
+    pub(crate) fn initialization(global: bool) -> io::Result<Self> {
+        let mut installation = Self::current(global)?;
+        if global {
+            installation.integration = Some(
+                GlobalIntegration::plan(&installation.context.root)
+                    .map_err(|error| error.to_string()),
+            );
+        }
+        Ok(installation)
     }
 }
 
@@ -313,18 +356,54 @@ impl Installation for LocalInstallation {
     type Error = io::Error;
 
     fn inspect(&self) -> Vec<Check> {
-        inspect(&self.context, self.global)
+        let mut checks = inspect(&self.context, self.global);
+        if let Some(plan) = &self.integration {
+            // Initialization validates the proposed link, allowing a reviewed
+            // built checkout to repair an obsolete managed registration.
+            let mut planned = match plan {
+                Ok(plan) => plan.inspect().remove(0),
+                Err(error) => Check::new(
+                    "ADAPTER",
+                    Status::Fail,
+                    error,
+                    Some(
+                        "Build the matching xper adapter, preserve any custom extension, then retry init --global",
+                    ),
+                ),
+            };
+            planned.id = "ADAPTER";
+            if let Some(adapter) = checks.iter_mut().find(|check| check.id == "ADAPTER") {
+                *adapter = planned;
+            }
+        }
+        checks
     }
     fn prepare(&mut self) -> io::Result<Vec<String>> {
         let context = &self.context;
         let global = self.global;
         let mut changes = Vec::new();
+        if let Some(plan) = &self.integration {
+            changes.extend(
+                plan.as_ref()
+                    .map_err(|error| io::Error::other(error.clone()))?
+                    .prepare()?,
+            );
+        }
         let config = if global {
             &context.scopes.global
         } else {
             &context.scopes.project
         };
-        if write_new(config, DEFAULT_CONFIG)? {
+        let created = write_new(config, DEFAULT_CONFIG).map_err(|error| {
+            if global {
+                io::Error::other(format!(
+                    "Global Pi integration is prepared, but configuration initialization failed: {error}"
+                ))
+            } else {
+                error
+            }
+        })?;
+        if created {
             changes.push(format!("created {}", config.display()));
         }
         if !global && ignore_local_config(&context.root)? {

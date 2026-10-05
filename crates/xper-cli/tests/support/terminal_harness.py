@@ -64,6 +64,7 @@ def install_fake_adapter(root, pending=False, available=False):
     package = root / "adapters" / "pi"
     entry = package / "dist" / "inspection" / "cli.js"
     entry.parent.mkdir(parents=True)
+    (package / "dist" / "extension.js").write_text("// Isolated adapter fixture.\n")
     (package / "package.json").write_text(json.dumps({
         "name": "@xper/adapter-pi", "version": version, "type": "module",
     }))
@@ -106,7 +107,6 @@ createInterface({ input: process.stdin }).on('line', (line) => {
         extension = root / ".pi" / "extensions" / "xper.ts"
         extension.parent.mkdir(parents=True)
         extension.write_text("// Isolated installation preflight fixture.\n")
-        (package / "dist" / "extension.js").write_text("// Isolated adapter fixture.\n")
 
 
 class Terminal:
@@ -427,6 +427,53 @@ with tempfile.TemporaryDirectory(prefix="xper-terminal-save-") as directory:
         terminal.finish(b"q")
     finally:
         terminal.close()
+
+with tempfile.TemporaryDirectory(prefix="xper-terminal-global-") as directory:
+    root = Path(directory)
+    install_fake_adapter(root, available=True)
+    global_config = config_paths(root)[2]
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text(expected_project_config())
+    pi_home = root / "home" / ".pi" / "agent"
+    pi_home.mkdir(parents=True)
+    settings = pi_home / "settings.json"
+    settings.write_text('{"packages":["npm:unrelated-package"]}\n')
+    original_settings = settings.read_bytes()
+    registration = pi_home / "extensions" / "xper.ts"
+    terminal = Terminal(root)
+    try:
+        terminal.set_size(80, 24)
+        terminal.expect("Project overview")
+        terminal.enter(b"2", "daily")
+        terminal.enter(b"a", "Choose destination scope")
+        terminal.enter(b"\r", "Review configuration")
+        terminal.expect("Register global Pi extension")
+        assert not registration.exists(), "Review registered Pi before confirmation"
+        assert global_config.read_text() == expected_project_config()
+        terminal.enter(b"\x1b", "Choose destination scope")
+        assert not registration.exists(), "Cancel registered Pi"
+        terminal.enter(b"\r", "Review configuration")
+        terminal.expect("Register global Pi extension")
+        global_config.write_text(expected_project_config() + "# External edit\n")
+        terminal.enter(b"\r", "Configuration changed outside this editor.")
+        assert not registration.exists(), "A known YAML conflict still registered Pi"
+        global_config.write_text(expected_project_config())
+        terminal.enter(b"\x1b[15~", "Files reloaded.")
+        terminal.enter(b"v", "Register global Pi extension")
+        terminal.enter(b"\r", "Selection saved in Global.")
+        assert registration.is_file(), "Global activation did not register Pi"
+        assert global_config.read_text() == expected_project_config(active=True)
+        assert settings.read_bytes() == original_settings, "Registration altered Pi settings"
+        terminal.finish(b"q")
+    finally:
+        terminal.close()
+    other = root / "another-project"
+    other.mkdir()
+    result = subprocess.run([binary, "doctor", "--global", "--json"],
+                            cwd=other, env=environment(root), capture_output=True, timeout=3)
+    assert result.returncode == 0, result.stderr
+    checks = json.loads(result.stdout)["checks"]
+    assert next(check for check in checks if check["id"] == "ADAPTER")["status"] == "PASS"
 
 for mode in ("error", "panic"):
     with tempfile.TemporaryDirectory(prefix=f"xper-terminal-{mode}-") as directory:

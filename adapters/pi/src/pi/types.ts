@@ -15,6 +15,10 @@ export interface PiContext {
 }
 
 export interface PiExtensionAPI {
+  events?: {
+    emit(channel: string, data: unknown): void;
+    on(channel: string, handler: (data: unknown) => void): () => void;
+  };
   on(
     event: "session_start",
     handler: (event: { reason: string }, ctx: PiContext) => Promise<void>,

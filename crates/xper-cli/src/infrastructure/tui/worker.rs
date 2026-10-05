@@ -18,8 +18,8 @@ use xper_application::{
     installation::CheckStatus,
     read_models::RunPage,
     use_cases::{
-        activate_profile, get_run_status, inspect_configuration, inspect_installation, list_runs,
-        preview_configuration, save_configuration,
+        activate_profile, get_run_status, initialize_workspace, inspect_configuration,
+        inspect_installation, list_runs, preview_configuration, save_configuration,
     },
 };
 
@@ -29,6 +29,7 @@ use crate::{
     infrastructure::{
         configuration::{AvailableModel, validate_models},
         installation::LocalInstallation,
+        pi_integration::GlobalIntegration,
     },
 };
 
@@ -47,11 +48,13 @@ pub(super) enum DataRequest {
         snapshot: ConfigurationSnapshot,
         scope: ConfigurationScope,
         changes: Vec<ConfigurationChange>,
+        integrate_global: bool,
     },
     Save {
         snapshot: ConfigurationSnapshot,
         scope: ConfigurationScope,
         changes: Vec<ConfigurationChange>,
+        integration: Option<GlobalIntegration>,
     },
     Activate(Option<String>),
 }
@@ -78,7 +81,7 @@ pub(super) enum Event {
         id: String,
         result: Result<get_run_status::Outcome, String>,
     },
-    Preview(Result<ConfigurationPreview, String>),
+    Preview(Result<(ConfigurationPreview, Option<GlobalIntegration>), String>),
     Saved(Result<ConfigurationSnapshot, String>),
     Activated(Result<ConfigurationSnapshot, String>),
     CatalogRoles(Result<Vec<Role>, String>),
@@ -213,6 +216,7 @@ fn data_request(root: &Path, request: DataRequest, models: &ModelSnapshot) -> Ev
             snapshot,
             scope,
             changes,
+            integrate_global,
         } => Event::Preview(
             configuration_repository(root)
                 .map_err(|error| error.to_string())
@@ -226,7 +230,16 @@ fn data_request(root: &Path, request: DataRequest, models: &ModelSnapshot) -> Ev
                                         .into(),
                                 );
                             }
-                            Ok(preview)
+                            let integration = if integrate_global {
+                                let plan = GlobalIntegration::plan(root)
+                                    .map_err(|error| error.to_string())?;
+                                global_preflight()?;
+                                preview.diagnostics.push(plan.describe());
+                                Some(plan)
+                            } else {
+                                None
+                            };
+                            Ok((preview, integration))
                         })
                 }),
         ),
@@ -234,7 +247,8 @@ fn data_request(root: &Path, request: DataRequest, models: &ModelSnapshot) -> Ev
             snapshot,
             scope,
             changes,
-        } => Event::Saved(save(root, &snapshot, scope, &changes, models)),
+            integration,
+        } => Event::Saved(save(root, &snapshot, scope, &changes, models, integration)),
         DataRequest::Activate(name) => Event::Activated(
             configuration_repository(root)
                 .map_err(|error| error.to_string())
@@ -277,6 +291,7 @@ fn save(
     scope: ConfigurationScope,
     changes: &[ConfigurationChange],
     models: &ModelSnapshot,
+    integration: Option<GlobalIntegration>,
 ) -> Result<ConfigurationSnapshot, String> {
     let mut repository = configuration_repository(root).map_err(|error| error.to_string())?;
     // Validate the proposed configuration before the installation checks, which
@@ -307,8 +322,49 @@ fn save(
             ));
         }
     }
+    if let Some(mut plan) = integration {
+        let current =
+            inspect_configuration::execute(&repository).map_err(|error| error.to_string())?;
+        if current.revision != snapshot.revision {
+            return Err(
+                "Configuration changed outside this editor. Reload and review before preparing Pi."
+                    .into(),
+            );
+        }
+        global_preflight()?;
+        match initialize_workspace::execute(&mut plan, |_| {}).map_err(|error| error.to_string())? {
+            initialize_workspace::Outcome::Blocked => {
+                return Err("Global Pi integration changed. Review again before saving.".into());
+            }
+            initialize_workspace::Outcome::Completed { .. } => {}
+        }
+        return save_configuration::execute(&mut repository, snapshot, scope, changes)
+            .map_err(|error| format!("Global Pi integration is prepared, but the profile was not saved: {error}. Reload and review again."));
+    }
     save_configuration::execute(&mut repository, snapshot, scope, changes)
         .map_err(|error| error.to_string())
+}
+
+fn global_preflight() -> Result<(), String> {
+    let installation = LocalInstallation::current(true).map_err(|error| error.to_string())?;
+    let failures = inspect_installation::execute(&installation)
+        .checks
+        .into_iter()
+        // The configuration preview and reviewed integration plan validate
+        // their proposed replacements, including repair of existing files.
+        .filter(|check| {
+            check.status == CheckStatus::Fail && !matches!(check.id, "CONFIG" | "ADAPTER")
+        })
+        .map(|check| format!("{}: {}", check.id, check.evidence))
+        .collect::<Vec<_>>();
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Global Pi preflight failed: {}",
+            failures.join("; ")
+        ))
+    }
 }
 
 fn validate_snapshot(
@@ -588,6 +644,7 @@ mod tests {
         let root = Directory::new();
         let adapter = root.0.join("adapters/pi");
         fs::create_dir_all(adapter.join("dist/inspection")).unwrap();
+        fs::write(adapter.join("dist/extension.js"), "// Synthetic adapter").unwrap();
         fs::write(
             adapter.join("package.json"),
             json!({"name":"@xper/adapter-pi","version":env!("CARGO_PKG_VERSION")}).to_string(),

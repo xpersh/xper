@@ -4,9 +4,12 @@
 configuration screen. It exposes role descriptions and the Pi model catalog;
 it does not create an xper workflow or connect to the Rust recorder.
 
-The host resolves the built helper from the checkout's `adapters/pi` package or
+The host resolves the built helper from the checkout's `adapters/pi` package,
+the adapter linked by xper's managed global Pi registration, or
 `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/npm/node_modules/@xper/adapter-pi`,
-checking the package version. It runs Node with the target workspace as cwd,
+checking the package version and build. This shares discovery with global
+integration setup; a broken managed registration remains an actionable error.
+It runs Node with the target workspace as cwd,
 inherits Pi's environment, and keeps stdin open until responses arrive.
 Closing stdin, SIGINT, or SIGTERM cancels an outstanding Pi catalog process.
 No resident server, socket, installation, or package discovery is performed.

@@ -2,10 +2,11 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
+    symbols::border,
     text::{Line, Span, Text},
-    widgets::{Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Tabs, Wrap},
 };
 use serde_json::Value;
 
@@ -22,16 +23,62 @@ impl Theme {
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
+                .remove_modifier(Modifier::DIM)
         } else {
-            Style::default().add_modifier(Modifier::BOLD)
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .remove_modifier(Modifier::DIM)
         }
     }
     fn muted(self) -> Style {
         Style::default().add_modifier(Modifier::DIM)
     }
     fn selected(self) -> Style {
-        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        self.accent()
     }
+    fn marker(self) -> &'static str {
+        if self.ascii { "> " } else { "› " }
+    }
+    fn border(self) -> border::Set<'static> {
+        if self.ascii {
+            border::Set {
+                top_left: "+",
+                top_right: "+",
+                bottom_left: "+",
+                bottom_right: "+",
+                vertical_left: "|",
+                vertical_right: "|",
+                horizontal_top: "-",
+                horizontal_bottom: "-",
+            }
+        } else {
+            border::ROUNDED
+        }
+    }
+}
+
+/// Compact terminals spend their cells on content rather than decoration.
+fn panel(frame: &mut Frame, area: Rect, title: &str, theme: Theme) -> Rect {
+    let framed = frame.area().height >= 20 && area.height >= 4 && area.width >= 18;
+    let block = Block::default()
+        .borders(if framed { Borders::ALL } else { Borders::NONE })
+        .border_set(theme.border())
+        .border_style(theme.muted())
+        .title(Line::styled(format!(" {} ", clean(title)), theme.accent()))
+        .padding(Padding::horizontal(u16::from(framed && area.width >= 60)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
+}
+
+fn separator(frame: &mut Frame, area: Rect, theme: Theme) -> Rect {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_set(theme.border())
+        .border_style(theme.muted());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
 }
 
 fn clean(value: &str) -> String {
@@ -43,13 +90,93 @@ fn line(value: impl Into<String>) -> Line<'static> {
 fn paragraph(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
+
+fn field(label: &str, value: &str, theme: Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:<25}"), theme.muted()),
+        Span::raw(clean(value)),
+    ])
+}
+
+/// Wrap using terminal-cell widths, including combining characters and wide glyphs.
+/// Dialog sizing and rendering use these same rows so actions cannot be displaced.
+fn wrap_text(value: &str, width: u16) -> Vec<String> {
+    if width == 0 {
+        return vec![];
+    }
+    let value = clean(value);
+    let mut rest = value.as_str();
+    let mut rows = vec![];
+    while Span::raw(rest).width() > usize::from(width) {
+        let span = Span::raw(rest);
+        let mut cells = 0;
+        let mut end = 0;
+        let mut space = None;
+        for grapheme in span.styled_graphemes(Style::default()) {
+            let next = Span::raw(grapheme.symbol).width();
+            if cells + next > usize::from(width) {
+                break;
+            }
+            cells += next;
+            end += grapheme.symbol.len();
+            if grapheme.symbol.chars().all(char::is_whitespace) {
+                space = Some(end);
+            }
+        }
+        if end == 0 {
+            break;
+        }
+        let split = space.filter(|offset| *offset < end).unwrap_or(end);
+        rows.push(rest[..split].trim_end().to_owned());
+        rest = rest[split..].trim_start();
+    }
+    rows.push(rest.to_owned());
+    rows
+}
+
+fn key_hints(value: &str, theme: Theme) -> Line<'static> {
+    let mut spans = vec![];
+    for (i, hint) in value
+        .split("  ")
+        .filter(|hint| !hint.is_empty())
+        .enumerate()
+    {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        if let Some((key, action)) = hint.split_once(':') {
+            spans.push(Span::styled(format!("{key}:"), theme.accent()));
+            spans.push(Span::raw(action.to_owned()));
+        } else {
+            spans.push(Span::raw(hint.to_owned()));
+        }
+    }
+    Line::from(spans)
+}
+
+fn input_tail(value: &str, width: u16) -> String {
+    let value = clean(value);
+    let span = Span::raw(&value);
+    let graphemes = span.styled_graphemes(Style::default()).collect::<Vec<_>>();
+    let mut cells = 1; // Keep the insertion point visible without changing the input.
+    let mut tail = vec![];
+    for grapheme in graphemes.iter().rev() {
+        cells += Span::raw(grapheme.symbol).width();
+        if cells > usize::from(width) {
+            break;
+        }
+        tail.push(grapheme.symbol);
+    }
+    format!("{}_", tail.into_iter().rev().collect::<String>())
+}
+
 fn list(frame: &mut Frame, area: Rect, rows: Vec<String>, selected: usize, theme: Theme) {
     let items: Vec<ListItem> = rows.into_iter().map(|s| ListItem::new(clean(&s))).collect();
     let mut state = ListState::default().with_selected((!items.is_empty()).then_some(selected));
     frame.render_stateful_widget(
         List::new(items)
             .highlight_style(theme.selected())
-            .highlight_symbol(if theme.ascii { "> " } else { "› " }),
+            .highlight_symbol(theme.marker()),
         area,
         &mut state,
     );
@@ -69,20 +196,43 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
         );
         return;
     }
+    let roomy = area.height >= 20 && area.width >= 80;
+    let spacious = roomy && area.height >= 30;
+    let canvas = area.inner(Margin::new(u16::from(roomy && area.width >= 80), 0));
+    let hint_rows = wrap_text(hints(app), canvas.width);
     let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(if area.width >= 120 { 0 } else { 2 }),
+        Constraint::Length(if spacious {
+            3
+        } else if roomy {
+            2
+        } else {
+            1
+        }),
+        Constraint::Length(if area.width >= 120 {
+            0
+        } else if roomy {
+            2
+        } else {
+            1
+        }),
         Constraint::Min(1),
-        Constraint::Length(2),
-        Constraint::Length(1),
+        Constraint::Length(if spacious {
+            3
+        } else if area.height >= 20 {
+            2
+        } else {
+            1
+        }),
+        Constraint::Length(hint_rows.len().min(2) as u16),
     ])
-    .split(area);
+    .split(canvas);
+    let header = Rect::new(rows[0].x, rows[0].y + u16::from(roomy), rows[0].width, 1);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("xper  ", theme.accent()),
-            Span::raw(clean(&app.root)),
+            Span::styled("xper   ", theme.accent()),
+            Span::styled(clean(&app.root), theme.muted()),
         ])),
-        rows[0],
+        header,
     );
     let selected = Section::ALL
         .iter()
@@ -100,23 +250,31 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
         );
     } else if area.width < 120 {
         frame.render_widget(
-            Tabs::new(
-                Section::ALL
-                    .iter()
-                    .enumerate()
-                    .map(|(i, s)| format!("{} {}", i + 1, s.label())),
-            )
+            Tabs::new(Section::ALL.iter().enumerate().map(|(i, s)| {
+                format!(
+                    "{}{} {}",
+                    if i == selected { theme.marker() } else { "" },
+                    i + 1,
+                    s.label()
+                )
+            }))
             .select(selected)
             .highlight_style(theme.selected())
-            .divider("  "),
+            .divider(" "),
             rows[1],
         );
     }
     let content = if area.width >= 120 {
-        let cols = Layout::horizontal([Constraint::Length(19), Constraint::Min(1)]).split(rows[2]);
+        let cols = Layout::horizontal([
+            Constraint::Length(19),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(rows[2]);
+        let navigation = panel(frame, cols[0], "Navigation", theme);
         list(
             frame,
-            cols[0],
+            navigation,
             Section::ALL
                 .iter()
                 .enumerate()
@@ -125,7 +283,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
             selected,
             theme,
         );
-        cols[1]
+        cols[2]
     } else {
         rows[2]
     };
@@ -138,11 +296,24 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
     if app.busy {
         notice = "Working... You can still interrupt with Ctrl+C.".into();
     }
+    let notice_area = if spacious {
+        separator(frame, rows[3], theme)
+    } else {
+        rows[3]
+    };
     frame.render_widget(
         Paragraph::new(clean(&notice)).wrap(Wrap { trim: false }),
-        rows[3],
+        notice_area,
     );
-    frame.render_widget(Paragraph::new(hints(app)).style(theme.muted()), rows[4]);
+    frame.render_widget(
+        Paragraph::new(
+            hint_rows
+                .iter()
+                .map(|row| key_hints(row, theme))
+                .collect::<Vec<_>>(),
+        ),
+        rows[4],
+    );
     if app.help {
         overlay(
             frame,
@@ -168,6 +339,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
                 "Ctrl+C                   Interrupt and exit without saving",
                 "? / Enter / Esc          Close this help",
             ],
+            None,
             theme,
         );
     }
@@ -205,6 +377,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
                 "New profile"
             },
             body,
+            Some(1),
             theme,
         );
     }
@@ -218,6 +391,7 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
                 "",
                 "y / Enter  Discard     n / Esc  Keep editing",
             ],
+            None,
             theme,
         );
     }
@@ -234,41 +408,96 @@ pub(super) fn draw(frame: &mut Frame, app: &App, theme: Theme) {
                 "",
                 "y / Enter  Start draft     n / Esc  Cancel",
             ],
+            None,
             theme,
         );
     }
 }
 
-fn overlay(frame: &mut Frame, area: Rect, title: &str, body: Vec<&str>, theme: Theme) {
-    let width = area.width.saturating_sub(4).min(76);
-    let height = (body.len() as u16 + 3).min(area.height.saturating_sub(2));
+fn overlay(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    mut body: Vec<&str>,
+    input: Option<usize>,
+    theme: Theme,
+) {
+    let roomy = area.height >= 20;
+    let width = area.width.saturating_sub(if roomy { 4 } else { 2 }).min(76);
+    let content_width = width.saturating_sub(if roomy { 4 } else { 0 });
+    let actions = wrap_text(body.pop().unwrap_or_default(), content_width);
+    let lines = body
+        .iter()
+        .enumerate()
+        .flat_map(|(index, value)| {
+            if input == Some(index) {
+                vec![Line::styled(
+                    input_tail(value, content_width),
+                    theme.accent(),
+                )]
+            } else {
+                wrap_text(value, content_width)
+                    .into_iter()
+                    .map(line)
+                    .collect()
+            }
+        })
+        .collect::<Vec<_>>();
+    let height = (lines.len() + actions.len() + if roomy { 3 } else { 1 })
+        .min(usize::from(area.height.saturating_sub(2))) as u16;
     let rect = Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height - height) / 2,
         width,
         height,
     );
-    frame.render_widget(Clear, rect);
-    let mut lines = vec![Line::styled(clean(title), theme.accent()), line("")];
-    lines.extend(body.into_iter().map(line));
-    paragraph(frame, rect, lines);
+    frame.render_widget(Clear, if roomy { rect } else { area });
+    let block = Block::default()
+        .borders(if roomy { Borders::ALL } else { Borders::NONE })
+        .border_set(theme.border())
+        .border_style(theme.muted())
+        .title(Line::styled(format!(" {} ", clean(title)), theme.accent()))
+        .padding(Padding::horizontal(u16::from(roomy)));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    let panes = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(actions.len() as u16 + u16::from(roomy)),
+    ])
+    .split(inner);
+    frame.render_widget(Paragraph::new(lines), panes[0]);
+    let footer = if roomy {
+        separator(frame, panes[1], theme)
+    } else {
+        panes[1]
+    };
+    frame.render_widget(
+        Paragraph::new(
+            actions
+                .into_iter()
+                .map(|value| Line::styled(value, theme.accent()))
+                .collect::<Vec<_>>(),
+        ),
+        footer,
+    );
 }
 
 fn home(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
-    let mut lines = vec![Line::styled("Project overview", theme.accent()), line("")];
+    let mut lines = vec![];
     if let Some(snapshot) = &app.snapshot {
-        lines.push(line(format!(
-            "Effective profile: {}",
+        lines.push(field(
+            "Effective profile:",
             snapshot
                 .effective_profile
                 .as_deref()
-                .unwrap_or("Pi defaults")
-        )));
-        lines.push(line(format!(
-            "Legacy project override: {}",
-            snapshot.active_profile.as_deref().unwrap_or("none")
-        )));
-        lines.push(line(""));
+                .unwrap_or("Pi defaults"),
+            theme,
+        ));
+        lines.push(field(
+            "Legacy project override:",
+            snapshot.active_profile.as_deref().unwrap_or("none"),
+            theme,
+        ));
         lines.push(line(format!(
             "{} profiles  |  {} contexts",
             app.profiles().len(),
@@ -277,7 +506,6 @@ fn home(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         lines.push(line("Enter: manage Profiles    5: Settings and contexts"));
         lines.extend(snapshot.diagnostics.iter().map(|s| line(s.clone())));
         if snapshot.documents.iter().all(|d| d.source.is_none()) {
-            lines.push(line(""));
             lines.push(Line::styled(
                 "Get started: Enter opens Profiles; n creates your first profile.",
                 theme.accent(),
@@ -286,10 +514,10 @@ fn home(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
     } else {
         lines.push(line("Loading configuration..."));
     }
-    lines.push(line(""));
+    let mut recording = vec![];
     if let Some(run) = app.runs.first() {
-        lines.push(line(format!("Latest recording: {}", run.run_id)));
-        lines.push(line(format!(
+        recording.push(Line::styled(clean(&run.run_id), theme.accent()));
+        recording.push(line(format!(
             "{}  |  phase {}  |  {} / {} attempts finished",
             run.status,
             run.phase.as_deref().unwrap_or("unknown"),
@@ -297,22 +525,49 @@ fn home(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             run.metrics.attempts_started
         )));
     } else {
-        lines.push(line("No recorded runs in this project."));
+        recording.push(line("No recorded runs in this project."));
     }
-    lines.push(line(""));
-    lines.push(line("Configure here; start and execute workflows in Pi."));
-    lines.push(line("Recorded history can lag the live Pi workflow."));
-    paragraph(frame, area, lines);
+    let roomy = frame.area().height >= 20;
+    let decoration = if roomy { 2 } else { 1 };
+    let width = area.width.saturating_sub(if roomy { 4 } else { 0 });
+    let overview_height = lines
+        .iter()
+        .map(|line| wrap_text(&line.to_string(), width).len())
+        .sum::<usize>() as u16
+        + decoration;
+    let footer_height = if area.height >= 12 { 2 } else { 0 };
+    let recording_height = (recording
+        .iter()
+        .map(|line| wrap_text(&line.to_string(), width).len())
+        .sum::<usize>() as u16
+        + decoration)
+        .max(if roomy { 4 } else { 2 })
+        .min(area.height.saturating_sub(3 + footer_height));
+    let rows = Layout::vertical([
+        Constraint::Length(
+            overview_height.min(area.height.saturating_sub(recording_height + footer_height)),
+        ),
+        Constraint::Length(recording_height),
+        Constraint::Min(footer_height),
+    ])
+    .split(area);
+    let overview = panel(frame, rows[0], "Project overview", theme);
+    paragraph(frame, overview, lines);
+    let latest = panel(frame, rows[1], "Latest recording", theme);
+    paragraph(frame, latest, recording);
+    frame.render_widget(
+        Paragraph::new(vec![
+            line("Configure here; start and execute workflows in Pi."),
+            line("Recorded history can lag the live Pi workflow."),
+        ])
+        .style(theme.muted())
+        .wrap(Wrap { trim: false }),
+        rows[2],
+    );
 }
 
 fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
     let editor = &app.editor;
-    let rows = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(1),
-        Constraint::Length(4),
-    ])
-    .split(area);
     let title = match editor.stage {
         Stage::Scope => "Choose destination scope",
         Stage::ContextList => "Settings / Contexts",
@@ -344,20 +599,31 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
     } else {
         title.to_owned()
     };
-    frame.render_widget(
-        Paragraph::new(format!(
-            "{}{}\n{}",
-            title,
-            if app.dirty() {
-                "  [unsaved changes]"
-            } else {
-                ""
-            },
-            hints(app),
-        ))
-        .style(theme.accent()),
-        rows[0],
+    let title = format!(
+        "{title}{}",
+        if app.dirty() {
+            "  [unsaved changes]"
+        } else {
+            ""
+        }
     );
+    let inner = panel(frame, area, &title, theme);
+    let help_height = if editor.stage == Stage::Review && (8..20).contains(&inner.height) {
+        3
+    } else if inner.height >= 12 {
+        5
+    } else if inner.height >= 8 {
+        4
+    } else {
+        2
+    };
+    let rows = Layout::vertical([Constraint::Min(3), Constraint::Length(help_height)]).split(inner);
+    let content = rows[0];
+    let guidance = if help_height >= 4 {
+        separator(frame, rows[1], theme)
+    } else {
+        rows[1]
+    };
     let mut help = vec![];
     match editor.stage {
         Stage::Scope => {
@@ -378,7 +644,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                     format!("{:<16} {purpose}", scope_label(*scope))
                 })
                 .collect();
-            list(frame, rows[1], entries, editor.cursor, theme);
+            list(frame, content, entries, editor.cursor, theme);
             let name = if editor.section == Section::Settings {
                 &editor.context
             } else {
@@ -404,7 +670,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             };
             list(
                 frame,
-                rows[1],
+                content,
                 app.actions().iter().map(|a| a.label().to_owned()).collect(),
                 editor.cursor,
                 theme,
@@ -425,7 +691,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                 .unwrap_or("none");
             paragraph(
                 frame,
-                rows[1],
+                content,
                 vec![
                     line(format!("Current legacy override: {name}")),
                     line(""),
@@ -438,11 +704,11 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         Stage::ContextList => {
             let contexts = app.contexts();
             if app.snapshot.is_none() {
-                paragraph(frame, rows[1], vec![line("Loading contexts...")]);
+                paragraph(frame, content, vec![line("Loading contexts...")]);
             } else if contexts.is_empty() {
                 paragraph(
                     frame,
-                    rows[1],
+                    content,
                     vec![
                         line("No contexts yet. Enter or n creates one."),
                         line("Contexts define which providers profiles may use."),
@@ -451,7 +717,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             } else {
                 list(
                     frame,
-                    rows[1],
+                    content,
                     contexts
                         .iter()
                         .map(|c| format!("{}  [{}]", c.name, c.source_label()))
@@ -486,11 +752,11 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             if names.is_empty() {
                 paragraph(
                     frame,
-                    rows[1],
+                    content,
                     vec![line("No contexts yet. Press n to create one.")],
                 );
             } else {
-                list(frame, rows[1], names, editor.cursor, theme);
+                list(frame, content, names, editor.cursor, theme);
             }
             help.push(line(format!("Destination: {}", scope_label(editor.scope))));
             help.push(line(
@@ -502,7 +768,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             if providers.is_empty() {
                 paragraph(
                     frame,
-                    rows[1],
+                    content,
                     vec![line(
                         "No providers available. Refresh the Pi catalog to retry.",
                     )],
@@ -510,7 +776,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             } else {
                 list(
                     frame,
-                    rows[1],
+                    content,
                     providers
                         .iter()
                         .map(|p| {
@@ -532,11 +798,11 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         Stage::Profiles => {
             let profiles = app.profiles();
             if app.snapshot.is_none() {
-                paragraph(frame, rows[1], vec![line("Loading profiles...")]);
+                paragraph(frame, content, vec![line("Loading profiles...")]);
             } else if profiles.is_empty() {
                 paragraph(
                     frame,
-                    rows[1],
+                    content,
                     vec![
                         line("No profiles yet. Enter or n creates one."),
                         line("Choose a scope, a context and the models for each role."),
@@ -545,7 +811,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             } else {
                 list(
                     frame,
-                    rows[1],
+                    content,
                     profiles
                         .iter()
                         .map(|p| {
@@ -626,7 +892,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                     }
                 })
                 .collect();
-            list(frame, rows[1], entries, editor.cursor, theme);
+            list(frame, content, entries, editor.cursor, theme);
             if let Some(id) = ids.get(editor.cursor) {
                 if let Some(role) = app.roles.iter().find(|r| r.id == *id) {
                     help.push(line(role.guidance.clone()));
@@ -647,12 +913,18 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         }
         Stage::Picker => {
             let panes =
-                Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).split(rows[1]);
+                Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).split(content);
             paragraph(
                 frame,
                 panes[0],
                 vec![
-                    line(format!("Search: {}_", editor.query)),
+                    Line::from(vec![
+                        Span::styled("Search: ", theme.muted()),
+                        Span::styled(
+                            input_tail(&editor.query, panes[0].width.saturating_sub(8)),
+                            theme.accent(),
+                        ),
+                    ]),
                     line(format!(
                         "Provider: {}  [F4]{}",
                         editor.provider.as_deref().unwrap_or("all allowed"),
@@ -782,7 +1054,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
                     Paragraph::new(Text::from(lines))
                         .wrap(Wrap { trim: false })
                         .scroll((editor.preview_scroll, 0)),
-                    rows[1],
+                    content,
                 );
                 help.push(line(
                     "Enter confirms this change. Esc returns without saving.",
@@ -791,7 +1063,7 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
             } else {
                 paragraph(
                     frame,
-                    rows[1],
+                    content,
                     vec![line(if app.busy {
                         "Validating draft..."
                     } else {
@@ -802,11 +1074,16 @@ fn configuration(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         }
     }
     if let Some(error) = &app.catalog_error {
-        help.insert(0, line(error.clone()));
+        help.insert(0, Line::styled(clean(error), theme.accent()));
     } else if app.catalog_loading && editor.stage != Stage::Picker {
         help.insert(0, line("Loading Pi catalog..."));
     }
-    paragraph(frame, rows[2], help);
+    frame.render_widget(
+        Paragraph::new(help)
+            .style(theme.muted())
+            .wrap(Wrap { trim: false }),
+        guidance,
+    );
 }
 
 fn model_source<'a>(app: &'a App, id: &str) -> &'a str {
@@ -848,6 +1125,7 @@ fn model_source<'a>(app: &'a App, id: &str) -> &'a str {
 
 fn history(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
     if app.runs.is_empty() {
+        let area = panel(frame, area, "Recorded runs", theme);
         paragraph(
             frame,
             area,
@@ -866,26 +1144,22 @@ fn history(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
         detail(frame, area, app, theme);
         return;
     }
-    let (list_area, detail_area) = if area.width >= 100 {
-        let cols = Layout::horizontal([Constraint::Percentage(43), Constraint::Percentage(57)])
-            .split(area);
-        (cols[0], Some(cols[1]))
+    let (list_area, detail_area) = if frame.area().width >= 100 {
+        let cols = Layout::horizontal([
+            Constraint::Percentage(43),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(area);
+        (cols[0], Some(cols[2]))
     } else {
         (area, None)
     };
-    let rows = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Min(1),
-        Constraint::Length(2),
-    ])
-    .split(list_area);
-    frame.render_widget(
-        Paragraph::new("Recorded runs").style(theme.accent()),
-        rows[0],
-    );
+    let list_area = panel(frame, list_area, "Recorded runs", theme);
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(2)]).split(list_area);
     list(
         frame,
-        rows[1],
+        rows[0],
         app.runs
             .iter()
             .map(|r| {
@@ -907,7 +1181,7 @@ fn history(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
     );
     paragraph(
         frame,
-        rows[2],
+        rows[1],
         vec![
             line(if app.next_cursor.is_some() {
                 "n  Load older runs"
@@ -928,6 +1202,7 @@ fn number(value: Option<u64>) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 fn detail(frame: &mut Frame, area: Rect, app: &App, theme: Theme) {
+    let area = panel(frame, area, app.section.label(), theme);
     let Some(run) = &app.detail.run else {
         paragraph(frame, area, vec![line("Loading selected recording...")]);
         return;

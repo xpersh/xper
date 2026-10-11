@@ -24,11 +24,34 @@ provider contexts. Status and Metrics share a project history and selected recor
 | F5 in Profiles / Settings | Reload files, retaining draft edits for a fresh review |
 
 Printable shortcuts become ordinary text in name and model-search fields.
-Wide terminals show navigation and details alongside content. At 80 columns,
-Enter opens details; at 60 columns one primary view remains. Below 48×12 a
-resize message preserves the current draft and suspends actions except Ctrl+C.
-`--ascii` avoids decorative Unicode;
-`NO_COLOR` disables automatic colors while selection remains visible.
+At 120 columns and above, navigation appears beside the content. From 80 to
+119 columns, sections appear as tabs; narrower terminals show the current
+section and the section-switching shortcuts. Wide content areas show recording
+details alongside the history list; Enter opens a dedicated detail view.
+Below 48×12 a resize message preserves the current draft and suspends actions
+except Ctrl+C.
+
+## Presentation
+
+The five sections use shared panels with thin, rounded borders, consistent
+spacing, and emphasized headings. Labels and values are aligned where space
+allows, while secondary information uses subdued styles and keyboard hints
+emphasize the available keys.
+Cyan accents highlight headings and the active selection; the dashboard keeps
+the terminal's default foreground and background, so it follows light and dark
+terminal themes. Selection combines a visible marker and bold text with the
+accent color.
+
+Dialogs, name and search fields, notices, and keyboard hints share the same
+visual style. Dialog text wraps to the available width, with space reserved for
+confirmation and cancellation controls. Smaller views reduce padding and
+decorative borders to retain room for content and actions. Resizing does not
+discard the current selection or configuration draft.
+
+`--ascii` uses ASCII borders and selection markers instead of decorative
+Unicode. `NO_COLOR` disables colors; headings and selections remain distinct
+through bold text, markers, and spacing. Neither option changes keyboard
+controls or editing behavior.
 
 ## Profiles
 

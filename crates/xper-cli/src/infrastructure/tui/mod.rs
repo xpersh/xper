@@ -444,3 +444,6 @@ mod tests;
 
 #[cfg(test)]
 mod history_tests;
+
+#[cfg(test)]
+mod visual_tests;

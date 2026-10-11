@@ -15,6 +15,7 @@ not automatically load `AGENTS.md` files from subdirectories.
    | Area | Instructions and reference |
    | --- | --- |
    | Rust core and CLI (`crates/`) | [crates/AGENTS.md](crates/AGENTS.md) and [core architecture](docs/architecture.md) |
+   | Shared TypeScript workflow (`adapters/shared/`) | [adapters/shared/AGENTS.md](adapters/shared/AGENTS.md) and [shared architecture](adapters/shared/docs/architecture.md) |
    | Pi adapter (`adapters/pi/`) and `.pi/` integration | [adapters/pi/AGENTS.md](adapters/pi/AGENTS.md) and [Pi architecture](adapters/pi/docs/architecture.md) |
    | Cross-process contract (`schemas/`, `fixtures/`, `xper-protocol`) | [Public protocol](schemas/README.md), [fixtures](fixtures/README.md), and the instructions for affected producers and consumers |
    | A backlog task | Its file in [docs/tasks/](docs/tasks/README.md), including status and acceptance criteria |
@@ -36,7 +37,10 @@ Otherwise, use `rg`; do not generate an index as part of another task.
   Conversation with the user can follow their preferred language.
 - The core resolves configuration and records reported execution facts. Each
   adapter owns its workflow, including phases, gates, retries, approvals,
-  artifacts, and execution budgets. Access the core through the public protocol;
+  artifacts, and execution budgets. Reusable TypeScript behavior belongs in
+  `adapters/shared`; concrete adapters depend on its public exports and own
+  harness integration. Shared never imports a concrete adapter or harness SDK.
+  Access the core through the public protocol;
   do not add workflow decisions to Rust or its replay logic. Read the
   [boundary decision](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
   before changing these responsibilities.
@@ -63,7 +67,7 @@ Otherwise, use `rg`; do not generate an index as part of another task.
 - A deliberate change to boundaries must update the guide and its checks with
   a justification. Do not disable a rule to make code pass when it belongs in
   another module.
-- Do not edit generated output (`target/`, `adapters/pi/dist/`, `node_modules/`)
+- Do not edit generated output (`target/`, `adapters/*/dist/`, `node_modules/`)
   or use local `.xper/` state as a fixture. Tests must use synthetic data and
   isolated resources, without model credentials.
 

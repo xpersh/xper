@@ -37,7 +37,9 @@ is returned as null. Unknown versions, methods, fields, and invalid params fail
 without calling Pi. Responses can arrive out of order; consumers correlate IDs
 and discard search results superseded by newer input.
 
-`describe` reads the eight role IDs and labels from Pi's workflow definitions.
+`describe` reads the eight role IDs and labels from the pure
+`@xper/adapter-shared` definitions and role metadata. It imports no shared
+workflow controller, execution effects, or recorder.
 Guidance follows RFC 0002 and is advisory: it neither assigns models nor imposes
 a frontier capability, price, or separate-provider requirement. Profile routes
 remain manual. A missing route in a prepared profile stops that role; it is not

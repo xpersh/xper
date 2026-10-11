@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PiWorkflow } from "../workflow/controller.js";
-import { WorkflowJournal } from "../workflow/journal.js";
-import { decodeAdapterCheckpoint } from "../workflow/checkpoint/decode.js";
-import { parseJudgmentReport } from "../workflow/judgment/contract.js";
-import { resolutionPath } from "../workflow/judgment/resolution.js";
-import type { JudgmentDecision, JudgmentResolutionInput } from "../workflow/types.js";
+import { PiWorkflow } from "../pi/workflow.js";
+import { WorkflowJournal } from "../../../shared/dist/workflow/journal.js";
+import { decodeAdapterCheckpoint } from "../../../shared/dist/workflow/checkpoint/decode.js";
+import { parseJudgmentReport } from "../../../shared/dist/workflow/judgment/contract.js";
+import { resolutionPath } from "../../../shared/dist/workflow/judgment/resolution.js";
+import type { JudgmentDecision, JudgmentResolutionInput } from "@xper/adapter-shared";
 import { checkpoint, commands, judged, reportFor, required } from "./judgment-harness.js";
-import { completeImplementation, completeVerification } from "./workflow-harness.js";
+import {
+  completeImplementation,
+  completeVerification,
+} from "../../../shared/dist/__tests__/workflow-harness.js";
 
 function input(
   h: Awaited<ReturnType<typeof judged>>,
@@ -258,7 +261,7 @@ test("legacy pending reports migrate and collect missing details without rewriti
       state.judgment.report.digest = content;
       h.artifacts.set(h.reportPath, { content, digest: content });
       await h.controller.stopRecording();
-      const journal = new WorkflowJournal(h.cwd, "session", h.recorder);
+      const journal = new WorkflowJournal(h.cwd, "session", h.recorder, "pi");
       await journal.load();
       await journal.commit({ ...state, version: 8 }, []);
       await journal.close();
@@ -475,7 +478,7 @@ test("damaged saved resolutions and checkpoint references cannot replace a human
     state.closure.verdict = "REJECT";
     state.closure.status = "rejected";
     state.closure.resolution.decision = "REJECT";
-    const journal = new WorkflowJournal(h.cwd, "session", h.recorder);
+    const journal = new WorkflowJournal(h.cwd, "session", h.recorder, "pi");
     await journal.load();
     await journal.commit(state, []);
     await journal.close();

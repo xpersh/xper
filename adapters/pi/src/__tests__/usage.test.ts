@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { delegateWorkflow } from "../actions/delegate-workflow.js";
+import { delegateWorkflow } from "@xper/adapter-shared/actions";
 import { runPiChild } from "../execution/child.js";
-import type { ModelUsage } from "../workflow/types.js";
+import type { ModelUsage } from "@xper/adapter-shared";
 
 const fakeExecutor = (messages: unknown[]) => `
   process.stdin.once('data', () => {

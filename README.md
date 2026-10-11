@@ -1,9 +1,9 @@
 # xper
 
 `xper` is a multi-agent development harness based on Extreme Programming
-practices. Its Pi extension owns the workflow and agent execution. The Rust
-service resolves configuration and model profiles, records reported events,
-and makes the execution history available for inspection and metrics.
+practices. Its shared TypeScript package owns the workflow; the Pi extension
+integrates agent execution, sessions, and tools. The Rust service resolves
+configuration and model profiles, records reported events, and makes the execution history available for inspection and metrics.
 
 > Status: Discovery, Define, Design, Breakdown, and Plan are executable from
 > Pi with artifact contracts, feedback, gates, and persisted evidence. After a
@@ -39,6 +39,7 @@ implemented, verified, and accepted independently, rather than an entire project
 ## Design documents
 
 - [xper core architecture and use cases](docs/architecture.md)
+- [Shared adapter workflow architecture](adapters/shared/docs/architecture.md)
 - [Pi adapter architecture](adapters/pi/docs/architecture.md)
 - [RFC 0006: Configuration, recording, and adapter-owned workflows](docs/rfcs/0006-configuration-recording-and-adapter-workflows.md)
 - [RFC 0007: Explicit adapter state machines](docs/rfcs/0007-explicit-adapter-state-machines.md)
@@ -87,17 +88,17 @@ knowledge execution, and sequential per-increment delivery. It does
 not require an external agent-manager package.
 
 Pi is the first adapter, not a Rust dependency. Through a versioned protocol it
-requests resolved configuration and reports events to the Rust service. Pi
-owns phases, gates, retries, approvals, artifact validation, and budgets. Rust
-checks recording integrity and serves the history; it does not decide which
+requests resolved configuration and reports events to the Rust service. The shared
+TypeScript package owns phases, gates, retries, approvals, artifact validation, and
+budgets; Pi provides its concrete integration. Rust checks recording integrity and serves the history; it does not decide which
 step may run next. A future adapter can use a different workflow with the
 same configuration and recording service.
 
-Pi expresses Knowledge, Implementation, Verification, and Judgment as separate pure typed state machines,
-with versioned graphs shared by execution and future inspection. Its runtime
-performs artifact and process effects outside the transition functions. The
-knowledge instance completes with a sealed Plan; `pi.implementation` and
-`pi.verification` instances then deliver each increment sequentially under the
+Shared expresses Knowledge, Implementation, Verification, and Judgment as separate
+pure typed state machines, with versioned graphs used by execution and future
+inspection. Its runtime performs artifact and process effects outside the transition functions. The
+knowledge instance completes with a sealed Plan; `xper.implementation` and
+`xper.verification` instances then deliver each increment sequentially under the
 same open run. An ordinary rejection creates a fresh Implementation instance
 with the prior evidence. A structured criteria or design rejection reopens the
 same Knowledge instance, invalidates the obsolete Plan, and conservatively
@@ -108,6 +109,23 @@ An explicit approval applies ACCEPT or REJECT and closes the run, or applies
 Judge feedback to reopen delivery, Define, or Design. Every next role remains
 explicitly delegated. Debt and human decisions require a confirmed interactive
 resolution; a read-only graph UI remains backlog work.
+
+`@xper/adapter-shared` is a private Node/ESM workspace. Its pure root exposes
+workflow types, definitions and role capabilities; `/workflow`, `/actions`,
+`/execution`, `/bridge`, and `/configuration` expose the corresponding runtime
+boundaries. `XperWorkflow` requires an explicit adapter identity and dependencies;
+Pi keeps its public `PiWorkflow` facade and existing exports. Shared owns prompts,
+artifacts, Git/test checks, recovery, and telemetry; Pi owns native tool mapping,
+models, child processes, session lifecycle, dialogs, and inspection. A future
+OpenCode adapter can reuse this package; OpenCode is not implemented yet.
+
+New runs use the `xper.*` definition family. Recovered `pi.*` runs retain that
+family, including subsequently created delivery or Judgment instances. Both have
+the same rules and topology at corresponding versions. Checkpoint format 9 and
+historical migrations remain supported; unknown or mixed definitions are rejected.
+Older adapter builds cannot resume new `xper.*` runs. Pi keeps its `.xper/pi`
+checkpoint/cache locations and `.xper/artifacts` paths. See the
+[compatibility rules](adapters/shared/docs/architecture.md#definitions-identity-and-compatibility).
 
 Pi creates its local workflow immediately. Bridge connection, configuration
 preparation, and event delivery run in the background. Starting, delegating,
@@ -318,15 +336,16 @@ npm test              # Rust + TypeScript tests
 ```
 
 `npm run format` formats Rust and TypeScript/JavaScript/JSON. The same set of
-gates runs in CI.
+gates runs in CI. Both TypeScript workspaces participate. Pi build and typecheck
+prepare shared first, so those commands work without preexisting `dist` output.
 
 ### Development with agents
 
 Start with [AGENTS.md](AGENTS.md): it explains what to read before editing,
 how to choose a module, and what to verify before delivery. Area-specific
-rules live alongside their code: [Rust core](crates/AGENTS.md) and
-[Pi adapter](adapters/pi/AGENTS.md). If the harness does not load instructions
-from subdirectories, read the relevant area's instructions explicitly.
+rules live alongside their code: [Rust core](crates/AGENTS.md),
+[shared workflow](adapters/shared/AGENTS.md), and [Pi adapter](adapters/pi/AGENTS.md).
+If the harness does not load instructions from subdirectories, read the relevant area's instructions explicitly.
 
 The architecture guides explain the decisions; `AGENTS.md` files turn them
 into working instructions, and boundary checks detect some violations in CI.
@@ -337,9 +356,9 @@ and validation evidence.
 The `.pi/` configuration runs the product and serves a different purpose from
 these instructions for developing xper.
 
-## Initial layout
+## Repository layout
 
-XP-002 creates only the modules needed for M1:
+The repository separates the core, reusable workflow, and concrete integrations:
 
 ```text
 crates/
@@ -350,7 +369,8 @@ crates/
 ├── xper-store-sqlite/   # persistence infrastructure
 └── xper-cli/            # xper binary
 adapters/
-└── pi/                  # adapter TypeScript package
+├── shared/              # private reusable TypeScript workflow and host support
+└── pi/                  # Pi integration and compatibility exports
 schemas/                 # public JSON Schema boundary
 fixtures/                # neutral messages for contract tests
 ```
@@ -362,12 +382,16 @@ a separate module boundary.
 `scripts/check-core-boundaries.mjs` validates crate architecture: the domain
 cannot have dependencies or use I/O APIs, application dependencies point
 inward, and infrastructure implements the core ports. Each adapter maintains
-its own checks: Pi's live in `adapters/pi/scripts/check-boundaries.mjs` and
-protect both its internal structure and access to the core exclusively through
-the public protocol.
+its own integration checks in its package. Shared's checks live in
+`adapters/shared/scripts/check-boundaries.mjs` and protect pure workflow rules,
+runtime/effect separation, and access to Rust through the public protocol. Pi's
+checks live in `adapters/pi/scripts/check-boundaries.mjs` and enforce integration
+ownership and the public shared API, including pure-only inspection dependencies.
+Shared cannot depend on Pi or any other concrete harness SDK.
 
 `npm run boundaries` runs checks for the core and all registered workspaces.
 They can run separately with `npm run boundaries:core` and
+`npm run boundaries --workspace @xper/adapter-shared` or
 `npm run boundaries --workspace @xper/adapter-pi`.
 
 Each adapter maintains its architecture guide in its own package. Adapters
@@ -385,7 +409,8 @@ frames; diagnostics go to `stderr`. The public contract is in
 [schemas/protocol-v1.schema.json](schemas/protocol-v1.schema.json), with shared
 test messages in [fixtures/protocol-v1.json](fixtures/protocol-v1.json).
 
-The TypeScript client exports `connectBridge` from `@xper/adapter-pi`. It sends
+The TypeScript client exports `connectBridge` from `@xper/adapter-shared/bridge`,
+with a compatibility reexport from `@xper/adapter-pi`. It sends
 `initialize` with the adapter name, version, and capabilities; the bridge asks
 the client for `capabilities`, and the client queries the bridge's capabilities.
 After the handshake, both peers can initiate requests. `ping` checks the

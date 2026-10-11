@@ -1,9 +1,9 @@
-import type { JudgmentReport } from "../workflow/judgment/contract.js";
+import type { JudgmentReport } from "@xper/adapter-shared";
 import type {
   JudgmentApproval,
   JudgmentDecision,
   JudgmentResolutionInput,
-} from "../workflow/types.js";
+} from "@xper/adapter-shared";
 import type { PiContext } from "./types.js";
 
 /** Only the command's human dialog constructs a resolution; delegation never calls this. */

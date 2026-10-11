@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-09-28
 - Builds on: [RFC 0006](0006-configuration-recording-and-adapter-workflows.md)
-- Scope: Pi knowledge workflow, composition boundaries, and future inspection
+- Scope: shared adapter workflows, composition boundaries, compatibility, and future inspection
 
 ## Decision
 
@@ -12,8 +12,10 @@ transition function. Keep its runtime, artifact reads, model execution, and
 local persistence outside that function. Use the same versioned, serializable
 workflow definition for permitted graph transitions and future visualization.
 
-This makes existing decisions explicit; it does not change the phase contracts,
-authorize automatic delegation, or implement delivery, verification, or a UI.
+The original extraction made existing decisions explicit without changing phase
+contracts, authorizing automatic delegation, or adding a UI. Later delivery and
+Judgment implementations retain the boundaries below; the current shared-package
+revision is recorded at the end of this RFC.
 The machine constrains protocol steps and evidence. Models retain responsibility
 for their reasoning within an assignment's contract.
 
@@ -45,14 +47,14 @@ background according to RFC 0006.
 The graph definition is data: stable node and edge IDs, explicit source and
 target nodes, transition meaning, and labels. Execution uses those edges;
 array order is not a hidden transition rule. Guards and artifact semantics
-remain typed Pi code. A graph edge describes a possible transition, not proof
+remain typed adapter workflow code. A graph edge describes a possible transition, not proof
 that the current evidence satisfies its gate.
 
 | Identity or version | Meaning |
 | --- | --- |
 | Definition ID and version | Which workflow and graph semantics an instance uses |
 | Definition format version | How the serializable graph is represented |
-| Checkpoint format version | How Pi validates and restores persisted runtime state |
+| Checkpoint format version | How the workflow validates and restores persisted runtime state |
 | Run ID | Correlation for the overall development objective |
 | Workflow instance ID | One execution of a particular definition within that run |
 | Visit ID | One knowledge phase entry, including revisits; completion retains the final phase visit |
@@ -80,20 +82,21 @@ Plan. Completion means that this knowledge instance has a validated, sealed
 Execution Plan. It does not mean that the development objective has been
 implemented, independently verified, accepted, or closed.
 
-Future coordination consumes that Plan by artifact identity and digest. It can
-create separate Implementation and Verification instances for each increment,
+Coordination consumes that Plan by artifact identity and digest and creates
+separate Implementation and Verification instances for each increment,
 linked to the same run, increment, and plan revision. Multiple increment
 instances may coexist when the Plan's dependencies, workspace ownership, and
 budgets permit it. Each flow owns its node vocabulary, transitions, checkpoint,
 and evidence contracts. Do not append every future node to a global `Phase`
 union or expand the knowledge reducer into the whole product's state machine.
 
-The coordinator will own cross-flow scheduling and handoff; individual flows
+The coordinator owns cross-flow scheduling and handoff; individual flows
 own their internal transitions. Verification feedback may request implementation
 rework or a knowledge revisit. That request must identify its cause and affected
 evidence; it does not directly mutate another flow's state. A changed Plan must
 be reconciled with existing increment work before further dispatch. Final
-acceptance and run closure remain [XP-012](../tasks/012-judgment-day.md).
+acceptance and run closure are implemented separately by explicit Judgment
+review and approval in [XP-012](../tasks/012-judgment-day.md).
 
 ### Delivery staging revision — 2026-09-28
 
@@ -133,7 +136,7 @@ The implementation reports `workflow.definition`, `workflow.position`, traversed
 instance references. A definition can be reported again after runtime reload.
 Position changes and graph transitions are distinct: settling an attempt does
 not necessarily leave its node. Completion reports node `ready` and keeps the
-final Plan visit. The [Pi guide](../../adapters/pi/docs/architecture.md#reported-topology-and-position)
+final Plan visit. The [shared guide](../../adapters/shared/docs/architecture.md#reported-topology-and-position)
 describes the event fields and compatibility status.
 
 Graph delivery and inspection are not execution prerequisites. No dashboard or
@@ -142,9 +145,10 @@ tracks the follow-on work.
 
 ## Recovery and verification
 
-The implemented knowledge definition is `pi.knowledge` at version 1. Its
-checkpoint format is independently versioned: format 2 migrates valid format-1
-state in memory while preserving existing identities and pending facts. A read
+The initial implementation used `pi.knowledge` at version 1 and checkpoint
+format 2, migrating valid format-1 state in memory while preserving existing
+identities and pending facts. Current definitions and format compatibility are
+specified in the shared-definition revision below. A read
 alone does not rewrite the checkpoint format; the next commit with new facts
 persists the new format. Background delivery may still save the existing journal
 while retaining its old state and the original pending event identities.
@@ -161,3 +165,41 @@ alongside execution behavior so a diagram cannot drift into a second workflow.
 Recovery tests must cover supported migrations and reject unknown definitions
 or damaged state without inventing progress. Runtime tests retain the guarantee
 that missing, rejecting, and never-resolving Rust cannot delay local execution.
+
+## Shared definition family revision — 2026-10-12
+
+`@xper/adapter-shared` owns the four concrete workflow machines and their runtime,
+with Pi consuming its public API. `XperWorkflow` owns one serialization and commit
+path; Pi's `PiWorkflow` facade supplies adapter identity and integration effects.
+No global engine, shared phase enum, or second transition owner is introduced.
+The pure root is usable by inspection without loading controller, executors, or
+recording. See the [shared architecture](../../adapters/shared/docs/architecture.md).
+
+New runs use `xper.knowledge@2`, `xper.implementation@1` (or `@2` for authorized
+rework), `xper.verification@1`, and `xper.judgment@1`. The `xper.*` family has the
+same rules and graph topology as corresponding `pi.*` versions; only definition
+IDs differ. Adapter identity used for recording and storage is a separate value.
+An adapter may therefore record itself as `pi` while executing `xper.*` workflows.
+
+A recovered run retains its definition family. Every later instance, including
+ordinary delivery, rework, and Judgment, derives that family from the recovered
+state. Flow resolvers accept only supported ID/version pairs; composed recovery
+rejects mixed families and unknown references. Topology and event construction
+resolve the definition referenced by each state, including historical states,
+rather than assuming the latest definition constant. Pending events and historical
+identities retain their original content.
+
+Checkpoint format remains 9 because the envelope structure has not changed.
+Existing envelope and Knowledge-state migrations preserve the `pi.*` family and
+all stable IDs and evidence. Existing migrations may advance a supported legacy
+definition version within that family; extraction does not rebrand the run.
+Older builds understanding only `pi.*` cannot recover new `xper.*` runs. Rust's
+opaque inspection and protocol version remain unchanged.
+
+Tests compare matching graphs and rules across families and exercise recovered
+`pi.*` runs through later delivery, feedback, rework, approval, and closure. They
+reject unknown/mixed references and preserve pending facts through recovery.
+A synthetic non-Pi adapter verifies explicit identity, local-storage isolation,
+and execution independent of unavailable or unresolved recording. Each package
+owns its boundary tests; shared continues to enforce deterministic pure transitions
+and explicit effect dependencies.

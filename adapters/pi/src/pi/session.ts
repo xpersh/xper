@@ -1,9 +1,13 @@
-import { BridgeClient, type BridgeHandshake, type BridgeOptions } from "../bridge/client.js";
-import { ProtocolFailure, errorCode } from "../bridge/protocol.js";
-import { XperClient, type RecorderClient } from "../bridge/xper-client.js";
+import {
+  BridgeClient,
+  type BridgeHandshake,
+  type BridgeOptions,
+} from "@xper/adapter-shared/bridge";
+import { ProtocolFailure, errorCode } from "@xper/adapter-shared/bridge";
+import { XperClient, type RecorderClient } from "@xper/adapter-shared/bridge";
 import { listAvailableModels } from "../execution/models.js";
-import { PiWorkflow } from "../workflow/controller.js";
-import type { RunStatus } from "../workflow/types.js";
+import { PiWorkflow } from "./workflow.js";
+import type { RunStatus } from "@xper/adapter-shared";
 import { PreparedConfiguration } from "./configuration.js";
 import { PiObservations } from "./observations.js";
 import type { PiContext } from "./types.js";

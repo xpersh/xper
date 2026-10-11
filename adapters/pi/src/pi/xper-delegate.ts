@@ -1,5 +1,5 @@
-import { delegateWorkflow } from "../actions/delegate-workflow.js";
-import type { DelegationDependencies } from "../actions/delegation.js";
+import { delegateWorkflow } from "@xper/adapter-shared/actions";
+import type { DelegationDependencies } from "@xper/adapter-shared/actions";
 import type { XperSession } from "./session.js";
 import type { PiExtensionAPI } from "./types.js";
 

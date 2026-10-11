@@ -1,17 +1,18 @@
-import type { BridgeOptions } from "./bridge/client.js";
-import { saveArtifact } from "./execution/artifacts.js";
+import { resolveAgent } from "@xper/adapter-shared";
+import type { BridgeOptions } from "@xper/adapter-shared/bridge";
+import { saveArtifact } from "@xper/adapter-shared/execution";
 import { runPiChild } from "./execution/child.js";
-import { runImplementation } from "./execution/implementation.js";
-import { runJudgment } from "./execution/judgment.js";
+import { runImplementation } from "@xper/adapter-shared/execution";
+import { runJudgment } from "@xper/adapter-shared/execution";
 import { piModelOptions } from "./execution/models.js";
-import { resolveAgent, toolsForRole } from "./execution/roles.js";
-import { runVerification } from "./execution/verification.js";
+import { toolsForRole } from "./execution/roles.js";
+import { runVerification } from "@xper/adapter-shared/execution";
 import { registerPiHooks } from "./pi/hooks.js";
 import { XperSession } from "./pi/session.js";
 import type { PiExtensionAPI } from "./pi/types.js";
 import { registerXperCommand } from "./pi/xper-command.js";
 import { registerXperDelegate } from "./pi/xper-delegate.js";
-import { readEvidence } from "./workflow/evidence.js";
+import { readEvidence } from "@xper/adapter-shared/execution";
 
 const registrationChannel = "xper:extension:claim:v1";
 

@@ -25,13 +25,16 @@
     "boundaries": "node --test scripts/architecture.test.mjs && node scripts/check-boundaries.mjs",
     "build": "node scripts/build.mjs",
     "test": "npm run build && node --test --test-concurrency=1 dist/__tests__/*.test.js",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "prebuild": "npm --prefix ../.. run build --workspace @xper/adapter-shared",
+    "pretypecheck": "npm --prefix ../.. run build --workspace @xper/adapter-shared"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.87.1",
-    "winston": "3.19.0"
+    "winston": "3.19.0",
+    "@xper/adapter-shared": "0.1.0"
   }
 }

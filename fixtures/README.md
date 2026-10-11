@@ -7,8 +7,8 @@ must not contain credentials, prompts, or user source code.
 errors, and invalid messages for the Pi configuration inspection helper. Both
 schema checks and adapter tests consume it; its model IDs are placeholders.
 
-`protocol-v1.json` is read by Rust and TypeScript contract tests. Each case
-contains a `message`; invalid envelopes also specify the expected `errorCode`.
+`protocol-v1.json` is read by Rust and the shared TypeScript protocol tests.
+Each case contains a `message`; invalid envelopes also specify the expected `errorCode`.
 
 `installations/valid`, `installations/partial`, and `installations/incompatible`
 are synthetic installation snapshots used by the CLI integration tests. Valid
@@ -19,7 +19,7 @@ preserves user-managed Pi resources. Version failures are supplied through a
 fake Pi executable; every test uses an isolated home directory.
 
 `knowledge-v1.json` contains synthetic Definition, Design, Story Map, Execution
-Plan, and feedback artifacts. Pi workflow and fake-executor integration tests
+Plan, and feedback artifacts. Shared workflow and fake-executor integration tests
 consume these examples. The Rust core does not deserialize or validate knowledge
 artifacts. Their input IDs are replaced by actual registered IDs during the
 integration test. `npm run test:contracts` validates the fixture files against
@@ -42,5 +42,11 @@ No verdict in this fixture represents an applied acceptance or run closure.
 The Judgment fixtures also include structured debt and human questions alongside
 legacy recommendations without those fields. `judgment-resolution-v1.json` contains
 synthetic explicit human resolutions bound to report/Plan/revision identities. Shared
-schema checks cover their shape; Pi tests additionally enforce exact source details,
-reference membership, debt acceptance, persistence, replay and human-only command UI.
+schema checks cover their shape; shared workflow tests enforce exact source details,
+reference membership, debt acceptance, persistence, and replay. Pi tests cover the
+human-only command UI.
+
+The shared extraction does not rebrand these artifact payloads or change their
+schema versions. Definition-family recovery cases use synthetic checkpoints in
+the shared test suites, preserving historical `pi.*` facts and exercising new
+`xper.*` runs. No fixture is copied from a developer's `.xper/` state.

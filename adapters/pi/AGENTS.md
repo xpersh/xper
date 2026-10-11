@@ -1,93 +1,52 @@
 # Working on the Pi adapter
 
-Apply these instructions together with the [root AGENTS.md](../../AGENTS.md).
-First read the [adapter architecture](docs/architecture.md), including its
-diagram. These rules also guide changes to the checkout's `.pi/` integration.
+Apply these instructions with the [root AGENTS.md](../../AGENTS.md).
+Read the [Pi architecture](docs/architecture.md) and, for shared behavior, the
+[shared instructions](../shared/AGENTS.md) and [architecture](../shared/docs/architecture.md).
+These rules also cover the checkout's `.pi/` integration.
 
 ## Where changes belong
 
 - `src/extension.ts` composes dependencies and registers the extension.
-- `src/inspection/` exposes adapter-owned role descriptions and cached native Pi
+- `src/pi/` translates Pi commands, tools, hooks, dialogs, session lifecycle,
+  observations, and presentation. `workflow.ts` preserves `PiWorkflow` as a facade
+  supplying `adapterId: "pi"`; it does not own a second workflow implementation.
+- `src/pi/configuration.ts` owns Pi preparation/presentation around the shared
+  prepared-configuration cache. Pi owns obtaining its catalog and native models.
+- `src/execution/` owns the child Pi process, credentials/model translation, and
+  mapping shared `read`, `command`, and `modify` capabilities to native tools.
+- `src/inspection/` exposes pure shared role descriptions and cached native Pi
   model search to the configuration screen. Follow [its contract](docs/inspection.md).
-  Keep it independent of workflow execution, recording, and credential handling.
-- `src/pi/` translates Pi commands, tools, and hooks, presents results, and
-  manages the session and observations.
-- `src/actions/` coordinates an integration action with injected dependencies.
-  It does not import Pi APIs, processes, files, or concrete bridge
-  implementations. Test the action with doubles before connecting its entry point.
-- `src/workflow/` owns phases, assignments, attempts, gates, feedback,
-  approvals, artifact contracts, dependency checks, and execution budgets.
-  `knowledge/`, `implementation/`, `verification/`, and `judgment/` own their pure typed
-  transitions, state, artifact contracts, checkpoint decoders, and definitions.
-  `graph.ts` owns vocabulary-neutral topology operations. `checkpoint/` validates
-  and migrates the composed envelope. `delivery/` owns pure coordination across
-  flows: frontier, dependencies, cumulative budgets, feedback and Plan authorization.
-  `runtime/` prepares evidence with explicit effect ports and constructs recorded
-  events; it does not own state or repeat transition rules. `controller.ts` invokes
-  those operations and commits results through one serialized checkpoint owner.
-  New pure modules inherit the directory-based boundary rules; never add an I/O
-  exception merely to make an extraction pass.
-- `src/bridge/xper-client.ts` provides typed configuration, recording, and
-  inspection operations and validates their responses. Keep public core RPC
-  calls in this boundary; workflow decisions are local adapter operations.
-- `src/bridge/client.ts` handles transport, correlation, and the handshake;
-  `src/bridge/protocol.ts` handles contract envelopes and errors.
-- `src/execution/` owns the child Pi process, role prompts, model selection,
-  artifact writing, Git inspection and host-run commands. Keep Implementer and
-  Verifier proposal parsing and runners separate: agent proposals, host evidence,
-  and workflow decisions have different owners. `actions/execution.ts` defines
-  the discriminated request; each delivery role requires its own handoff fields. Judge consumes frozen
-  run-wide evidence through reading tools only; its report does not apply a verdict.
+  Keep it independent of workflow execution, effect runners, and recording.
+- Reusable rules, contracts, actions, evidence, Git/test runners, prompts,
+  checkpoint/recovery, outbox, and protocol client belong in `adapters/shared`.
+  Do not duplicate them here or move workflow decisions into Rust.
 
-The adapter decides gates and transitions and reports the resulting facts to
-the core. Do not import crate internals or delegate these decisions to Rust.
-The core stores adapter checkpoints as opaque data; their schema, validation,
-and recovery belong here. A generic Pi observation does not replace an
-attempt's explicit result.
+Use declared `@xper/adapter-shared` exports, including its `/workflow`, `/actions`,
+`/execution`, `/bridge`, and `/configuration` entries. Do not import production
+internals from shared's source or generated tree. Test-only synthetic builders
+may be reused by tests, but are not a public consumer interface. Preserve Pi's
+existing public exports and extension/inspection entry points.
 
-Preserve the distinction between success, failure, cancellation, and timeout.
-Publish an artifact path only after saving it, and do not overwrite existing
-evidence. Keep stable event IDs when retrying recording after transport failure;
-never rerun an agent merely because its event acknowledgement was lost. A
-recording failure must not turn successful execution into failed execution.
-Report pending or volatile recording honestly and retain recoverable events.
+Construct the local workflow before background bridge setup. No workflow
+operation, including first start, status, recovery, or approval, may await Rust.
+Prepare configuration separately and freeze the latest snapshot or visible Pi
+defaults at run start. Keep catalog calls and remote inspection outside that
+awaited path. Reconnection must not replace local state or interrupt execution.
+Slow or rejecting recording cannot change the attempt's outcome or cause a retry.
 
-No workflow operation may await Rust, including the first session/run, status,
-or recovery. Construct local workflow state before background bridge setup.
-Prepare configuration separately; a new run freezes the latest available
-prepared snapshot or Pi defaults, with degraded preparation visible. A late
-configuration response must not alter an active run. Restore from the local
-checkpoint without first querying the recorder; preserve local integrity checks.
+Preserve `.xper/pi` journals and prepared cache and `.xper/artifacts` evidence.
+New runs use the `xper.*` workflow family; shared preserves `pi.*` on recovery.
+Do not rewrite historical identities or pending events in this facade.
 
-Deliver outbox events through a background worker. Slow calls, unavailable
-recording, or rejected events must not hold the workflow's serialization queue.
-Retain failed deliveries; isolate permanent rejections so other telemetry can
-continue. Tests must exercise unresolved RPC promises as well as explicit
-errors, proving operations complete before Rust responds.
-
-## State machines and future flows
-
-Follow [RFC 0007](../../docs/rfcs/0007-explicit-adapter-state-machines.md).
-Keep transitions deterministic: supply identities, time, configuration, and
-validated evidence explicitly. Do not read files, run agents, call Rust, or
-mutate the input state from the transition function. The controller must not become a
-second owner of transition rules.
-
-Use declared graph edges for transitions; array order is not workflow policy.
-Keep definition identity/version separate from checkpoint format and instance,
-visit, assignment, and attempt identities. A new workflow has its own node
-vocabulary and state; do not add its phases to the knowledge union. Completing
-knowledge hands off the sealed Plan and does not close the overall run.
-
-A future UI consumes versioned definitions and reported positions/history. It
-never runs gates or drives execution; missing or delayed facts stay visibly
-incomplete. Do not add UI, scheduler, or future workflow stubs to this slice.
-When changing state or topology, update migration, reducer, and definition
-consistency tests alongside the behavior.
+Pi gathers explicit human input and displays decisions; shared validates and
+applies them. Keep dialogs outside the workflow serialization queue. Cancellation
+or missing UI must retain pending approval. The delegation tool cannot grant
+human approval or implicitly authorize revised-Plan resumption.
 
 ## Verification
 
-From the root:
+Run from the repository root:
 
 ```bash
 npm run boundaries --workspace @xper/adapter-pi
@@ -95,19 +54,18 @@ npm run typecheck --workspace @xper/adapter-pi
 npm run test --workspace @xper/adapter-pi
 ```
 
-The test command builds the package. Action and client tests use doubles;
-artifact tests use temporary directories. Integration tests require the checkout
-and Rust toolchain, start the bridge, and simulate the Pi process without model
-credentials. Preserve this separation when adding tests.
+Build and typecheck prepare shared first. Tests cover Pi-specific integration with
+simulated child execution, controlled effects, and isolated temporary resources;
+no model credentials are required. Keep pure workflow and host-runner tests with
+shared. Test missing, rejecting, and never-resolving recording at integration
+boundaries without changing local outcomes. Preserve native tool restrictions,
+legacy public imports, and extension/inspection loading from a clean build.
 
-Keep behavior suites flat under `src/__tests__/*.test.ts`; shared harnesses contain
-synthetic builders and doubles. The build removes stale generated suites before
-compiling. Architecture tests check TypeScript import and re-export edges,
-including type-only edges in cycle detection. Pure modules cannot import effects;
-flows may reference another flow's contract types but not its state or decisions.
-Runtime effects arrive through ports, and execution reports evidence without
-importing workflow decisions. File size is a review signal, not a hard limit.
+Keep behavior suites under `src/__tests__/*.test.ts`; shared test harnesses contain
+synthetic data. The build removes stale generated suites. Pi's boundary checker
+protects adapter integration and public imports; shared checks its own internal
+architecture. Do not relax a rule merely to make an extraction pass.
 
-Do not edit `dist/`. For manual integration checks, follow the
+Do not edit `dist/`. For manual integration checks follow the
 [README](../../README.md#relationship-with-pi); a demo does not replace tests.
-Before delivering code changes, also run `npm run check`.
+Run `npm run check` before delivering code changes.

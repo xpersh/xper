@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fuzzyFilter } from "@earendil-works/pi-tui";
-import type { AvailableModel } from "../bridge/xper-client.js";
+import type { AvailableModel } from "@xper/adapter-shared/bridge";
 import { ModelCatalogError } from "../execution/models.js";
 import { InspectionCatalog } from "../inspection/catalog.js";
 import { type InspectionResponse, parseRequest } from "../inspection/protocol.js";
 import { describeRoles } from "../inspection/roles.js";
-import { implementationReworkDefinition } from "../workflow/implementation/definition.js";
-import { judgmentDefinition } from "../workflow/judgment/definition.js";
-import { knowledgeDefinition } from "../workflow/knowledge/definition.js";
-import { verificationDefinition } from "../workflow/verification/definition.js";
+import { implementationReworkDefinition } from "@xper/adapter-shared";
+import { judgmentDefinition } from "@xper/adapter-shared";
+import { knowledgeDefinition } from "@xper/adapter-shared";
+import { verificationDefinition } from "@xper/adapter-shared";
 
 const models: AvailableModel[] = [
   { provider: "corp", model: "fast-coder", reasoning: false },

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import type { ExecutionResult } from "../actions/execution.js";
-import type { AttemptOutcome, ModelUsage } from "../workflow/types.js";
+import type { ExecutionResult } from "@xper/adapter-shared/actions";
+import type { AttemptOutcome, ModelUsage } from "@xper/adapter-shared";
 
 export type DelegateOutcome = AttemptOutcome;
 

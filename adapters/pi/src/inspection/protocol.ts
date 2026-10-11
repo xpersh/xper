@@ -1,4 +1,4 @@
-import type { AvailableModel } from "../bridge/xper-client.js";
+import type { AvailableModel } from "@xper/adapter-shared/bridge";
 import type { RoleDescriptor } from "./roles.js";
 
 export const INSPECTION_VERSION = 1;

@@ -7,7 +7,10 @@ gates, execution-plan validator, or budget admission policy.
 
 [RFC 0006](rfcs/0006-configuration-recording-and-adapter-workflows.md) explains
 this boundary and the source-of-truth guarantees. The
-[Pi guide](../adapters/pi/docs/architecture.md) describes the executable workflow.
+[shared guide](../adapters/shared/docs/architecture.md) describes the executable
+workflow; the [Pi guide](../adapters/pi/docs/architecture.md) describes its harness
+integration. Shared TypeScript owns reusable rules and protocol-client code, with
+no dependency from Rust or shared back into Pi.
 
 Configuration preparation and recording delivery are background services to
 Pi. Workflow start, execution, local status, and recovery do not await Rust.
@@ -211,8 +214,8 @@ workflow merely by inspecting them.
 Configuration retains scope merging, credential rejection, provider allowlists,
 and model/thinking compatibility checks. The existing `workflow.knowledge`
 configuration is passed to Pi as opaque adapter configuration for compatibility.
-Pi validates and applies its budgets and human gates. Core configuration must
-not decide the next role or reinterpret those workflow settings.
+The shared workflow validates and applies its budgets and human gates. Core
+configuration must not decide the next role or reinterpret those workflow settings.
 Pi prepares resolved configuration asynchronously and freezes the latest
 available snapshot, or visible defaults, at run start. Late configuration
 responses do not mutate that active run.

@@ -1,6 +1,6 @@
 /target/
 /node_modules/
-/adapters/pi/dist/
+/adapters/*/dist/
 /.pi/npm/
 /.pi/git/
 /.xper/observations/

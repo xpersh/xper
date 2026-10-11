@@ -1,6 +1,7 @@
 # Knowledge workflow: Discovery through Plan
 
-The Pi adapter implements the five knowledge phases introduced in XP-010.
+The shared TypeScript workflow implements the five knowledge phases introduced
+in XP-010, with Pi providing the current harness integration.
 Each explicit delegation executes one assignment, saves its output, evaluates
 its gate locally, and reports the outcome to Rust. A ready Execution Plan
 completes the knowledge instance; compatibility status still names its phase
@@ -9,14 +10,16 @@ and its dependent Verifier, one increment at a time. Rejection enables a fresh
 bounded Implementation instance unless the Verifier identifies ambiguous
 criteria or an infeasible design. Those concrete problems reopen Define or
 Design and require a revised Plan plus an explicit checkout-resumption decision.
-The adapter does not create worktrees, run increments concurrently, close the
-overall run, or issue a final verdict.
+Knowledge and per-increment delivery do not create worktrees, run increments
+concurrently, or close the overall run. An explicit Judge delegation and approval
+handle the final recommendation and run decision.
 
-These are Pi workflow rules, not core recording rules. Rust resolves
-configuration and preserves the reported events and opaque Pi checkpoint.
+These are shared adapter workflow rules, not core recording rules. Rust resolves
+configuration and preserves the reported events and opaque adapter checkpoint.
 [RFC 0006](rfcs/0006-configuration-recording-and-adapter-workflows.md) explains
-the ownership boundary. Moving these rules into Pi preserves its current gates;
-it does not make every phase transition unrestricted.
+the ownership boundary. Extracting these rules into `@xper/adapter-shared`
+preserves the existing gates. See the
+[shared architecture](../adapters/shared/docs/architecture.md).
 
 Local start, delegation, advancement, approval, status, and checkpoint recovery
 do not wait for Rust. Configuration is prepared separately and events are
@@ -26,7 +29,7 @@ checks still apply.
 
 ## State and composition
 
-The adapter uses an explicit pure state machine and the versioned `pi.knowledge`
+The adapter uses an explicit pure state machine and the versioned `xper.knowledge`
 v2 graph. Declared edges describe forward progress, feedback, and completion,
 including the terminal `ready -> define` and `ready -> design`
 delivery-feedback edges;
@@ -37,17 +40,24 @@ protocol. [RFC 0007](rfcs/0007-explicit-adapter-state-machines.md) defines this
 boundary and the future read-only visualization contract.
 
 The completed instance hands off a sealed Plan by artifact identity and digest.
-The next eligible assignment starts a separate `pi.implementation` v1 instance
+The next eligible assignment starts a separate `xper.implementation` v1 instance
 for its increment, with nodes `implement` and `implemented`. This flow freezes
 the assignment, accepted inputs, direct dependency evidence, criteria,
 verification cases, model, Git base, and limits. It is not an extra Knowledge
 phase. Verification and run closure remain separate responsibilities. A completed Implementation hands its
-exact artifact, digest, base, and resulting commit to a `pi.verification` v1
+exact artifact, digest, base, and resulting commit to a `xper.verification` v1
 instance with nodes `verify`, `verified`, and `rejected`. Histories retain every
 Implementation and Verification instance; only their latest positions are
 projected per increment. Knowledge state v3 can import immutable artifact
 references owned by another flow, so the Verification or Judge result that caused a
 revisit remains an exact assignment input without changing artifact ownership.
+
+These IDs describe new runs. Recovered `pi.*` runs keep their definition family,
+including later delivery, rework, and Judgment instances. Corresponding versions
+have identical topology and rules. Judge-authorized rework uses Implementation
+v2; ordinary delivery retains v1. Checkpoint format 9 is unchanged, and historical
+migrations remain supported. Mixed or unknown definition references fail recovery.
+Old Pi builds that only understand `pi.*` cannot resume new `xper.*` checkpoints.
 
 ## Phase contracts
 

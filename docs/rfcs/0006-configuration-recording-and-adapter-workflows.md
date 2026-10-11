@@ -4,7 +4,7 @@
 - Date: 2026-09-28
 - Supersedes: workflow ownership in RFCs 0001, 0004, and 0005
 - Clarifies: configuration in RFC 0002 and passive observability in RFC 0003
-- Implementation guides: [Rust core](../architecture.md), [Pi adapter](../../adapters/pi/docs/architecture.md)
+- Implementation guides: [Rust core](../architecture.md), [shared workflow](../../adapters/shared/docs/architecture.md), [Pi adapter](../../adapters/pi/docs/architecture.md)
 
 ## Decision
 
@@ -129,11 +129,49 @@ Changes to that policy can now be made and tested within the adapter without
 changing Rust's workflow vocabulary or replay rules.
 
 Other adapters may implement different workflows and still use the same
-configuration and recording service. Shared workflow code can be extracted
-later when there are actual consumers; it is not a reason to restore workflow
-control to Rust or create a speculative framework now.
+configuration and recording service. The shared-package revision below also
+allows reuse of xper's workflow without returning workflow control to Rust or
+creating a generic workflow framework.
 
 Metrics are a central responsibility, but a full metrics CLI, comparison UI,
 and dashboard remain separate work. [XP-013](../tasks/013-metrics-inspection.md)
 tracks those deliverables. The current guides distinguish implemented queries
 and aggregates from that intended direction.
+
+## Shared TypeScript implementation revision — 2026-10-12
+
+Extract reusable adapter behavior into the private Node/ESM workspace
+`@xper/adapter-shared`, with Pi as its first consumer. The dependency direction
+is concrete adapter to shared to public protocol. Shared must never import a
+concrete adapter, its SDK, or Rust internals. This refines the TypeScript package
+boundary without moving any workflow decision into the core.
+
+Shared owns Knowledge, Implementation, Verification and Judgment machines,
+contracts, gates, budgets, feedback, approvals, coordination, evidence, artifacts,
+Git/test runners, role prompts/capabilities, checkpoint recovery, outbox, protocol
+client, and prepared-configuration cache. Pi retains commands, tools, hooks,
+sessions, dialogs, presentation, catalog/credentials/model translation, native
+capability mapping, and child invocation. These are existing responsibilities
+being separated, not an engine or registry anticipating unspecified workflows.
+
+Expose a pure package root for definitions, types, contracts, and roles; expose
+runtime behavior through `/workflow`, `/actions`, `/execution`, `/bridge`, and
+`/configuration`. `XperWorkflow` requires an explicit adapter identity and effect
+dependencies. `PiWorkflow` remains a compatible facade with `adapterId: "pi"`.
+The identity scopes metadata, journal, and configuration cache; Pi keeps `.xper/pi`
+and existing `.xper/artifacts` evidence. Adapters supply cost provenance, with
+Pi continuing to report `pi_estimate`.
+
+The package move retains all nonblocking guarantees above. Configuration
+preparation, bridge connection, outbox delivery, and remote inspection cannot
+become awaited workflow prerequisites. Each run freezes prepared configuration
+or visible defaults. Local state and pending/rejected facts remain usable with
+missing, rejecting, or unanswered Rust calls.
+
+Shared owns the transferred architecture checks for pure rules, effect ports,
+cycles, recording, and the public protocol boundary. Pi owns its integration,
+public shared-import, and inspection checks. Both workspaces participate in root
+verification. This placement follows the responsibility being enforced instead
+of weakening checks during extraction. Shared remains private; OpenCode and
+independent package publication are separate work. Workflow-family compatibility
+is specified in [RFC 0007](0007-explicit-adapter-state-machines.md#shared-definition-family-revision--2026-10-12).

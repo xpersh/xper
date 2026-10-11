@@ -1,0 +1,45 @@
+{
+  "name": "@xper/adapter-shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared TypeScript workflow and public protocol support for xper adapters",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./workflow": {
+      "types": "./dist/workflow.d.ts",
+      "default": "./dist/workflow.js"
+    },
+    "./actions": {
+      "types": "./dist/actions.d.ts",
+      "default": "./dist/actions.js"
+    },
+    "./execution": {
+      "types": "./dist/execution.d.ts",
+      "default": "./dist/execution.js"
+    },
+    "./bridge": {
+      "types": "./dist/bridge.d.ts",
+      "default": "./dist/bridge.js"
+    },
+    "./configuration": {
+      "types": "./dist/configuration.d.ts",
+      "default": "./dist/configuration.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "boundaries": "node --test scripts/architecture.test.mjs && node scripts/check-boundaries.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 dist/__tests__/*.test.js",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

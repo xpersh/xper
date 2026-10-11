@@ -4,10 +4,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { connectBridge } from "../bridge/client.js";
-import { XperClient } from "../bridge/xper-client.js";
+import { connectBridge } from "@xper/adapter-shared/bridge";
+import { XperClient } from "@xper/adapter-shared/bridge";
 import { createXperExtension } from "../extension.js";
-import { PiWorkflow } from "../workflow/controller.js";
+import { PiWorkflow } from "../pi/workflow.js";
 import { binary, fakePi, pidFrom, until, workspace } from "./extension-harness.js";
 
 test("vertical slice persists Discovery, gates Define, recovers the bridge, and distinguishes outcomes", async () => {

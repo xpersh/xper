@@ -1,5 +1,5 @@
 import { fuzzyFilter } from "@earendil-works/pi-tui";
-import type { AvailableModel } from "../bridge/xper-client.js";
+import type { AvailableModel } from "@xper/adapter-shared/bridge";
 import { ModelCatalogError } from "../execution/models.js";
 import { failure, type InspectionResponse, parseRequest } from "./protocol.js";
 import { describeRoles } from "./roles.js";

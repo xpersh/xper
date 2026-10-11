@@ -1,165 +1,156 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkArchitecture, moduleImports } from "./architecture.mjs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+import { checkArchitecture, checkDependencies, moduleImports } from "./architecture.mjs";
 
 const check = (files) => checkArchitecture(new Map(Object.entries(files)));
-test("configuration inspection reads definitions and models without executing a workflow", () => {
+
+test("inspection uses pure shared metadata and bridge types without starting services", () => {
   assert.deepEqual(
     check({
-      "inspection/roles.ts":
-        'import { knowledgeDefinition } from "../workflow/knowledge/definition.js";',
+      "inspection/roles.ts": 'export { describeRoles } from "@xper/adapter-shared";',
+      "inspection/protocol.ts":
+        'import type { AvailableModel } from "@xper/adapter-shared/bridge";',
       "inspection/cli.ts": 'import { listAvailableModels } from "../execution/models.js";',
     }),
     [],
   );
   for (const dependency of [
-    "workflow/controller",
-    "bridge/client",
-    "extension",
-    "execution/child",
+    "@xper/adapter-shared/workflow",
+    "@xper/adapter-shared/bridge",
+    "@xper/adapter-shared/configuration",
+    "@xper/adapter-shared/actions",
+    "@xper/adapter-shared/execution",
+    "../extension.js",
+    "../execution/child.js",
   ]) {
     assert.match(
-      check({ "inspection/cli.ts": `export * from "../${dependency}.js";` }).join("\n"),
+      check({ "inspection/cli.ts": `export * from "${dependency}";` }).join("\n"),
       /must not start workflow or recording/,
     );
   }
 });
-test("all workflow subdirectories inherit purity rules", () => {
+
+test("only the declared shared entrypoints are public dependencies", () => {
+  for (const suffix of ["", "/workflow", "/actions", "/execution", "/bridge", "/configuration"])
+    assert.deepEqual(
+      check({ "extension.ts": `export * from "@xper/adapter-shared${suffix}";` }),
+      [],
+    );
+  for (const dependency of [
+    "@xper/adapter-shared/workflow/controller",
+    "@xper/adapter-shared/dist/workflow.js",
+    "@xper/adapter-shared/src/workflow/controller.js",
+    "@xper/adapter-other",
+    "@xper/core",
+    "xper-application",
+  ])
+    assert.match(
+      check({ "extension.ts": `import type { Value } from "${dependency}";` }).join("\n"),
+      /private xper module/,
+    );
   assert.match(
-    check({ "workflow/knowledge/gate.ts": 'import { readFile } from "node:fs/promises";' }).join(
+    check({ "extension.ts": 'export * from "../../shared/src/workflow/controller.js";' }).join(
       "\n",
     ),
-    /must remain pure/,
+    /public package entrypoints/,
   );
-  assert.match(
-    check({ "workflow/delivery/select.ts": "const now = Date.now();" }).join("\n"),
-    /explicit inputs/,
-  );
+  assert.deepEqual(checkDependencies(["@xper/adapter-shared", "@earendil-works/pi-tui"]), []);
+  assert.match(checkDependencies(["@xper/core"]).join("\n"), /private xper package/);
 });
-test("re-exports cannot hide dependencies on effects", () => {
-  assert.match(
-    check({ "workflow/knowledge/state.ts": 'export * from "../runtime/evidence.js";' }).join("\n"),
-    /must remain pure/,
-  );
-  assert.match(
-    check({
-      "workflow/knowledge/state.ts": 'export { XperClient } from "../../bridge/xper-client.js";',
-    }).join("\n"),
-    /must remain pure/,
-  );
-});
-test("type-only protocol references stay available to pure decisions", () => {
+
+test("Pi executors cannot drive shared workflow decisions or access recording", () => {
+  for (const dependency of ["workflow", "actions", "bridge", "configuration"])
+    assert.match(
+      check({
+        "execution/child.ts": `import { value } from "@xper/adapter-shared/${dependency}";`,
+      }).join("\n"),
+      /not drive workflow decisions/,
+    );
   assert.deepEqual(
     check({
-      "workflow/knowledge/state.ts":
-        'import type { ModelSelection } from "../../bridge/xper-client.js";',
+      "execution/roles.ts": 'import { capabilitiesForRole } from "@xper/adapter-shared";',
+      "execution/child.ts": 'import type { ExecutionResult } from "@xper/adapter-shared/actions";',
     }),
     [],
   );
+});
+
+test("workflow commands and recording stay behind their local typed boundaries", () => {
+  assert.match(
+    check({ "pi/session.ts": 'client.request("configuration.resolve");' }).join("\n"),
+    /typed xper client/,
+  );
+  assert.match(
+    check({ "pi/xper-command.ts": 'client.request("run.start");' }).join("\n"),
+    /workflow commands inside adapters/,
+  );
+  assert.match(
+    check({ "pi/xper-tools.ts": "await client.waitForRecording();" }).join("\n"),
+    /must not await telemetry/,
+  );
+});
+
+test("dynamic and re-export dependencies cannot evade entrypoint restrictions", () => {
+  assert.match(
+    check({
+      "inspection/cli.ts": 'const service = import("@xper/adapter-shared/workflow");',
+    }).join("\n"),
+    /must not start workflow or recording/,
+  );
+  for (const source of [
+    'import { type BridgeClient } from "@xper/adapter-shared/bridge";',
+    'export { type BridgeClient } from "@xper/adapter-shared/bridge";',
+    'import bridge = require("@xper/adapter-shared/bridge");',
+  ])
+    assert.match(
+      check({ "inspection/cli.ts": source }).join("\n"),
+      /must not start workflow or recording/,
+    );
   assert.equal(
-    moduleImports("workflow/test.ts", 'export type { Value } from "./types.js";')[0].typeOnly,
+    moduleImports("types.ts", 'export type { Value } from "./model.js";')[0].typeOnly,
     true,
   );
 });
-test("cycles include re-exports and type-only edges", () => {
+
+test("cycles include type-only imports and re-exports", () => {
   assert.match(
     check({
-      "workflow/a.ts": 'export * from "./b.js";',
-      "workflow/b.ts": 'import type { A } from "./a.js";',
+      "pi/a.ts": 'export * from "./b.js";',
+      "pi/b.ts": 'import type { A } from "./a.js";',
     }).join("\n"),
     /Dependency cycle/,
   );
 });
-test("inline type specifiers and import-equals preserve their runtime dependency", () => {
-  for (const source of [
-    'import { type Stats } from "node:fs";',
-    'export { type Stats } from "node:fs";',
-    'import fs = require("node:fs");',
-  ]) {
-    assert.match(check({ "workflow/knowledge/state.ts": source }).join("\n"), /must remain pure/);
+
+test("package self references resolve to source without generated declarations", () => {
+  const directory = dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
+  const config = ts.readConfigFile(`${directory}/tsconfig.json`, ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, directory);
+  const host = {
+    ...ts.sys,
+    fileExists: (file) => !file.replaceAll("\\", "/").includes("/dist/") && ts.sys.fileExists(file),
+    directoryExists: (path) =>
+      !/\/dist(?:\/|$)/.test(path.replaceAll("\\", "/")) && ts.sys.directoryExists(path),
+  };
+  for (const entry of ["index"]) {
+    const specifier = `@xper/adapter-pi${entry === "index" ? "" : `/${entry}`}`;
+    const result = ts.resolveModuleName(
+      specifier,
+      `${directory}/src/__tests__/consumer.test.ts`,
+      parsed.options,
+      host,
+      undefined,
+      undefined,
+      ts.ModuleKind.ESNext,
+    );
+    assert.equal(
+      result.resolvedModule?.resolvedFileName.replaceAll("\\", "/"),
+      `${directory}/src/${entry}.ts`.replaceAll("\\", "/"),
+      specifier,
+    );
   }
-  assert.deepEqual(
-    check({
-      "workflow/knowledge/state.ts": 'import type fs = require("node:fs");',
-    }),
-    [],
-  );
-});
-test("actions cannot import concrete executors and bridge cannot depend on workflow", () => {
-  assert.match(
-    check({ "actions/delegate.ts": 'import { run } from "../execution/child.js";' }).join("\n"),
-    /receive Pi execution/,
-  );
-  assert.match(
-    check({
-      "bridge/client.ts": 'import { decide } from "../workflow/knowledge/machine.js";',
-    }).join("\n"),
-    /must not depend on Pi workflow/,
-  );
-});
-test("dynamic imports are included in dependency checks", () => {
-  assert.match(
-    check({ "workflow/knowledge/state.ts": 'const io = import("node:fs");' }).join("\n"),
-    /must remain pure/,
-  );
-});
-test("runtime encoding and journal storage stay within their boundaries", () => {
-  assert.deepEqual(
-    check({
-      "workflow/runtime/events.ts": 'import { Buffer } from "node:buffer";',
-      "workflow/journal.ts": 'import { readFile } from "node:fs/promises";',
-    }),
-    [],
-  );
-});
-
-test("runtime preparation uses injected effects and execution cannot drive decisions", () => {
-  assert.match(
-    check({
-      "workflow/runtime/start.ts": 'import { inspect } from "../../execution/workspace.js";',
-    }).join("\n"),
-    /runtime ports/,
-  );
-  assert.match(
-    check({
-      "execution/child.ts": 'import { transition } from "../workflow/knowledge/machine.js";',
-    }).join("\n"),
-    /not drive workflow decisions/,
-  );
-});
-test("flows share contracts without importing each other’s transitions", () => {
-  assert.match(
-    check({
-      "workflow/knowledge/gate.ts": 'import { transition } from "../verification/machine.js";',
-    }).join("\n"),
-    /compose other flows through delivery/,
-  );
-  assert.deepEqual(
-    check({
-      "workflow/implementation/state.ts":
-        'import type { PlannedAssignment } from "../knowledge/contract.js";',
-    }),
-    [],
-  );
-});
-test("actions cannot acquire I/O through a shared helper outside their dependency boundary", () => {
-  assert.match(
-    check({ "actions/delegate.ts": 'export * from "../shared/io.js";' }).join("\n"),
-    /receive Pi execution/,
-  );
-});
-
-test("Judgment follows the same purity and cross-flow composition rules", () => {
-  assert.match(
-    check({
-      "workflow/judgment/machine.ts": 'import { run } from "../../execution/child.js";',
-    }).join("\n"),
-    /must remain pure/,
-  );
-  assert.match(
-    check({
-      "workflow/judgment/machine.ts": 'import { transition } from "../verification/machine.js";',
-    }).join("\n"),
-    /compose other flows through delivery/,
-  );
 });

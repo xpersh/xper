@@ -1,4 +1,4 @@
-import { checkArchitecture } from "./architecture.mjs";
+import { checkArchitecture, checkDependencies } from "./architecture.mjs";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,11 +8,7 @@ const failures = [];
 
 const adapterManifest = JSON.parse(readFileSync(join(adapterRoot, "package.json"), "utf8"));
 const productionDependencies = Object.keys(adapterManifest.dependencies ?? {});
-for (const dependency of productionDependencies) {
-  if (dependency.startsWith("@xper/") && dependency !== "@xper/protocol") {
-    failures.push(`Pi adapter depends on private xper package ${dependency}`);
-  }
-}
+failures.push(...checkDependencies(productionDependencies));
 
 function filesWithExtension(directory, extension) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

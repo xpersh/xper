@@ -8,9 +8,9 @@
       "tsconfig.base.json",
       "scripts/**/*.mjs",
       "adapters/*/scripts/**/*.mjs",
-      "adapters/pi/**/*.json",
-      "adapters/pi/**/*.ts",
-      "!!adapters/pi/dist"
+      "adapters/*/**/*.json",
+      "adapters/*/**/*.ts",
+      "!!adapters/*/dist"
     ]
   },
   "formatter": {

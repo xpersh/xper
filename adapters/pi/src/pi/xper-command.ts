@@ -1,7 +1,7 @@
-import type { JudgmentResolutionInput } from "../workflow/types.js";
+import type { JudgmentResolutionInput } from "@xper/adapter-shared";
 import { promptJudgmentResolution } from "./judgment-approval.js";
 import type { PiExtensionAPI } from "./types.js";
-import { PROTOCOL_VERSION } from "../bridge/protocol.js";
+import { PROTOCOL_VERSION } from "@xper/adapter-shared/bridge";
 import { ADAPTER_VERSION, type XperSession } from "./session.js";
 
 const USAGE =

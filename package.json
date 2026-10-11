@@ -5,6 +5,7 @@
   "type": "module",
   "packageManager": "npm@11.12.0",
   "workspaces": [
+    "adapters/shared",
     "adapters/pi"
   ],
   "engines": {
@@ -20,8 +21,8 @@
     "format:check": "cargo fmt --all -- --check && biome format .",
     "lint": "cargo clippy --workspace --all-targets --all-features -- -D warnings && biome lint . && npm run boundaries",
     "test": "cargo test --workspace --all-targets && npm run test:contracts && npm run test:ts",
-    "test:ts": "npm run test --workspace @xper/adapter-pi",
-    "typecheck": "npm run typecheck --workspace @xper/adapter-pi",
+    "test:ts": "npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
     "test:contracts": "node scripts/check-contracts.mjs"
   },
   "devDependencies": {

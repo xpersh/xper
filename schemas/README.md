@@ -24,7 +24,8 @@ adapter together. Older bridges lack the capabilities and fail clearly.
 Rust records reported facts and resolves configuration. Workflow commands,
 artifact contracts, gates, retries, and transitions belong to the adapter. See
 [the core architecture](../docs/architecture.md) and
-[the Pi architecture](../adapters/pi/docs/architecture.md).
+[the shared workflow architecture](../adapters/shared/docs/architecture.md),
+with [Pi integration](../adapters/pi/docs/architecture.md) as the first consumer.
 
 ## Methods
 
@@ -44,7 +45,8 @@ provider/model availability and reasoning support without choosing what work
 should run. It reloads merged configuration on each query; existing recorded
 selections are immutable. `adapterConfig` passes through the existing
 `workflow.knowledge` configuration, including values Rust does not understand.
-Pi interprets and validates that value. Credentials remain outside this API.
+The shared adapter workflow interprets and validates that value. Credentials
+remain outside this API.
 
 ## Events and durable acknowledgement
 
@@ -98,16 +100,16 @@ start a new Pi session/run while retaining that history.
 
 ## Adapter artifact contracts
 
-[knowledge-v1.schema.json](knowledge-v1.schema.json) documents Pi's versioned
-Define-through-Plan artifacts; Discovery is Markdown. It is an adapter contract,
-not a Rust protocol dependency. Pi validates its semantic rules. Shared schema
+[knowledge-v1.schema.json](knowledge-v1.schema.json) documents the shared
+workflow's versioned Define-through-Plan artifacts; Discovery is Markdown. It is an adapter contract,
+not a Rust protocol dependency. Shared validates its semantic rules. Shared schema
 checks exercise the synthetic examples without requiring a model.
 
 Plan requires one `implementation.driver` and one dependent `verify.verifier`
 per increment. This is a semantic restriction within `knowledge-v1`; the artifact
 structure and `schemaVersion: 1` are unchanged. Existing artifacts and recorded
-history are not rewritten. Rust preserves them for inspection, while current Pi
-validation rejects Plans containing extra roles.
+history are not rewritten. Rust preserves them for inspection, while current
+shared workflow validation rejects Plans containing extra roles.
 
 [implementation-v1.schema.json](implementation-v1.schema.json) defines the
 host-observed result of one Implementer assignment. It binds the assignment and
@@ -117,8 +119,8 @@ log reference, and evidence for every selected criterion. The child proposes
 commands and criterion evidence; it cannot supply a trusted pass flag. This is
 an adapter artifact contract and does not add a Rust protocol method. The additive
 optional `revalidationOf` field identifies the applied Judge report authorizing
-an unchanged revision. Its presence requires empty `changedFiles`; Pi additionally
-requires equal commits, the matching frozen rework authorization, fresh host tests
+an unchanged revision. Its presence requires empty `changedFiles`; shared
+additionally requires equal commits, the matching frozen rework authorization, fresh host tests
 and criterion evidence. Without it, the descendant-change contract is unchanged.
 Older v1 artifacts remain valid; consumers supporting revalidation must understand
 this additive variant.
@@ -129,8 +131,8 @@ records the accumulated base, actual host-run command exits and confined logs,
 evidence for every criterion, and separate regression, requested-scope, and
 simplicity findings. `rejected` requires a nonempty cause and evidence;
 `verified` permits no failed finding, failed command, or rejection object. The
-Verifier proposes findings and extra commands, while Pi constructs and validates
-the canonical artifact. A rejection may add `knowledgeFeedback: null` or one
+Verifier proposes findings and extra commands, while the shared host runner
+constructs and validates the canonical artifact. A rejection may add `knowledgeFeedback: null` or one
 reason: `ambiguous_criteria` for Define or `infeasible_design` for Design. The
 field is optional so historical v1 artifacts remain valid. Host-observed command
 failure removes any proposed Knowledge classification and remains Implementation
@@ -138,14 +140,14 @@ rework.
 
 The stable error catalog remains in
 [the Rust protocol crate](../crates/xper-protocol/src/lib.rs) and
-[the TypeScript transport](../adapters/pi/src/bridge/protocol.ts).
+[the TypeScript transport](../adapters/shared/src/bridge/protocol.ts).
 
 [judgment-v1.schema.json](judgment-v1.schema.json) defines the read-only Judge's
 recommendation for a completely verified Plan. Host-owned evaluation metadata
 binds artifact IDs/digests, log digests, covered criteria/increments and exact
 base/evaluated commits. Every criterion and criticism cites supplied artifact IDs
-or the exact `git:<base>..<evaluated>` diff reference; Pi checks reference membership
-and criterion coverage beyond JSON Schema. All seven RFC 0001 verdicts are
+or the exact `git:<base>..<evaluated>` diff reference; shared checks reference
+membership and criterion coverage beyond JSON Schema. All seven RFC 0001 verdicts are
 recommendations only. Their presence does not mean acceptance, feedback or closure.
 The checkpoint stores references and report metadata, not the artifact contents.
 Rust continues to record opaque adapter facts without a new RPC or artifact parser.
@@ -173,16 +175,16 @@ checkpoint format 9 is opaque adapter data. Rust needs no new parser or policy.
 `judgment-v1` additionally permits structured `debts` (unique report-local IDs,
 nonempty descriptions, logical owners and future conditions) and `humanDecision`
 (question and evidence references) on ACCEPT_WITH_DEBT or HUMAN_DECISION reports.
-Their absence remains valid for historical v1 artifacts. Pi requires the respective
-fields when registering new special reports; it validates reference membership
+Their absence remains valid for historical v1 artifacts. Shared requires the
+respective fields when registering new special reports; it validates reference membership
 and unique debt IDs beyond JSON Schema.
 
 [judgment-resolution-v1.schema.json](judgment-resolution-v1.schema.json) describes
-Pi's immutable human resolution artifact. It binds the original report ID/digest,
-Plan and evaluated commit to the recommendation, effective decision, human reason,
+the shared workflow's immutable human resolution artifact. It binds the original
+report ID/digest, Plan and evaluated commit to the recommendation, effective decision, human reason,
 debt list, question/evidence and confirmation time. `completedByHuman` identifies
 legacy details supplied by the person. It does not assert an authenticated identity.
-Pi verifies that structured Judge details are preserved and all debt is accepted
+Shared verifies that structured Judge details are preserved and all debt is accepted
 before allowing ACCEPT_WITH_DEBT; debt cannot accompany unconditional ACCEPT.
 
 The existing approval command obtains this input through Pi's interactive UI.
@@ -201,3 +203,19 @@ ordinary acceptance, rejection, acceptance with listed debt, or any existing fee
 route. Rust preserves these extensible facts without deciding their meaning.
 Checkpoint 9 stores resolution metadata on closures and historical decisions;
 artifact text remains local. Existing checkpoints migrate without new decisions.
+
+## Shared workflow identity compatibility
+
+`@xper/adapter-shared/bridge` owns the TypeScript protocol client; Pi preserves
+its public compatibility reexports. The package extraction does not change
+protocol v1, schemas, error codes, capabilities, artifact shapes, or Rust replay.
+Definition and checkpoint data remain opaque to the core.
+
+New runs report `xper.knowledge@2`, `xper.implementation@1` (or `@2` for rework),
+`xper.verification@1`, and `xper.judgment@1`. Recovered `pi.*` runs retain those
+legacy IDs, including newly created flow instances. Shared validates supported
+ID/version pairs and a single family per checkpoint; Rust does not. Envelope
+format 9 is unchanged, pending facts keep their original identities, and existing
+migrations remain in the legacy family. Older adapters supporting only `pi.*`
+cannot resume the new family. See the
+[workflow compatibility guide](../adapters/shared/docs/architecture.md#definitions-identity-and-compatibility).

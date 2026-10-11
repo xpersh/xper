@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { AvailableModel, ModelSelection } from "../workflow/types.js";
+import type { AvailableModel, ModelSelection } from "@xper/adapter-shared";
 
 export const execFileAsync = promisify(execFile);
 
